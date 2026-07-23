@@ -305,7 +305,14 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
             <button className="btn" onClick={onOpenSettings} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               Cài đặt API
             </button>
-            <button className="btn" onClick={onOpenDev}>Chế độ Dev</button>
+            {/* Đợt 49: nút Dev ở TITLE SCREEN cũng phải theo cờ ?dev=1 —
+                đây chính là cái nút "sống dai" trên bản deploy: đợt 48 chỉ
+                ẩn nút ở header màn chơi mà quên mất màn hình chính có nút
+                Dev RIÊNG của nó. Bài học: ẩn 1 tính năng phải grep TOÀN BỘ
+                điểm vào, không chỉ chỗ mình nhớ. */}
+            {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev') && (
+              <button className="btn" onClick={onOpenDev}>Chế độ Dev</button>
+            )}
           </div>
           {!configured && (
             <p style={{ color: 'var(--text-dim)', fontSize: 12 }}>Mẹo: bấm "Cài đặt API" ở trên trước khi bắt đầu.</p>

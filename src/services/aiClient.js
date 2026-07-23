@@ -29,6 +29,8 @@
 // đi thẳng đường đã chạy được.
 const BRIDGE_PATH = '/api-bridge'
 const bridgeNeeded = new Set() // các baseUrl đã xác định phải đi qua cầu nối
+// null = chưa biết; false = host chưa deploy cầu nối (thiếu file cấu hình).
+let bridgeDeployed = null
 
 function bridgeAvailable() {
   // Chỉ có trên bản deploy (localhost `npm run dev` không chạy edge function).
@@ -73,7 +75,13 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
       if (bridgeAvailable() && !bridgeNeeded.has(baseUrl)) {
         try {
           const res = await fetchViaBridge(url, init)
-          if (res.status !== 404 || isLast) {
+          // Cầu nối CHƯA ĐƯỢC DEPLOY: host trả về trang 404/HTML của SPA chứ
+          // không phải JSON → nhận ra để báo đúng bệnh thay vì "lỗi API 404".
+          const ctype = res.headers?.get?.('content-type') ?? ''
+          const bridgeMissing = res.status === 404 && !ctype.includes('application/json')
+          if (bridgeMissing) {
+            bridgeDeployed = false
+          } else if (res.status !== 404 || isLast) {
             // Cầu nối chạy được → nhớ lại, mọi lượt sau đi luôn đường này.
             bridgeNeeded.add(baseUrl)
             endpointMemo.set(memoKey, url)
@@ -90,7 +98,9 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
         `Kiểm tra: (1) Base URL có đúng dạng https://.../v1 không; ` +
         `(2) proxy có cho phép gọi từ trình duyệt (CORS) tại ${origin} không — ` +
         `nhiều proxy chạy được trong SillyTavern vì ST gọi từ máy chủ, còn web thì bị trình duyệt chặn nếu proxy thiếu header Access-Control-Allow-Origin. ` +
-        `(Trang đã tự thử chuyển tiếp qua máy chủ nhưng vẫn không được — hãy kiểm tra lại Base URL/API key, hoặc dùng proxy khác.)`,
+        (bridgeDeployed === false
+          ? `LƯU Ý CHO CHỦ TRANG: cầu nối chuyển tiếp (/api-bridge) chưa được deploy — hãy upload thư mục "functions" (Cloudflare Pages) hoặc "netlify" + netlify.toml (Netlify) rồi deploy lại.`
+          : `(Trang đã tự thử chuyển tiếp qua máy chủ nhưng vẫn không được — hãy kiểm tra lại Base URL/API key, hoặc dùng proxy khác.)`),
       )
     }
   }
@@ -98,6 +108,44 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
 }
 
 // Số token thử lại khi model đốt hết hạn mức vào phần "suy nghĩ" (đợt 55).
+
+// ============ ĐỌC STREAM SSE (đợt 58) ============
+// Khi đi qua cầu nối, phải bật stream: nếu chờ model sinh xong mới trả về,
+// Netlify Edge Function cắt kết nối ở giây thứ 40 ("Response header timeout:
+// 40s" theo tài liệu Netlify) — đúng lỗi tester gặp. Với stream, header về
+// NGAY từ chunk đầu nên không bao giờ chạm giới hạn đó, và tổng thời gian
+// sinh dài bao lâu cũng được.
+async function readSseText(res) {
+  const reader = res.body?.getReader?.()
+  if (!reader) return null
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let out = ''
+  let sawData = false
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? '' // dòng cuối có thể chưa trọn vẹn
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line.startsWith('data:')) continue
+      const payload = line.slice(5).trim()
+      if (!payload || payload === '[DONE]') continue
+      sawData = true
+      try {
+        const j = JSON.parse(payload)
+        const d = j?.choices?.[0]?.delta
+        let piece = d?.content ?? j?.choices?.[0]?.message?.content ?? ''
+        if (Array.isArray(piece)) piece = piece.map((p) => (typeof p === 'string' ? p : p?.text || '')).join('')
+        if (typeof piece === 'string') out += piece
+      } catch { /* chunk lỗi định dạng — bỏ qua, không làm hỏng cả lượt */ }
+    }
+  }
+  return sawData ? out : null
+}
+
 const RETRY_MIN_TOKENS = 16384
 
 export async function chatCompletion(config, messages, options = {}) {
@@ -128,6 +176,9 @@ export async function chatCompletion(config, messages, options = {}) {
   const prefill = options.assistantPrefill?.trim()
   const finalMessages = prefill ? [...messages, { role: 'assistant', content: prefill }] : messages
 
+  // Chỉ bật stream khi ĐI QUA CẦU NỐI (nơi có giới hạn 40s). Gọi trực tiếp
+  // giữ nguyên cách cũ để không đụng vào những proxy không hỗ trợ stream.
+  const willUseBridge = bridgeNeeded.has(baseUrl) && bridgeAvailable()
   const { res } = await fetchWithEndpointFallback(baseUrl, 'chat/completions', {
     method: 'POST',
     headers: {
@@ -139,6 +190,7 @@ export async function chatCompletion(config, messages, options = {}) {
       messages: finalMessages,
       temperature,
       max_tokens: maxTokens,
+      ...(willUseBridge ? { stream: true } : {}),
     }),
     signal: options.signal,
   })
@@ -152,6 +204,26 @@ export async function chatCompletion(config, messages, options = {}) {
       detail = await res.text()
     }
     throw new Error(`Lỗi API (${res.status}): ${detail || res.statusText}`)
+  }
+
+  // Phản hồi dạng stream (SSE) → gom các chunk lại thành chính văn.
+  const respType = res.headers?.get?.('content-type') ?? ''
+  if (respType.includes('text/event-stream')) {
+    const streamed = await readSseText(res)
+    if (streamed && streamed.trim()) {
+      const t = streamed.trim()
+      if (prefill && t.startsWith(prefill)) return `${prefill}${t.slice(prefill.length)}`
+      return prefill ? `${prefill}${t}` : t
+    }
+    // Stream rỗng: rơi về nhánh xử lý rỗng bên dưới (có cơ chế thử lại).
+    if (!options._retried) {
+      return chatCompletion(config, messages, {
+        ...options,
+        maxTokens: Math.max(RETRY_MIN_TOKENS, maxTokens * 4),
+        _retried: true,
+      })
+    }
+    throw new Error('API trả về stream rỗng. Hãy tăng "Max tokens" trong Cài đặt API hoặc đổi model.')
   }
 
   const data = await res.json()

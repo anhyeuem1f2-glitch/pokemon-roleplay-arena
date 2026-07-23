@@ -46,11 +46,13 @@ export default async (request: Request): Promise<Response> => {
   }
 
   const target = request.headers.get('x-target-url')
+  // Mở /api-bridge trực tiếp trên trình duyệt = cách kiểm tra cầu nối đã
+  // deploy hay chưa → trả lời rõ ràng thay vì báo lỗi khó hiểu.
   if (!target) {
-    return new Response(JSON.stringify({ error: { message: 'Thiếu header x-target-url.' } }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders(selfOrigin) },
-    })
+    return new Response(
+      JSON.stringify({ ok: true, bridge: 'online', message: 'Cầu nối CORS đang hoạt động.' }),
+      { status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders(origin || selfOrigin) } },
+    )
   }
 
   let targetUrl: URL

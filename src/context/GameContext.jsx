@@ -22,7 +22,7 @@ export function GameProvider({ children }) {
       apiKey: '',
       model: 'gpt-4o-mini',
       temperature: 0.9,
-      maxTokens: 1024,
+      maxTokens: 8192, // đợt 55 (trước 1024): tránh model thinking trả rỗng
     }
   })
 

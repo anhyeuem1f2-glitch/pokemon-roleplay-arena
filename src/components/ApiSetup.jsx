@@ -12,7 +12,7 @@ export default function ApiSetup() {
   const { apiConfig, setApiConfig } = useGame()
   const [form, setForm] = useState({
     temperature: 0.9,
-    maxTokens: 1024,
+    maxTokens: 8192, // đợt 55: model thinking đốt token suy nghĩ vào hạn mức này
     ...apiConfig,
   })
   const [status, setStatus] = useState(null) // null | 'testing' | 'ok' | 'error'
@@ -170,11 +170,12 @@ export default function ApiSetup() {
               min="100"
               step="100"
               value={form.maxTokens}
-              onChange={(e) => updateField('maxTokens', parseInt(e.target.value, 10) || 1024)}
+              onChange={(e) => updateField('maxTokens', parseInt(e.target.value, 10) || 8192)}
             />
             <small>
-              Nếu API hay báo "phản hồi rỗng", thử tăng số này lên (VD 2048) — một số model/proxy
-              tính cả phần suy nghĩ nội bộ vào giới hạn token này.
+              Các model "thinking" (Gemini 2.5/3.x Pro, o-series, Claude thinking…) tính CẢ phần suy
+              nghĩ nội bộ vào giới hạn này — để thấp là phần trả lời bị rỗng. Mặc định 8192; nếu vẫn
+              báo "phản hồi rỗng (finish_reason: length)" thì đặt 30000-60000.
             </small>
           </div>
         </>

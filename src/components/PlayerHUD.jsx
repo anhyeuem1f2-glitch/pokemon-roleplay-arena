@@ -3,6 +3,7 @@ import { useGame } from '../context/GameContext.jsx'
 import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
+import AvatarPicker from './AvatarPicker.jsx'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -54,11 +55,13 @@ function AffinityBar({ value }) {
 
 export default function PlayerHUD({ mobile = false }) {
   const {
-    playerName, playerProfile, bodyStatus, setBodyStatus, hunger,
+    playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger,
     party, setParty, playerMon, setPlayerMon,
     relationships, inventory, setInventory,
   } = useGame()
   const [infoMon, setInfoMon] = useState(null)
+  // Đợt 54: bấm khung avatar để đổi ảnh ngay giữa truyện.
+  const [avatarOpen, setAvatarOpen] = useState(false)
 
   return (
     <aside
@@ -78,8 +81,10 @@ export default function PlayerHUD({ mobile = false }) {
         overflowY: 'auto',
       }}
     >
-      {/* Avatar */}
+      {/* Avatar — bấm để đổi ảnh (đợt 54) */}
       <div
+        onClick={() => setAvatarOpen(true)}
+        title="Bấm để đổi ảnh đại diện"
         style={{
           width: '100%',
           aspectRatio: '1',
@@ -90,6 +95,7 @@ export default function PlayerHUD({ mobile = false }) {
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
+          cursor: 'pointer',
         }}
       >
         {playerProfile.avatarUrl ? (
@@ -232,6 +238,26 @@ export default function PlayerHUD({ mobile = false }) {
               {r.note && <div style={{ fontSize: 9.5, color: 'var(--text-dim)', marginTop: 2 }}>{r.note}</div>}
             </div>
           ))}
+        </div>
+      )}
+
+      {avatarOpen && (
+        <div
+          onClick={() => setAvatarOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 90, padding: 20 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: 'min(460px, 96vw)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span className="page-title" style={{ margin: 0 }}>Ảnh đại diện</span>
+              <button className="btn" style={{ padding: '4px 10px' }} onClick={() => setAvatarOpen(false)}>Đóng</button>
+            </div>
+            <AvatarPicker
+              value={playerProfile.avatarUrl}
+              onChange={(v) => setPlayerProfile({ ...playerProfile, avatarUrl: v })}
+              fallbackLetter={(playerName || '?')[0]?.toUpperCase()}
+              size={120}
+            />
+          </div>
         </div>
       )}
 

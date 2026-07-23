@@ -60,6 +60,9 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
   throw lastErr ?? new Error('Không gọi được tới API.')
 }
 
+// Số token thử lại khi model đốt hết hạn mức vào phần "suy nghĩ" (đợt 55).
+const RETRY_MIN_TOKENS = 16384
+
 export async function chatCompletion(config, messages, options = {}) {
   const { baseUrl, apiKey, model } = config
   if (!baseUrl || !model) {
@@ -72,7 +75,11 @@ export async function chatCompletion(config, messages, options = {}) {
   // tương thích OpenAI) tính cả phần "suy nghĩ" (reasoning/thinking tokens)
   // vào max_tokens — để quá thấp (như 400) dễ khiến phần nội dung hiển thị
   // bị rỗng dù request vẫn "thành công".
-  const maxTokens = options.maxTokens ?? config.maxTokens ?? 1024
+  // Mặc định 8192 (đợt 55, trước là 1024): các model "thinking" hiện nay
+  // (Gemini 2.5/3.x Pro, o-series, Claude thinking...) tính CẢ token suy nghĩ
+  // nội bộ vào max_tokens — 1024 bị đốt sạch cho phần suy nghĩ, trả về rỗng
+  // kèm finish_reason "length". Đây đúng là lỗi người chơi beta gặp.
+  const maxTokens = options.maxTokens ?? config.maxTokens ?? 8192
 
   // Assistant prefill: mồi trước 1 đoạn text coi như AI đã bắt đầu trả lời,
   // model chỉ cần viết TIẾP thay vì tự quyết định có mở đầu thế nào/có nên
@@ -123,12 +130,30 @@ export async function chatCompletion(config, messages, options = {}) {
   if (!text && typeof choice?.text === 'string') {
     text = choice.text
   }
+  // Một số proxy tách phần suy nghĩ ra reasoning_content và để content rỗng.
+  // KHÔNG dùng reasoning_content làm chính văn (đó là CoT), nhưng ghi nhận
+  // để biết model có chạy hay không — việc thử lại bên dưới sẽ xử lý.
+  const hadReasoningOnly = !text && Boolean(choice?.message?.reasoning_content || choice?.message?.reasoning)
 
   if (!text || !text.trim()) {
-    const reason = choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : ''
+    const finish = choice?.finish_reason
+    // TỰ THỬ LẠI 1 LẦN (đợt 55): rỗng + finish_reason "length" = model đã
+    // tiêu hết hạn mức cho phần suy nghĩ nội bộ, chưa kịp viết chữ nào ra.
+    // Lượt hỏng này không sinh nội dung nên thử lại với hạn mức cao hơn là
+    // đáng; chỉ thử MỘT lần để không đốt token vô hạn.
+    const canRetry = !options._retried && (finish === 'length' || finish === 'MAX_TOKENS' || hadReasoningOnly)
+    if (canRetry) {
+      const bumped = Math.max(RETRY_MIN_TOKENS, maxTokens * 4)
+      return chatCompletion(config, messages, { ...options, maxTokens: bumped, _retried: true })
+    }
+    const reason = finish ? ` (finish_reason: ${finish})` : ''
+    const modelHint = /search/i.test(model)
+      ? ' Lưu ý: bản model có đuôi "-search" thường trả về kết quả tìm kiếm kèm metadata thay vì văn bản thuần — hãy thử bản KHÔNG có "-search".'
+      : ''
     throw new Error(
-      `API trả về phản hồi rỗng${reason}. Thử tăng "Max tokens" trong Cài đặt API (mục Nâng cao), ` +
-        `hoặc đổi sang model khác — có thể model/proxy này chưa tương thích hoàn toàn chuẩn OpenAI.`,
+      `API trả về phản hồi rỗng${reason}. Model này nhiều khả năng là loại "thinking" (tính cả token suy nghĩ ` +
+        `vào giới hạn) — hãy vào Cài đặt API → Nâng cao và đặt "Max tokens" khoảng 30000-60000, ` +
+        `hoặc đổi sang model khác.${modelHint}`,
     )
   }
 

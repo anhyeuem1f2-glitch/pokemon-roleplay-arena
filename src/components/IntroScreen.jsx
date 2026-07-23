@@ -3,6 +3,7 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
+import AvatarPicker from './AvatarPicker.jsx'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
@@ -112,7 +113,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
     messages,
     storyTone, setStoryTone,
-    setInventory, setRelationships, setBodyStatus, setHunger, setPlayerProfile,
+    setInventory, setRelationships, setBodyStatus, setHunger, playerProfile, setPlayerProfile,
   } = useGame()
 
   const [stage, setStage] = useState('title') // 'title' | 'setup'
@@ -202,6 +203,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setRelationships([])
     setBodyStatus({ head: 0, torso: 0, leftArm: 0, rightArm: 0, leftLeg: 0, rightLeg: 0 })
     setHunger({ player: 100, mon: 100 })
+    // Giữ nguyên avatarUrl vừa chọn ở bước Hồ sơ, chỉ reset tiền.
     setPlayerProfile((prof) => ({ ...prof, money: 3000 }))
 
     const originArea = originAreaKey ? getArea(originRegionKey, originAreaKey) : null
@@ -389,9 +391,20 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           {stepKey === 'profile' && (
             <>
               <p className="page-subtitle">
-                Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Thế giới theo
-                tông realistic kiểu Pokémon Special: có sinh kế, luật lệ, và mặt tối thật sự.
+                Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Giọng văn và
+                mức độ khắc nghiệt của thế giới do bạn chọn ở bước "Tông truyện" phía sau.
               </p>
+              {/* Ảnh đại diện (đợt 54): tải từ máy hoặc dán link. */}
+              <div className="field" style={{ marginBottom: 12 }}>
+                <label>Ảnh đại diện (tuỳ chọn)</label>
+                <AvatarPicker
+                  value={playerProfile.avatarUrl}
+                  onChange={(v) => setPlayerProfile({ ...playerProfile, avatarUrl: v })}
+                  fallbackLetter={(trainerName || '?')[0]?.toUpperCase()}
+                  size={104}
+                />
+              </div>
+
               <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
                 <div className="field">
                   <label>Tên nhân vật</label>

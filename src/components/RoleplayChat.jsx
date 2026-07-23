@@ -322,16 +322,48 @@ export default function RoleplayChat() {
     setEditingIndex(null)
   }
 
-  function openCtxMenu(e, i) {
-    e.preventDefault()
+  function openCtxMenuAt(clientX, clientY, i) {
     // Kẹp vị trí để menu không tràn mép phải/dưới màn hình.
     const MENU_W = 230
     const MENU_H = 250
     setCtxMenu({
-      x: Math.min(e.clientX, window.innerWidth - MENU_W - 8),
-      y: Math.min(e.clientY, window.innerHeight - MENU_H - 8),
+      x: Math.max(8, Math.min(clientX, window.innerWidth - MENU_W - 8)),
+      y: Math.max(8, Math.min(clientY, window.innerHeight - MENU_H - 8)),
       index: i,
     })
+  }
+
+  function openCtxMenu(e, i) {
+    e.preventDefault()
+    openCtxMenuAt(e.clientX, e.clientY, i)
+  }
+
+  // CHẠM GIỮ trên mobile (đợt 53): điện thoại KHÔNG có chuột phải — giữ ngón
+  // ~500ms trên tin nhắn để mở đúng menu đó. Vuốt/nhả sớm thì huỷ.
+  const longPressRef = useRef({ timer: null, x: 0, y: 0 })
+  function touchProps(i) {
+    return {
+      onTouchStart: (e) => {
+        const t = e.touches[0]
+        if (!t) return
+        longPressRef.current.x = t.clientX
+        longPressRef.current.y = t.clientY
+        clearTimeout(longPressRef.current.timer)
+        longPressRef.current.timer = setTimeout(() => {
+          openCtxMenuAt(longPressRef.current.x, longPressRef.current.y, i)
+        }, 500)
+      },
+      onTouchMove: (e) => {
+        const t = e.touches[0]
+        if (!t) return
+        // Di chuyển >10px = đang cuộn, không phải giữ.
+        if (Math.abs(t.clientX - longPressRef.current.x) > 10 || Math.abs(t.clientY - longPressRef.current.y) > 10) {
+          clearTimeout(longPressRef.current.timer)
+        }
+      },
+      onTouchEnd: () => clearTimeout(longPressRef.current.timer),
+      onTouchCancel: () => clearTimeout(longPressRef.current.timer),
+    }
   }
   const [editDraft, setEditDraft] = useState('')
   const [shopMsgIndex, setShopMsgIndex] = useState(null) // index message đang mở shop
@@ -841,7 +873,8 @@ export default function RoleplayChat() {
                   key={i}
                   className="story-text story-text--player"
                   onContextMenu={(e) => openCtxMenu(e, i)}
-                  title="Chuột phải để sửa / sao chép / xoá"
+                  {...touchProps(i)}
+                  title="Chuột phải (hoặc chạm giữ trên điện thoại) để sửa / gửi lại / xoá"
                 >
                   » {m.content}
                 </p>
@@ -863,7 +896,7 @@ export default function RoleplayChat() {
                   </div>
                 </div>
               ) : (
-              <div onContextMenu={(e) => openCtxMenu(e, i)} title="Chuột phải: sửa / reroll / sao chép / biến / xoá">
+              <div onContextMenu={(e) => openCtxMenu(e, i)} {...touchProps(i)} title="Chuột phải hoặc chạm giữ: sửa / reroll / sao chép / biến / xoá">
               <StoryParagraph
                 content={m.content}
                 used={Boolean(m.battleUsed)}

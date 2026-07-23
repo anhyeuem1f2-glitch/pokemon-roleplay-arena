@@ -393,3 +393,30 @@ select:focus-visible {
   60% { filter: brightness(1.4); }
 }
 .anim-hurt { animation: hurt-flash 0.5s ease; }
+
+
+/* ============ MOBILE (đợt 53) ============
+   Beta chạy trên web nên rất nhiều người chơi vào bằng điện thoại. Các quy
+   tắc dưới đây chỉ áp dụng ở màn hình hẹp, không đụng bố cục desktop. */
+@media (max-width: 820px) {
+  /* Lưới nhiều cột trong wizard tạo nhân vật → xếp dọc cho dễ bấm. */
+  .grid-resp { grid-template-columns: 1fr !important; }
+
+  .panel { padding: 14px !important; }
+  .wizard-wrap { padding: 10px !important; align-items: flex-start !important; }
+  .panel--wizard { max-height: none !important; }
+
+  /* Hàng nút không tràn ngang. */
+  .btn-row { flex-wrap: wrap; }
+  .btn { padding: 7px 12px; font-size: 12.5px; }
+
+  /* iOS tự phóng to trang khi focus input có font < 16px → ép 16px. */
+  input, textarea, select { font-size: 16px !important; }
+
+  .page-title { font-size: 15px; }
+  .story-text { font-size: 15.5px; line-height: 1.75; }
+}
+
+@media (max-width: 480px) {
+  .sidebar__brand span { display: none; }
+}

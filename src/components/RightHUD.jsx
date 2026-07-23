@@ -11,7 +11,7 @@ import { getWeather } from '../data/weather.js'
 // giống cột phải của giao diện Phàm Nhân Tu Tiên): trên cùng là MINI MAP —
 // bấm vào mở modal bản đồ thật với vị trí hiện tại; dưới là 2 nút hệ thống.
 
-export default function RightHUD({ onOpenSettings, onHome }) {
+export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const { playerLocation, setPlayerLocation, storyDate,
   } = useGame()
   const [mapOpen, setMapOpen] = useState(false)
@@ -24,15 +24,18 @@ export default function RightHUD({ onOpenSettings, onHome }) {
   return (
     <aside
       style={{
-        width: 200,
+        // Đợt 53: mobile → panel tràn ngang, cao tự nhiên, KHÔNG sticky/100vh
+        // (điện thoại không đủ chỗ cho 2 cột dọc hai bên).
+        width: mobile ? '100%' : 200,
         flexShrink: 0,
-        borderLeft: '1px solid var(--line)',
+        borderLeft: mobile ? 'none' : '1px solid var(--line)',
+        borderBottom: mobile ? '1px solid var(--line)' : undefined,
         background: 'var(--bg-panel)',
         padding: '14px 14px 18px',
-        position: 'sticky',
+        position: mobile ? 'static' : 'sticky',
         top: 0,
         alignSelf: 'flex-start',
-        height: '100vh',
+        height: mobile ? 'auto' : '100vh',
         overflowY: 'auto',
         display: 'flex',
         flexDirection: 'column',

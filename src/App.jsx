@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useGame } from './context/GameContext.jsx'
 import RoleplayChat from './components/RoleplayChat.jsx'
 import IntroScreen from './components/IntroScreen.jsx'
@@ -26,10 +26,31 @@ function GearIcon() {
 const SHOW_DEV_MODE =
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev')
 
+
+// ===== MOBILE (đợt 53) =====
+// Bố cục 3 cột (HUD trái + truyện + HUD phải) không vừa màn hình điện thoại.
+// Dưới 820px: xếp DỌC, 2 HUD thu vào 2 tab bật/tắt để chính văn được ưu tiên.
+function useIsMobile(breakpoint = 820) {
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth <= breakpoint,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint}px)`)
+    const onChange = (e) => setIsMobile(e.matches)
+    setIsMobile(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [breakpoint])
+  return isMobile
+}
+
 export default function App() {
   const { apiConfig, gameStarted, setGameStarted } = useGame()
   const [showSettings, setShowSettings] = useState(false)
   const [showDev, setShowDev] = useState(false)
+  const isMobile = useIsMobile()
+  // Trên mobile: mở/đóng từng HUD (mặc định đóng — chính văn là chính).
+  const [mobilePanel, setMobilePanel] = useState(null) // null | 'left' | 'right'
   const configured = Boolean(apiConfig.baseUrl && apiConfig.model)
 
   if (showSettings) {
@@ -64,7 +85,9 @@ export default function App() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '14px 24px',
+          padding: isMobile ? '10px 12px' : '14px 24px',
+          gap: 8,
+          flexWrap: 'wrap',
           borderBottom: '1px solid var(--line)',
           position: 'sticky',
           top: 0,
@@ -76,7 +99,7 @@ export default function App() {
           TRAINER ARENA
           <span>roleplay × battle engine</span>
         </div>
-        <div className="btn-row" style={{ gap: 12 }}>
+        <div className="btn-row" style={{ gap: isMobile ? 6 : 12, flexWrap: 'wrap' }}>
           <span className={`status-pill ${configured ? 'status-pill--ok' : ''}`}>
             {configured ? apiConfig.model : 'Chưa cấu hình API'}
           </span>
@@ -91,19 +114,44 @@ export default function App() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <GearIcon />
-            Cài đặt API
+            {isMobile ? 'API' : 'Cài đặt API'}
           </button>
         </div>
       </header>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+      {/* Mobile (đợt 53): 2 nút bật/tắt HUD thay cho 2 cột dọc. */}
+      {isMobile && (
+        <div style={{ display: 'flex', gap: 8, padding: '8px 12px 0' }}>
+          {[
+            { key: 'left', label: '👤 Nhân vật' },
+            { key: 'right', label: '🗺 Bản đồ & menu' },
+          ].map((t) => (
+            <button
+              key={t.key}
+              className="btn"
+              style={{
+                flex: 1, fontSize: 12,
+                borderColor: mobilePanel === t.key ? 'var(--amber)' : undefined,
+                color: mobilePanel === t.key ? 'var(--amber)' : undefined,
+              }}
+              onClick={() => setMobilePanel((cur) => (cur === t.key ? null : t.key))}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start' }}>
         {/* HUD dọc trái kiểu Phàm Nhân Tu Tiên — chỉ hiện trong màn chơi. */}
-        <PlayerHUD />
-        <main style={{ flex: 1, maxWidth: 760, margin: '0 auto', padding: '24px 20px', minWidth: 0 }}>
+        {(!isMobile || mobilePanel === 'left') && <PlayerHUD mobile={isMobile} />}
+        <main style={{ flex: 1, width: isMobile ? '100%' : undefined, maxWidth: isMobile ? '100%' : 760, margin: '0 auto', padding: isMobile ? '14px 12px 20px' : '24px 20px', minWidth: 0 }}>
           <RoleplayChat />
         </main>
         {/* Cột phải (đợt 26): mini map + Cài đặt + Màn hình chính. */}
+        {(!isMobile || mobilePanel === 'right') && (
         <RightHUD
+          mobile={isMobile}
           onOpenSettings={() => setShowSettings(true)}
           onHome={() => {
             if (window.confirm('Về màn hình chính? Truyện hiện tại đã được LƯU — bấm "Tiếp tục hành trình" ở màn hình chính để chơi tiếp; "Bắt đầu một hành trình mới" sẽ tạo truyện mới.')) {
@@ -111,6 +159,7 @@ export default function App() {
             }
           }}
         />
+        )}
       </div>
     </div>
   )

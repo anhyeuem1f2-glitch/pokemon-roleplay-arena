@@ -10,13 +10,63 @@
  * @param {Array<{role: 'system'|'user'|'assistant', content: string}>} messages
  * @param {{temperature?: number, maxTokens?: number, signal?: AbortSignal, assistantPrefill?: string}} options
  */
+
+// ============ GIẢI QUYẾT ENDPOINT (đợt 53) ============
+// Thực chiến beta: người chơi dán Base URL thiếu "/v1" (VD
+// https://gcli.ggchan.dev/) → app gọi /chat/completions → route không tồn
+// tại → server trả 404 KHÔNG kèm header CORS → trình duyệt báo "CORS
+// policy / Failed to fetch", rất dễ hiểu nhầm là bị chặn.
+// Cách xử lý: thử lần lượt các biến thể đường dẫn, CHỈ thử tiếp khi lỗi
+// thuộc loại không tốn token (lỗi mạng/CORS hoặc 404), rồi NHỚ biến thể
+// chạy được cho các lần sau.
+const endpointMemo = new Map()
+
+function endpointCandidates(baseUrl, path) {
+  const base = baseUrl.replace(/\/+$/, '')
+  const list = [`${base}/${path}`]
+  // Chưa có /v1 (hoặc /v1beta...) trong base → thử thêm bản có /v1.
+  if (!/\/v\d[\w.]*$/i.test(base)) list.push(`${base}/v1/${path}`)
+  return list
+}
+
+/** fetch qua các ứng viên endpoint; trả { res, url }. */
+async function fetchWithEndpointFallback(baseUrl, path, init) {
+  const memoKey = `${baseUrl}|${path}`
+  const memo = endpointMemo.get(memoKey)
+  const candidates = memo ? [memo] : endpointCandidates(baseUrl, path)
+  let lastErr = null
+  for (let i = 0; i < candidates.length; i++) {
+    const url = candidates[i]
+    const isLast = i === candidates.length - 1
+    try {
+      const res = await fetch(url, init)
+      // 404 = sai route → thử biến thể kế tiếp (không tốn token).
+      if (res.status === 404 && !isLast) continue
+      endpointMemo.set(memoKey, url)
+      return { res, url }
+    } catch (netErr) {
+      // Lỗi mạng/CORS: có thể do route sai → thử tiếp; hết ứng viên thì ném.
+      lastErr = netErr
+      if (!isLast) continue
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'trang web này'
+      throw new Error(
+        `Không gọi được tới API (lỗi mạng/CORS): ${netErr.message}. ` +
+        `Kiểm tra: (1) Base URL có đúng dạng https://.../v1 không; ` +
+        `(2) proxy có cho phép gọi từ trình duyệt (CORS) tại ${origin} không — ` +
+        `nhiều proxy chạy được trong SillyTavern vì ST gọi từ máy chủ, còn web thì bị trình duyệt chặn nếu proxy thiếu header Access-Control-Allow-Origin.`,
+      )
+    }
+  }
+  throw lastErr ?? new Error('Không gọi được tới API.')
+}
+
 export async function chatCompletion(config, messages, options = {}) {
   const { baseUrl, apiKey, model } = config
   if (!baseUrl || !model) {
     throw new Error('Thiếu Base URL hoặc Model. Hãy vào mục Cài đặt API trước.')
   }
 
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`
+  // URL thật do fetchWithEndpointFallback quyết định (tự thử thêm /v1).
   const temperature = options.temperature ?? config.temperature ?? 0.9
   // max_tokens mặc định nâng lên 1024: một số proxy (VD Gemini chạy qua lớp
   // tương thích OpenAI) tính cả phần "suy nghĩ" (reasoning/thinking tokens)
@@ -34,25 +84,20 @@ export async function chatCompletion(config, messages, options = {}) {
   const prefill = options.assistantPrefill?.trim()
   const finalMessages = prefill ? [...messages, { role: 'assistant', content: prefill }] : messages
 
-  let res
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model,
-        messages: finalMessages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
-      signal: options.signal,
-    })
-  } catch (networkErr) {
-    throw new Error(`Không gọi được tới API (lỗi mạng/CORS): ${networkErr.message}`)
-  }
+  const { res } = await fetchWithEndpointFallback(baseUrl, 'chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model,
+      messages: finalMessages,
+      temperature,
+      max_tokens: maxTokens,
+    }),
+    signal: options.signal,
+  })
 
   if (!res.ok) {
     let detail = ''
@@ -103,14 +148,14 @@ export async function chatCompletion(config, messages, options = {}) {
  * chắc chắn nghĩa là key sai — chỉ mang tính tham khảo nhanh.
  */
 export async function testConnection(config) {
-  const { baseUrl, apiKey } = config
-  const url = `${baseUrl.replace(/\/+$/, '')}/models`
-  const res = await fetch(url, {
-    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-  })
-  if (!res.ok) {
-    throw new Error(`Không kết nối được (${res.status} ${res.statusText})`)
+  // Đợt 53: test ĐÚNG ĐƯỜNG THẬT mà truyện dùng (POST chat/completions),
+  // thay vì GET /models như trước. Lý do: /models có thể chạy ngon trong khi
+  // POST bị CORS/404 → nút báo "Kết nối thành công" nhưng vào chơi là lỗi
+  // (đúng ca người chơi beta báo). Gửi 1 request cực nhỏ để không tốn token.
+  if (!config?.model) {
+    throw new Error('Chưa chọn Model — hãy điền/chọn model rồi thử lại.')
   }
+  await chatCompletion(config, [{ role: 'user', content: 'ping' }], { maxTokens: 1, temperature: 0 })
   return true
 }
 
@@ -121,8 +166,7 @@ export async function testConnection(config) {
  */
 export async function listModels(config) {
   const { baseUrl, apiKey } = config
-  const url = `${baseUrl.replace(/\/+$/, '')}/models`
-  const res = await fetch(url, {
+  const { res } = await fetchWithEndpointFallback(baseUrl, 'models', {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
   })
   if (!res.ok) {

@@ -344,8 +344,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-      <div className="panel" style={{ width: 'min(720px, 100%)', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="wizard-wrap" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div className="panel panel--wizard" style={{ width: 'min(720px, 100%)', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
         {/* Thanh tiến trình */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
           {STEPS.map((s2, i) => (
@@ -392,7 +392,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Thế giới theo
                 tông realistic kiểu Pokémon Special: có sinh kế, luật lệ, và mặt tối thật sự.
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
+              <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
                 <div className="field">
                   <label>Tên nhân vật</label>
                   <input value={trainerName} onChange={(e2) => setTrainerName(e2.target.value)} placeholder="Để trống = 'Nhà Huấn Luyện'" />
@@ -441,7 +441,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                   <div style={{ fontSize: 10.5, letterSpacing: '0.12em', fontWeight: 700, color: 'var(--mint)', margin: '10px 0 6px' }}>
                     {g.label.toUpperCase()}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     {g.items.map((i2) => (
                       <PickCard
                         key={i2.key}
@@ -486,7 +486,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 Quê nhà định hình giọng nói, mối quan hệ đầu đời — và tổ chức phản diện nào lảng vảng
                 trong tin tức địa phương. Mỗi vùng một khí chất riêng.
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+              <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
                 {REGIONS.map((r) => (
                   <PickCard
                     key={r.key}
@@ -585,7 +585,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           {stepKey === 'opening' && (
             <>
               <p className="page-subtitle">Chọn cách câu chuyện mở màn — mỗi lựa chọn có mô tả đầy đủ bên dưới.</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <PickCard
                   selected={openingKey === 'auto'}
                   title="🎲 Để AI tự nghĩ"

@@ -52,7 +52,7 @@ function AffinityBar({ value }) {
   )
 }
 
-export default function PlayerHUD() {
+export default function PlayerHUD({ mobile = false }) {
   const {
     playerName, playerProfile, bodyStatus, setBodyStatus, hunger,
     party, setParty, playerMon, setPlayerMon,
@@ -63,15 +63,18 @@ export default function PlayerHUD() {
   return (
     <aside
       style={{
-        width: 232,
+        // Đợt 53: mobile → panel tràn ngang, cao tự nhiên, KHÔNG sticky/100vh
+        // (điện thoại không đủ chỗ cho 2 cột dọc hai bên).
+        width: mobile ? '100%' : 232,
         flexShrink: 0,
-        borderRight: '1px solid var(--line)',
+        borderRight: mobile ? 'none' : '1px solid var(--line)',
+        borderBottom: mobile ? '1px solid var(--line)' : undefined,
         background: 'var(--bg-panel)',
         padding: '14px 14px 18px',
-        position: 'sticky',
+        position: mobile ? 'static' : 'sticky',
         top: 0,
         alignSelf: 'flex-start',
-        height: '100vh',
+        height: mobile ? 'auto' : '100vh',
         overflowY: 'auto',
       }}
     >

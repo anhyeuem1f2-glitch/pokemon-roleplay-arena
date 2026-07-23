@@ -31,7 +31,7 @@ function buildLoreWikiNote(wbActive, canonNote) {
   return parts.join('\n\n')
 }
 
-export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '' }) {
+export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '' }) {
   // WORLDBOOK (đợt 41) — nguồn thông tin CHÍNH của người dùng; gộp với
   // lorebook cũ của character (nếu có). Đưa vào worldInfoBefore + system.
   const wbActive = getActiveWorldbook(worldbook?.entries ?? [], scanText)
@@ -39,6 +39,9 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
   // chèn đội hình đúng game nguồn (chạy cả offline, bổ trợ lớp Bulbapedia).
   const canonTrainerNote = buildCanonTrainerNote(scanText)
   canonNote = [canonNote, canonTrainerNote].filter(Boolean).join('\n\n')
+  // TÔNG TRUYỆN (đợt 50): độ khó + thể loại người chơi chọn — ghép vào cùng
+  // kênh note hệ thống để vào prompt ở CẢ nhánh preset lẫn nhánh mặc định.
+  if (toneNote) canonNote = [toneNote, canonNote].filter(Boolean).join('\n\n')
   if (mainPreset) {
     const activeLore = [...wbActive, ...getActiveLoreEntries(character.lorebook ?? [], scanText)]
     const { beforeHistory, afterHistory } = buildPresetPrompt(mainPreset.blocks, {

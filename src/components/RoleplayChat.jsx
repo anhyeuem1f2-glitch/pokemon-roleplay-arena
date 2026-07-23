@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
-import { chatCompletion } from '../services/aiClient.js'
+import { chatCompletion, polishProse } from '../services/aiClient.js'
 import { extractMissingStateTags } from '../services/stateExtractor.js'
 import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
+import { buildToneNote } from '../data/storyTones.js'
 import { cleanAiOutput, extractThinking } from '../utils/outputCleanup.js'
 import { buildMonSmart, detectMentionedSpecies , applyEvGain } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
@@ -288,7 +289,7 @@ export default function RoleplayChat() {
     storyDate,
     advanceStoryDate,
     party,
-    setParty,
+    setParty, storyTone,
     hunger,
     adjustHunger,
     stateApiConfig,
@@ -481,6 +482,7 @@ export default function RoleplayChat() {
         scanText,
         worldbook,
         canonNote,
+        toneNote: buildToneNote(storyTone),
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -513,18 +515,32 @@ export default function RoleplayChat() {
       }
       if (!movedTo) movedTo = detectLocationFromMetadata(reply, playerLocation)
       if (!movedTo) movedTo = detectMentionedArea(stateParsed.cleaned, playerLocation)
+      // CHAU CHUỐT VĂN PHONG (đợt 50): nếu cấu hình API phụ (slot Combat
+      // Anime cũ), model phụ đánh bóng câu chữ theo tông truyện — chạy SAU
+      // khi đã bóc tag (tag không bị model phụ nuốt), lỗi thì giữ nguyên văn.
+      let displayText = stateParsed.cleaned
+      if (animeApiConfig?.baseUrl && animeApiConfig?.model) {
+        try {
+          displayText = await polishProse({ ...apiConfig, ...animeApiConfig }, stateParsed.cleaned, buildToneNote(storyTone))
+        } catch (polErr) {
+          console.warn('[polish] bỏ qua chau chuốt:', polErr.message)
+        }
+      }
       // Meta từng lượt (đợt 48 — học card PNTT): biến đã áp + suy nghĩ +
       // văn gốc, xem lại bằng nút 🧬 / chuột phải → "Biến cập nhật".
       const turnMeta = {
         raw: (reply ?? '').slice(0, META_CLIP),
         thinking: extractThinking(reply).slice(0, META_CLIP),
-        changes: describeParsedChanges(stateParsed, movedTo),
+        changes: [
+          ...describeParsedChanges(stateParsed, movedTo),
+          ...(displayText !== stateParsed.cleaned ? ['✍ Văn đã qua API chau chuốt văn phong'] : []),
+        ],
       }
       setMessages((m) => [
         ...m,
         {
           role: 'assistant',
-          content: stateParsed.cleaned,
+          content: displayText,
           meta: turnMeta,
           ...(stateParsed.shops.length > 0
             ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name }
@@ -549,9 +565,17 @@ export default function RoleplayChat() {
       // API CẬP NHẬT BIẾN (đợt 36, tuỳ chọn): model phụ đọc lại chính văn và
       // BỔ SUNG các tag model chính quên khai (kèm danh sách tag đã áp để
       // không áp trùng). Chạy nền — lỗi chỉ warn.
-      if (stateApiConfig?.baseUrl && stateApiConfig?.model) {
-        extractMissingStateTags(stateApiConfig, {
+      // Đợt 52 (yêu cầu beta): lớp cập nhật biến LUÔN BẬT — sổ tay keyword
+      // không được phụ thuộc việc model chính có "nhớ" khai tag hay không.
+      // Có API phụ riêng (model rẻ) thì dùng, không thì fallback API CHÍNH.
+      const stateCfg = stateApiConfig?.baseUrl && stateApiConfig?.model ? stateApiConfig : apiConfig
+      if (stateCfg?.baseUrl && stateCfg?.model) {
+        extractMissingStateTags(stateCfg, {
           storyText: stateParsed.cleaned,
+          // Đợt 50: đưa cả INPUT người chơi cho model phụ đối chiếu — người
+          // chơi hay viết sai tên Pokémon ("chamnder"), model phụ phải hiểu
+          // theo ngữ cảnh và khai tag bằng TÊN CHUẨN.
+          userText: [...nextMessages].reverse().find((m2) => m2.role === 'user' && !m2.hidden)?.content ?? '',
           appliedTags: {
             money: stateParsed.money, rel: stateParsed.rel, pokemons: stateParsed.pokemons,
             hunger: stateParsed.hunger, dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
@@ -635,6 +659,28 @@ export default function RoleplayChat() {
     const lastUser = [...trimmed].reverse().find((m2) => m2.role === 'user')
     await callAI(trimmed, lastUser?.content ?? '')
   }
+
+  // GỬI LẠI TỪ TIN NGƯỜI CHƠI (đợt 50): người chơi chuột phải vào TIN CỦA
+  // MÌNH cũng phải reroll được (phản hồi beta: "nút reroll đâu?" — trước đó
+  // reroll chỉ nằm trên tin AI). Cắt mọi tin phía sau tin người chơi này
+  // (thường là 1 tin AI trả lời) rồi gọi AI viết lại từ đúng chỗ đó.
+  async function handleResendFromUser(idx) {
+    if (loading) return
+    const m = messages[idx]
+    if (!m || m.role !== 'user') return
+    const trimmed = messages.slice(0, idx + 1)
+    setMessages(trimmed)
+    await callAI(trimmed, m.content ?? '')
+  }
+
+  // index tin NGƯỜI CHƠI cuối cùng (không tính hidden) — chỉ tin này được
+  // "Gửi lại" (gửi lại tin giữa truyện sẽ cắt mất cả khúc sau, quá nguy hiểm).
+  const lastUserIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user' && !messages[i].hidden) return i
+    }
+    return -1
+  })()
 
   // SỬA 1 tin (đợt 39): cho phép sửa cả tin người chơi lẫn chính văn AI.
   function handleEditMessage(index, newContent) {
@@ -936,6 +982,10 @@ export default function RoleplayChat() {
                 style={{ position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 96, padding: '6px 0', minWidth: 210, boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}
               >
                 {item('✎ Sửa tin nhắn', () => { setEditingIndex(ctxMenu.index); setEditDraft(m.content) })}
+                {!isAi && item('↻ Gửi lại (viết lại lượt trả lời)', () => handleResendFromUser(ctxMenu.index), {
+                  disabled: loading || ctxMenu.index !== lastUserIndex,
+                  titleTip: ctxMenu.index !== lastUserIndex ? 'Chỉ gửi lại được tin người chơi MỚI NHẤT' : 'Xoá lượt AI trả lời và viết lại',
+                })}
                 {isAi && item('↻ Gửi lại (reroll)', handleRegenerate, {
                   disabled: loading || ctxMenu.index !== lastAiIndex,
                   titleTip: ctxMenu.index !== lastAiIndex ? 'Chỉ reroll được tin AI mới nhất' : 'Viết lại lượt này',
@@ -958,8 +1008,23 @@ export default function RoleplayChat() {
         )}
 
         {error && (
-          <div className="status-pill status-pill--error" style={{ marginTop: 10 }}>
-            {error}
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className="status-pill status-pill--error">{error}</div>
+            {/* Đợt 51: nút THỬ LẠI ngay trên banner lỗi — trước đây lượt lỗi
+                (VD proxy 502) người chơi phải gõ lại tin → tin bị NHÂN ĐÔI
+                trong truyện. Giờ bấm 1 nút, gọi lại đúng từ tin cuối. */}
+            {lastUserIndex >= 0 && lastUserIndex === messages.length - 1 && (
+              <button
+                className="btn"
+                disabled={loading}
+                onClick={() => {
+                  setError(null)
+                  callAI(messages, messages[lastUserIndex]?.content ?? '')
+                }}
+              >
+                ↻ Thử lại lượt này
+              </button>
+            )}
           </div>
         )}
 

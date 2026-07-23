@@ -50,14 +50,9 @@ export default function DirectorSection() {
         {getIdentity(playerIdentity).desc}
       </small>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 10 }}>
-        <input
-          type="checkbox"
-          checked={cfg.romance}
-          onChange={(e) => setDirectorSettings({ romance: e.target.checked })}
-        />
-        Cho phép tình huống romance (tín hiệu nhẹ nhàng, không đường đột)
-      </label>
+      {/* Đợt 50: bỏ checkbox romance — romance giờ là 1 THỂ LOẠI chọn ở
+            màn tạo nhân vật (trang Tông truyện); đạo diễn luôn được phép
+            dùng chất liệu romance ở mức phù hợp tông. */}
     </div>
   )
 }

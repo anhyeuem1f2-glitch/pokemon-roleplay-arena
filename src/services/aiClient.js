@@ -246,3 +246,28 @@ export async function rerankDocs(config, query, documents, topN) {
     }))
     .sort((a, b) => b.score - a.score)
 }
+
+
+// ============ CHAU CHUỐT VĂN PHONG (đợt 50) ============
+// API phụ (tái sử dụng slot "Combat Anime" cũ — tính năng anime chưa mở cho
+// beta nên slot này đổi vai): sau khi có chính văn sạch, model phụ ĐÁNH BÓNG
+// câu chữ theo tông truyện — KHÔNG được đổi nội dung/sự kiện/thoại/thứ tự.
+// Lỗi bất kỳ → trả nguyên văn cũ, truyện không bao giờ bị chặn.
+export async function polishProse(cfg, text, toneNote) {
+  if (!cfg?.baseUrl || !cfg?.model || !text?.trim()) return text
+  const reply = await chatCompletion(cfg, [
+    {
+      role: 'system',
+      content: [
+        'Bạn là biên tập viên văn xuôi tiếng Việt cho một game nhập vai Pokémon. Nhiệm vụ DUY NHẤT: chau chuốt câu chữ của đoạn chính văn được đưa — mượt hơn, tự nhiên hơn, đúng tông truyện — rồi trả về TOÀN BỘ đoạn văn đã sửa.',
+        'LUẬT SẮT: (1) KHÔNG thay đổi nội dung, sự kiện, thông tin, tên riêng, con số; (2) KHÔNG thêm/bớt tình tiết hay lời thoại (chỉ được sửa cách diễn đạt của thoại, giữ nguyên ý); (3) giữ nguyên bố cục đoạn; (4) sửa các cấu trúc dịch-máy lủng củng (động từ chồng chất, tính từ xâu chuỗi vô nghĩa) thành câu tiếng Việt tự nhiên; (5) trả về CHỈ đoạn văn, không lời dẫn, không markdown rào.',
+        toneNote ? `TÔNG TRUYỆN cần bám: ${toneNote}` : '',
+      ].filter(Boolean).join('\n'),
+    },
+    { role: 'user', content: text },
+  ], { temperature: 0.4, maxTokens: 4000 })
+  const out = (reply ?? '').trim()
+  // Sanity: kết quả rỗng hoặc ngắn bất thường (<50% gốc) → coi như hỏng, giữ bản gốc.
+  if (!out || out.length < text.length * 0.5) return text
+  return out
+}

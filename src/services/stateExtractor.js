@@ -31,10 +31,14 @@ QUY TẮC:
  * @param {{baseUrl,apiKey,model}} cfg
  * @param {{storyText: string, appliedTags: object, hasPokemon: boolean}} params
  */
-export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon }) {
+export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon, userText = '' }) {
   if (!storyText?.trim()) return null
   const applied = JSON.stringify(appliedTags)
   const user = [
+    // Đợt 50: kèm INPUT người chơi để đối chiếu — người chơi có thể viết SAI
+    // CHÍNH TẢ tên Pokémon/nhân vật; phải hiểu theo ngữ cảnh và luôn khai
+    // tag bằng TÊN CHUẨN (VD người chơi gõ "chamnder" → tag dùng Charmander).
+    userText.trim() ? `INPUT NGƯỜI CHƠI LƯỢT NÀY (có thể sai chính tả — hiểu theo ngữ cảnh, tag dùng tên CHUẨN):\n${userText.slice(0, 1200)}\n` : '',
     `CHÍNH VĂN LƯỢT NÀY:\n${storyText.slice(0, 4000)}`,
     '',
     `TAG ĐÃ ÁP (không lặp lại): ${applied}`,

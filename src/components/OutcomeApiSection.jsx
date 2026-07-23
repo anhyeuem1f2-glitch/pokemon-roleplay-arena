@@ -99,7 +99,7 @@ export default function OutcomeApiSection({ outcomeApiConfig, setOutcomeApiConfi
         onChange={(v) => setOutcomeApiConfig({ ...outcomeApiConfig, lose: v })}
       />
       <OutcomeApiField
-        label="API Combat Anime: trọng tài trận thời gian thực"
+        label="API chau chuốt văn phong — đánh bóng câu chữ theo tông truyện (tuỳ chọn)"
         value={animeApiConfig}
         onChange={setAnimeApiConfig}
       />

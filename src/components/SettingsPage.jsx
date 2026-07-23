@@ -242,7 +242,7 @@ function CheckAllApis({ apiConfig, outcomeApiConfig, animeApiConfig }) {
       { label: 'API chính', config: apiConfig },
       { label: 'API phụ 1 — chạy thoát', config: outcomeApiConfig.escaped },
       { label: 'API phụ 2 — thua cuộc', config: outcomeApiConfig.lose },
-      { label: 'API Combat Anime — trọng tài', config: animeApiConfig },
+      { label: 'API chau chuốt văn phong', config: animeApiConfig },
     ].filter((t) => t.config && t.config.baseUrl)
 
     const out = []

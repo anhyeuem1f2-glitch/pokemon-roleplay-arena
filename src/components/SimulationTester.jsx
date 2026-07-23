@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
+import { buildToneNote } from '../data/storyTones.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { buildMonSmart } from '../data/pokemonSpecies.js'
@@ -39,7 +40,7 @@ export default function SimulationTester({ onEnterGame }) {
     setPlayerName, setPlayerMon, setParty, setMessages, setGameStarted,
     setPlayerLocation, setPlayerIdentity, setPlayerCharacter, setStoryDate,
     setInventory, setPlayerProfile, pokedexSpecies, movesDb,
-    setRelationships, setBodyStatus, setHunger,
+    setRelationships, setBodyStatus, setHunger, storyTone,
   } = useGame()
 
   const [scenario, setScenario] = useState('')
@@ -126,6 +127,7 @@ export default function SimulationTester({ onEnterGame }) {
         scanText: `${directive}\n${area?.name ?? ''} ${region?.name ?? ''}`,
         identityContext: `THÂN PHẬN NHÂN VẬT CHÍNH: ${identity.name} — ${identity.desc}`,
         worldbook,
+        toneNote: buildToneNote(storyTone),
       })
       callOptions.assistantPrefill = assistantPrefill
 

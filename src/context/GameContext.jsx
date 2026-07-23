@@ -54,6 +54,22 @@ export function GameProvider({ children }) {
     try { localStorage.setItem('trainer-arena:worldbook', JSON.stringify(next)) } catch { /* ignore */ }
   }, [])
 
+  // --- Tông truyện (đợt 50): độ khó + thể loại, chọn ở màn tạo nhân vật ---
+  const [storyTone, setStoryToneState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('trainer-arena:story-tone')
+      if (saved) return JSON.parse(saved)
+    } catch { /* ignore */ }
+    return { difficulty: 'anime', genres: [] }
+  })
+  const setStoryTone = useCallback((next) => {
+    setStoryToneState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      try { localStorage.setItem('trainer-arena:story-tone', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
   // --- Lịch sử chat roleplay (đợt 46: PERSIST — F5 không mất truyện) ---
   // Trước đây messages chỉ sống trong phiên: reload giữa chừng là mất sạch
   // chính văn trong khi tiền/túi đồ/vị trí vẫn còn → lệch nhau rất khó chịu.
@@ -524,6 +540,7 @@ export function GameProvider({ children }) {
     messages,
     setMessages,
     resetChat,
+    storyTone, setStoryTone,
     gameStarted,
     setGameStarted,
     playerName,

@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
+import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
@@ -29,6 +30,9 @@ const STEPS = [
   { key: 'profile', label: 'Hồ sơ' },
   { key: 'identity', label: 'Thân phận' },
   { key: 'origin', label: 'Xuất thân' },
+  // Đợt 50: trang chọn ĐỘ KHÓ + THỂ LOẠI — quyết định giọng văn toàn truyện
+  // (thay cho tông REALISTIC hardcode cũ bị chê "đen tối quá").
+  { key: 'tone', label: 'Tông truyện' },
   { key: 'opening', label: 'Mở đầu' },
 ]
 
@@ -107,6 +111,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     memoryApiConfig, playerIdentity, setPlayerIdentity,
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
     messages,
+    storyTone, setStoryTone,
     setInventory, setRelationships, setBodyStatus, setHunger, setPlayerProfile,
   } = useGame()
 
@@ -205,7 +210,10 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     const opening = OPENINGS.find((o) => o.key === openingKey) ?? null
     const ageNum = Number(age) || null
     const directive = [
-      `[Chỉ dẫn hệ thống — không phải lời thoại nhân vật] Hãy viết đoạn MỞ ĐẦU cho câu chuyện. Tông REALISTIC: thế giới Pokémon là một xã hội thật có sinh kế, luật lệ và mặt tối — không màu hồng kiểu anime thiếu nhi.`,
+      `[Chỉ dẫn hệ thống — không phải lời thoại nhân vật] Hãy viết đoạn MỞ ĐẦU cho câu chuyện.`,
+      // Đợt 50: tông truyện do NGƯỜI CHƠI chọn (độ khó + thể loại) thay cho
+      // tông REALISTIC hardcode cũ.
+      buildToneNote(storyTone),
       `Nhân vật chính (người chơi): ${finalName}${gender ? `, giới tính ${gender}` : ''}${age ? `, ${age} tuổi` : ''}.`,
       appearance.trim() ? `Ngoại hình: ${appearance.trim()}.` : '',
       `Thân phận: ${identity.name} — ${identity.desc} Để thân phận thấm vào bối cảnh một cách TỰ NHIÊN, không kể lể dồn dập.`,
@@ -234,6 +242,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         scanText: `${directive}\n${originArea?.name ?? ''} ${originRegion?.name ?? ''}`,
         identityContext: `THÂN PHẬN NHÂN VẬT CHÍNH (cố định, phải nhất quán xuyên suốt): ${identity.name} — ${identity.desc}`,
         worldbook,
+        toneNote: buildToneNote(storyTone),
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -371,6 +380,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           {stepKey === 'profile' && 'Bạn là ai?'}
           {stepKey === 'identity' && 'Thân phận — xuất phát điểm xã hội của bạn'}
           {stepKey === 'origin' && 'Quê nhà & thời điểm bắt đầu'}
+          {stepKey === 'tone' && 'Tông truyện — bạn muốn thế giới này vận hành thế nào?'}
           {stepKey === 'opening' && 'Câu chuyện bắt đầu thế nào?'}
         </h2>
 
@@ -518,6 +528,60 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           )}
 
           {/* ===== TRANG 4: MỞ ĐẦU + TỔNG KẾT ===== */}
+          {stepKey === 'tone' && (
+            <div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {DIFFICULTIES.map((d) => (
+                  <button
+                    key={d.key}
+                    onClick={() => setStoryTone((t) => ({ ...t, difficulty: d.key }))}
+                    style={{
+                      textAlign: 'left', border: `1px solid ${storyTone.difficulty === d.key ? 'var(--amber)' : 'var(--line)'}`,
+                      background: storyTone.difficulty === d.key ? 'var(--bg-deep)' : 'transparent',
+                      borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--text-main)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 14, color: storyTone.difficulty === d.key ? 'var(--amber)' : 'var(--text-main)' }}>{d.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-mid)', marginTop: 4 }}>{d.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', marginBottom: 8 }}>
+                  Thể loại chính (chọn tối đa 3 — có thể bỏ qua)
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {GENRES.map((g) => {
+                    const on = storyTone.genres?.includes(g.key)
+                    return (
+                      <button
+                        key={g.key}
+                        onClick={() => setStoryTone((t) => {
+                          const cur = t.genres ?? []
+                          if (cur.includes(g.key)) return { ...t, genres: cur.filter((k) => k !== g.key) }
+                          if (cur.length >= 3) return t // trần 3 thể loại — nhiều hơn là loãng
+                          return { ...t, genres: [...cur, g.key] }
+                        })}
+                        style={{
+                          border: `1px solid ${on ? 'var(--mint)' : 'var(--line)'}`,
+                          color: on ? 'var(--mint)' : 'var(--text-mid)',
+                          background: 'transparent', borderRadius: 999, padding: '5px 14px',
+                          fontSize: 12.5, cursor: 'pointer',
+                        }}
+                      >
+                        {g.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
+                  Độ khó quyết định giọng văn & mức rủi ro (Thực tế: có thể chết → game over). Thể loại là
+                  gia vị AI sẽ ưu tiên dệt vào truyện. Đổi được giữa chừng trong Cài đặt sau này nếu cần.
+                </div>
+              </div>
+            </div>
+          )}
+
           {stepKey === 'opening' && (
             <>
               <p className="page-subtitle">Chọn cách câu chuyện mở màn — mỗi lựa chọn có mô tả đầy đủ bên dưới.</p>

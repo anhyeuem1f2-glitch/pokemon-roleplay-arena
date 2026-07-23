@@ -290,7 +290,8 @@ function loadSettings() {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(SETTINGS_KEY) : null
     if (saved) {
       const p = JSON.parse(saved)
-      settings = { intensity: p.intensity ?? 'normal', romance: p.romance !== false }
+      // Đợt 50: romance LUÔN bật — điều tiết bằng thể loại ở Tông truyện.
+      settings = { intensity: p.intensity ?? 'normal', romance: true }
       return settings
     }
   } catch { /* làm mới */ }

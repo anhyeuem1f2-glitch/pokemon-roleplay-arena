@@ -72,10 +72,7 @@ export default function StateApiSection() {
     <div className="field">
       <label>API cập nhật biến (chống "truyện chạy mà biến đứng yên")</label>
       <small>
-        Sau mỗi lượt, model phụ này đọc lại chính văn và bổ sung tag trạng thái mà model chính quên
-        khai (tiền, Pokémon nhận được, độ no, ngày giờ, NPC, fact, quan hệ). Chạy nền, lỗi tự bỏ
-        qua. Khuyên dùng model nhỏ + rẻ, temperature 0 tự đặt sẵn.
-      </small>
+        Lớp cập nhật biến giờ LUÔN CHẠY sau mỗi lượt (mặc định dùng chính API chính). Bật mục này nếu muốn tách sang một model riêng nhỏ + rẻ để tiết kiệm — model phụ đọc lại chính văn và bổ sung tag trạng thái mà model chính quên khai (tiền, Pokémon, độ no, ngày giờ, NPC, fact, quan hệ). Chạy nền, lỗi tự bỏ qua, temperature 0 tự đặt sẵn.</small>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 8 }}>
         <input
           type="checkbox"

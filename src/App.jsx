@@ -16,13 +16,15 @@ function GearIcon() {
   )
 }
 
-// ===== CỜ PUBLIC BETA (đợt 48) =====
-// Bản build production (npm run build → deploy web) ẨN "Chế độ Dev" — kéo
-// theo ẩn luôn Combat Anime (nằm trong Dev, chưa sẵn sàng cho beta). Bản
-// `npm run dev` local vẫn thấy đầy đủ. Cần mở Dev trên bản deploy để debug:
-// thêm ?dev=1 vào URL.
-const SHOW_DEV_MODE = !import.meta.env.PROD
-  || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev'))
+// ===== CỜ PUBLIC BETA (đợt 49) =====
+// Nút "Chế độ Dev" mặc định ẨN Ở MỌI NƠI (kể cả chạy local) — KHÔNG còn dựa
+// vào import.meta.env.PROD nữa (thực chiến: build trên Netlify không đảm
+// bảo biến env như kỳ vọng → nút vẫn lộ trên bản deploy). Cách duy nhất
+// mở Dev: thêm ?dev=1 vào URL (VD http://localhost:5173/?dev=1 hoặc
+// https://ten-site.netlify.app/?dev=1) — deterministic, môi trường nào
+// cũng vậy, người chơi thường không bao giờ thấy.
+const SHOW_DEV_MODE =
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev')
 
 export default function App() {
   const { apiConfig, gameStarted, setGameStarted } = useGame()

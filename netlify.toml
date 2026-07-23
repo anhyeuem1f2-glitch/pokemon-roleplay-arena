@@ -1,0 +1,11 @@
+# Cấu hình Netlify (đợt 56)
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Edge Function làm CẦU NỐI CORS cho các proxy AI không gửi header
+# Access-Control-Allow-Origin (VD gcli.*). Chạy phía máy chủ nên không bị
+# trình duyệt chặn; app tự dùng khi gọi thẳng thất bại.
+[[edge_functions]]
+  path = "/api-bridge"
+  function = "api-bridge"

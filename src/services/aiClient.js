@@ -19,6 +19,28 @@
 // Cách xử lý: thử lần lượt các biến thể đường dẫn, CHỈ thử tiếp khi lỗi
 // thuộc loại không tốn token (lỗi mạng/CORS hoặc 404), rồi NHỚ biến thể
 // chạy được cho các lần sau.
+
+// ============ CẦU NỐI CORS PHÍA MÁY CHỦ (đợt 56) ============
+// Khi proxy AI không gửi header CORS, trình duyệt chặn thẳng — client không
+// làm gì được. Bản deploy trên Netlify có sẵn Edge Function /api-bridge
+// chuyển tiếp request phía máy chủ (không dính CORS).
+// Chiến lược: gọi TRỰC TIẾP trước (nhanh nhất, không qua trung gian); chỉ khi
+// dính lỗi mạng/CORS mới tự chuyển sang cầu nối, rồi GHI NHỚ để các lượt sau
+// đi thẳng đường đã chạy được.
+const BRIDGE_PATH = '/api-bridge'
+const bridgeNeeded = new Set() // các baseUrl đã xác định phải đi qua cầu nối
+
+function bridgeAvailable() {
+  // Chỉ có trên bản deploy (localhost `npm run dev` không chạy edge function).
+  return typeof window !== 'undefined' && /^https?:/.test(window.location.origin)
+}
+
+async function fetchViaBridge(targetUrl, init) {
+  const headers = new Headers(init.headers || {})
+  headers.set('x-target-url', targetUrl)
+  return fetch(BRIDGE_PATH, { ...init, headers })
+}
+
 const endpointMemo = new Map()
 
 function endpointCandidates(baseUrl, path) {
@@ -39,12 +61,26 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
     const url = candidates[i]
     const isLast = i === candidates.length - 1
     try {
-      const res = await fetch(url, init)
+      // baseUrl này đã biết là bị CORS chặn → đi thẳng cầu nối, khỏi thử lại.
+      const useBridge = bridgeNeeded.has(baseUrl) && bridgeAvailable()
+      const res = useBridge ? await fetchViaBridge(url, init) : await fetch(url, init)
       // 404 = sai route → thử biến thể kế tiếp (không tốn token).
       if (res.status === 404 && !isLast) continue
       endpointMemo.set(memoKey, url)
       return { res, url }
     } catch (netErr) {
+      // Lỗi mạng/CORS ở lần gọi TRỰC TIẾP → thử lại qua cầu nối máy chủ.
+      if (bridgeAvailable() && !bridgeNeeded.has(baseUrl)) {
+        try {
+          const res = await fetchViaBridge(url, init)
+          if (res.status !== 404 || isLast) {
+            // Cầu nối chạy được → nhớ lại, mọi lượt sau đi luôn đường này.
+            bridgeNeeded.add(baseUrl)
+            endpointMemo.set(memoKey, url)
+            return { res, url }
+          }
+        } catch { /* cầu nối cũng hỏng → rơi xuống xử lý lỗi bên dưới */ }
+      }
       // Lỗi mạng/CORS: có thể do route sai → thử tiếp; hết ứng viên thì ném.
       lastErr = netErr
       if (!isLast) continue
@@ -53,7 +89,8 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
         `Không gọi được tới API (lỗi mạng/CORS): ${netErr.message}. ` +
         `Kiểm tra: (1) Base URL có đúng dạng https://.../v1 không; ` +
         `(2) proxy có cho phép gọi từ trình duyệt (CORS) tại ${origin} không — ` +
-        `nhiều proxy chạy được trong SillyTavern vì ST gọi từ máy chủ, còn web thì bị trình duyệt chặn nếu proxy thiếu header Access-Control-Allow-Origin.`,
+        `nhiều proxy chạy được trong SillyTavern vì ST gọi từ máy chủ, còn web thì bị trình duyệt chặn nếu proxy thiếu header Access-Control-Allow-Origin. ` +
+        `(Trang đã tự thử chuyển tiếp qua máy chủ nhưng vẫn không được — hãy kiểm tra lại Base URL/API key, hoặc dùng proxy khác.)`,
       )
     }
   }

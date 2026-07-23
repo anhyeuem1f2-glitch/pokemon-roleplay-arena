@@ -90,7 +90,11 @@ export default function ApiSetup() {
           onChange={(e) => updateField('baseUrl', e.target.value)}
           placeholder="https://api.openai.com/v1"
         />
-        <small>Endpoint gốc, không kèm /chat/completions ở cuối.</small>
+        <small>
+          Endpoint gốc, không kèm /chat/completions ở cuối (thường có dạng https://.../v1). Nếu proxy
+          của bạn không cho trình duyệt gọi thẳng (lỗi CORS), trang sẽ TỰ chuyển tiếp qua máy chủ —
+          bạn không phải cấu hình gì thêm.
+        </small>
       </div>
 
       <div className="field">

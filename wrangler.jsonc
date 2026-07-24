@@ -1,10 +1,17 @@
 {
+  // Cấu hình deploy bằng CLOUDFLARE WORKERS (đợt 60).
   "name": "pokemon-roleplay-arena",
   "main": "worker/index.js",
   "compatibility_date": "2026-07-01",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
+    // App là SPA: đường dẫn không khớp file nào thì trả index.html.
+    "not_found_handling": "single-page-application",
+    // BẮT BUỘC (đợt 60): chế độ SPA ở trên chặn mọi request điều hướng và
+    // trả index.html TRƯỚC khi worker chạy — nên /api-bridge cũng bị nuốt,
+    // trả về trang game thay vì JSON của cầu nối. Khai báo run_worker_first
+    // để riêng đường dẫn này cho worker xử lý trước. (Cần wrangler >= 4.20)
+    "run_worker_first": ["/api-bridge"]
   }
 }

@@ -117,6 +117,26 @@ export function clearMemory() {
   notify()
 }
 
+
+/** Đợt 61: xoá các ký ức thuộc một khoảng lượt (khi người chơi xoá tin
+ * nhắn/chương). turnFrom..turnTo tính theo INDEX tin trong mảng messages. */
+export function forgetMemoriesInTurnRange(turnFrom, turnTo) {
+  const store = load()
+  const before = store.entries.length
+  store.entries = store.entries.filter((e) => !(e.turn >= turnFrom && e.turn <= turnTo))
+  if (store.entries.length !== before) {
+    decodedCache = new Map()
+    persist()
+    notify()
+  }
+  return before - store.entries.length
+}
+
+/** Đợt 61: danh sách ký ức cho Sổ tay hiển thị (không kèm vector nặng). */
+export function listMemories() {
+  return load().entries.map((e) => ({ id: e.id, turn: e.turn, text: e.text }))
+}
+
 function addEntry(text, vector, turn) {
   const store = load()
   const entry = { id: store.nextId++, turn: turn ?? 0, text, vec: encodeVec(vector) }

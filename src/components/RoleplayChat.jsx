@@ -19,9 +19,9 @@ import SafariModal from './SafariModal.jsx'
 import { isSafariArea } from '../data/regions.js'
 import { musicManager } from '../utils/musicManager.js'
 import { VICTORY_TRACK_KEYS, DEFEAT_TRACK_KEYS } from '../data/musicTracks.js'
-import { rememberExchange, recallRelevant, buildMemoryNote } from '../utils/storyMemory.js'
+import { rememberExchange, recallRelevant, buildMemoryNote, forgetMemoriesInTurnRange, clearMemory } from '../utils/storyMemory.js'
 import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote } from '../utils/storyNotebook.js'
-import { maybeUpdateSummary, buildSummaryNote } from '../utils/storySummary.js'
+import { maybeUpdateSummary, buildSummaryNote, trimSummaryCoverage, clearSummary } from '../utils/storySummary.js'
 import { maybeMakeNudge, getIdentity } from '../data/storyDirector.js'
 import { getRegion, getArea } from '../data/regions.js'
 import { getWeather } from '../data/weather.js'
@@ -315,10 +315,46 @@ export default function RoleplayChat() {
   // Sửa/Reroll dưới tin; viewer 🧬 xem biến cập nhật của từng lượt.
   const [ctxMenu, setCtxMenu] = useState(null) // {x, y, index}
   const [turnInfoIndex, setTurnInfoIndex] = useState(null)
+  // Đợt 61: menu chuột phải trên Ô NHẬP (xoá input / xoá lịch sử chat).
+  const [inputMenu, setInputMenu] = useState(null) // {x, y}
+
+  // Dọn ký ức + tóm tắt cho các tin bị xoá (đợt 61). idxs = mảng index bị xoá.
+  // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
+  function wipeAllMemory() {
+    resetChat()
+    try { clearMemory() } catch { /* ignore */ }
+    try { clearSummary() } catch { /* ignore */ }
+  }
+
+  function cleanupMemoryFor(idxs, newCount) {
+    if (idxs.length) {
+      const lo = Math.min(...idxs)
+      const hi = Math.max(...idxs)
+      // Ký ức được gắn theo turn = index tin AI lúc ghi (rememberExchange).
+      forgetMemoriesInTurnRange(lo, hi)
+    }
+    // Kéo coverage tóm tắt về, để lần tóm tắt sau không nhắc nội dung đã xoá.
+    trimSummaryCoverage(newCount)
+  }
 
   function handleDeleteMessage(i) {
-    if (!window.confirm('Xoá tin nhắn này khỏi truyện? (Không hoàn tác được — biến đã áp từ tin này KHÔNG bị hoàn lại.)')) return
-    setMessages((msgs) => msgs.filter((_, idx) => idx !== i))
+    const m = messages[i]
+    if (!m) return
+    // Xoá INPUT người chơi → xoá LUÔN tin AI trả lời ngay sau (đợt 61: theo
+    // yêu cầu "xóa input thì tự động xóa luôn output của input đó").
+    const idxs = [i]
+    if (m.role === 'user' && messages[i + 1]?.role === 'assistant') idxs.push(i + 1)
+    const isPair = idxs.length > 1
+    if (!window.confirm(
+      isPair
+        ? 'Xoá lượt này (tin của bạn + phần AI trả lời)? Ký ức và phần tóm tắt liên quan cũng được dọn theo. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.'
+        : 'Xoá tin nhắn này khỏi truyện? Ký ức/tóm tắt liên quan cũng được dọn. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.',
+    )) return
+    setMessages((msgs) => {
+      const next = msgs.filter((_, idx) => !idxs.includes(idx))
+      cleanupMemoryFor(idxs, next.length)
+      return next
+    })
     setEditingIndex(null)
   }
 
@@ -827,7 +863,7 @@ export default function RoleplayChat() {
             className="btn"
             onClick={() => {
               // Đợt 46: messages đã persist — xoá là mất hẳn, phải hỏi lại.
-              if (window.confirm('Xoá toàn bộ lịch sử truyện? Hành động này không hoàn tác được.')) resetChat()
+              if (window.confirm('Xoá toàn bộ lịch sử truyện + ký ức + tóm tắt? Không hoàn tác được.')) wipeAllMemory()
             }}
           >
             Xoá lịch sử chat
@@ -1040,6 +1076,65 @@ export default function RoleplayChat() {
           <TurnInfoModal message={messages[turnInfoIndex]} onClose={() => setTurnInfoIndex(null)} />
         )}
 
+        {/* Menu chuột phải trên Ô NHẬP (đợt 61). */}
+        {inputMenu && (
+          <>
+            <div onClick={() => setInputMenu(null)} onContextMenu={(e) => { e.preventDefault(); setInputMenu(null) }} style={{ position: 'fixed', inset: 0, zIndex: 95 }} />
+            <div className="panel" style={{ position: 'fixed', left: inputMenu.x, top: inputMenu.y, zIndex: 96, padding: '6px 0', minWidth: 200, boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
+              {[
+                {
+                  label: '⌫ Xoá nội dung đang gõ',
+                  disabled: !input,
+                  onClick: () => setInput(''),
+                },
+                {
+                  label: '↩ Xoá lượt trả lời gần nhất',
+                  disabled: loading || lastAiIndex < 0,
+                  onClick: () => {
+                    // Xoá cặp cuối: tin người chơi mới nhất + AI trả lời.
+                    const ai = lastAiIndex
+                    if (ai < 0) return
+                    const idxs = [ai]
+                    if (messages[ai - 1]?.role === 'user') idxs.push(ai - 1)
+                    if (!window.confirm('Xoá lượt gần nhất (bạn + AI)? Ký ức/tóm tắt liên quan cũng được dọn.')) return
+                    setMessages((msgs) => {
+                      const next = msgs.filter((_, idx) => !idxs.includes(idx))
+                      cleanupMemoryFor(idxs, next.length)
+                      return next
+                    })
+                  },
+                },
+                {
+                  label: '🗑 Xoá toàn bộ lịch sử truyện',
+                  danger: true,
+                  disabled: loading || messages.length === 0,
+                  onClick: () => {
+                    if (window.confirm('Xoá TOÀN BỘ lịch sử truyện + ký ức + tóm tắt? Không hoàn tác được.')) {
+                      wipeAllMemory()
+                    }
+                  },
+                },
+              ].map((it) => (
+                <button
+                  key={it.label}
+                  disabled={it.disabled}
+                  onClick={() => { setInputMenu(null); it.onClick?.() }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', border: 'none',
+                    background: 'transparent', color: it.danger ? 'var(--red, #e05a5a)' : 'var(--text-main)',
+                    opacity: it.disabled ? 0.4 : 1, padding: '8px 14px', fontSize: 13,
+                    cursor: it.disabled ? 'default' : 'pointer',
+                  }}
+                  onMouseEnter={(e) => { if (!it.disabled) e.currentTarget.style.background = 'var(--bg-deep)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         {error && (
           <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <div className="status-pill status-pill--error">{error}</div>
@@ -1118,7 +1213,18 @@ export default function RoleplayChat() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Bạn làm gì / nói gì tiếp theo? (Enter để gửi, Shift+Enter xuống dòng)"
+            onContextMenu={(e) => {
+              // Nếu đang bôi đen chữ trong ô, để trình duyệt lo (copy/paste).
+              const ta = e.currentTarget
+              if (ta.selectionStart !== ta.selectionEnd) return
+              e.preventDefault()
+              const MENU_W = 220, MENU_H = 140
+              setInputMenu({
+                x: Math.max(8, Math.min(e.clientX, window.innerWidth - MENU_W - 8)),
+                y: Math.max(8, Math.min(e.clientY, window.innerHeight - MENU_H - 8)),
+              })
+            }}
+            placeholder="Bạn làm gì / nói gì tiếp theo? (Enter để gửi, Shift+Enter xuống dòng — chuột phải để xoá nhanh)"
             style={{
               flex: 1,
               minHeight: 44,

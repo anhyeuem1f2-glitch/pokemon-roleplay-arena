@@ -65,6 +65,18 @@ export function clearSummary() {
   notify()
 }
 
+
+/** Đợt 61: khi xoá bớt tin, kéo coveredTurns về không vượt quá số tin còn
+ * lại — để bản tóm tắt lần sau không "nhớ" nội dung đã bị xoá. */
+export function trimSummaryCoverage(newMessageCount) {
+  const st = load()
+  if (st.coveredTurns > newMessageCount) {
+    cache = { ...st, coveredTurns: Math.max(0, newMessageCount) }
+    persist()
+    notify()
+  }
+}
+
 /** Người dùng sửa tay bản tóm tắt trong Sổ tay. */
 export function setSummaryText(text) {
   const s = load()

@@ -3,6 +3,8 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
+import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
+import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
@@ -30,6 +32,9 @@ const GENDERS = ['Nam', 'Nữ', 'Khác / không tiết lộ']
 const STEPS = [
   { key: 'profile', label: 'Hồ sơ' },
   { key: 'identity', label: 'Thân phận' },
+  // Đợt 61: tính cách + siêu năng lực — chống việc AI mặc định vẽ nhân vật
+  // chính thành lạnh lùng/thực dụng.
+  { key: 'traits', label: 'Tính cách' },
   { key: 'origin', label: 'Xuất thân' },
   // Đợt 50: trang chọn ĐỘ KHÓ + THỂ LOẠI — quyết định giọng văn toàn truyện
   // (thay cho tông REALISTIC hardcode cũ bị chê "đen tối quá").
@@ -135,9 +140,49 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const [startDay, setStartDay] = useState(storyDate.day)
   const [startMonth, setStartMonth] = useState(storyDate.month)
   const [startYear, setStartYear] = useState(storyDate.year)
+  // Tính cách + siêu năng lực (đợt 61)
+  const [personality, setPersonality] = useState([])
+  const [superpower, setSuperpower] = useState('none')
+  const [customPower, setCustomPower] = useState('')
   // Mở đầu
   const [openingKey, setOpeningKey] = useState('auto')
   const [desiredOpening, setDesiredOpening] = useState('')
+  // Preset nhân vật đã lưu (đợt 61)
+  const [presets, setPresets] = useState(() => loadCharacterPresets())
+  const [presetSaveName, setPresetSaveName] = useState('')
+
+  // Gom toàn bộ thiết lập hiện tại thành 1 object để lưu / nạp.
+  function collectSetup() {
+    return {
+      trainerName, gender, age, appearance,
+      avatarUrl: playerProfile.avatarUrl || '',
+      playerIdentity, customName, customDesc,
+      originRegionKey, originAreaKey,
+      personality, superpower, customPower,
+      storyTone,
+      openingKey, desiredOpening,
+    }
+  }
+
+  function applySetup(d) {
+    if (!d) return
+    setTrainerName(d.trainerName ?? '')
+    setGender(d.gender ?? '')
+    setAge(d.age ?? '')
+    setAppearance(d.appearance ?? '')
+    if (d.avatarUrl !== undefined) setPlayerProfile((prof) => ({ ...prof, avatarUrl: d.avatarUrl }))
+    if (d.playerIdentity) setPlayerIdentity(d.playerIdentity)
+    setCustomName(d.customName ?? '')
+    setCustomDesc(d.customDesc ?? '')
+    if (d.originRegionKey) setOriginRegionKey(d.originRegionKey)
+    setOriginAreaKey(d.originAreaKey ?? '')
+    setPersonality(d.personality ?? [])
+    setSuperpower(d.superpower ?? 'none')
+    setCustomPower(d.customPower ?? '')
+    if (d.storyTone) setStoryTone(d.storyTone)
+    setOpeningKey(d.openingKey ?? 'auto')
+    setDesiredOpening(d.desiredOpening ?? '')
+  }
 
   const configured = Boolean(apiConfig.baseUrl && apiConfig.model)
   const originRegion = getRegion(originRegionKey)
@@ -219,6 +264,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       `Nhân vật chính (người chơi): ${finalName}${gender ? `, giới tính ${gender}` : ''}${age ? `, ${age} tuổi` : ''}.`,
       appearance.trim() ? `Ngoại hình: ${appearance.trim()}.` : '',
       `Thân phận: ${identity.name} — ${identity.desc} Để thân phận thấm vào bối cảnh một cách TỰ NHIÊN, không kể lể dồn dập.`,
+      // Tính cách + siêu năng lực (đợt 61).
+      buildCharacterTraitsNote({ personality, superpower, customPower }),
       originArea
         ? `Xuất thân: ${originArea.name}, vùng ${originRegion?.name}. Mở đầu diễn ra tại/gắn với nơi này (trừ khi tình huống mở đầu nói khác).`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
@@ -381,6 +428,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         <h2 className="page-title" style={{ marginTop: 8 }}>
           {stepKey === 'profile' && 'Bạn là ai?'}
           {stepKey === 'identity' && 'Thân phận — xuất phát điểm xã hội của bạn'}
+          {stepKey === 'traits' && 'Tính cách & năng lực — nhân vật của bạn là người thế nào?'}
           {stepKey === 'origin' && 'Quê nhà & thời điểm bắt đầu'}
           {stepKey === 'tone' && 'Tông truyện — bạn muốn thế giới này vận hành thế nào?'}
           {stepKey === 'opening' && 'Câu chuyện bắt đầu thế nào?'}
@@ -394,6 +442,35 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Giọng văn và
                 mức độ khắc nghiệt của thế giới do bạn chọn ở bước "Tông truyện" phía sau.
               </p>
+              {/* NẠP hồ sơ nhân vật đã lưu (đợt 61) */}
+              {presets.length > 0 && (
+                <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 10, marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-mid)', marginBottom: 8, fontWeight: 700 }}>
+                    ⚡ Nạp nhân vật đã lưu
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {presets.map((pr) => (
+                      <div key={pr.name} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button
+                          className="btn"
+                          style={{ flex: 1, textAlign: 'left', fontSize: 12.5 }}
+                          onClick={() => { applySetup(pr.data); setError(null) }}
+                        >
+                          {pr.name}
+                        </button>
+                        <button
+                          className="btn"
+                          style={{ fontSize: 11, padding: '4px 8px' }}
+                          title="Xoá hồ sơ này"
+                          onClick={() => setPresets(deleteCharacterPreset(pr.name))}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* Ảnh đại diện (đợt 54): tải từ máy hoặc dán link. */}
               <div className="field" style={{ marginBottom: 12 }}>
                 <label>Ảnh đại diện (tuỳ chọn)</label>
@@ -493,6 +570,74 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           )}
 
           {/* ===== TRANG 3: XUẤT THÂN + NGÀY ===== */}
+          {stepKey === 'traits' && (
+            <div>
+              <p className="page-subtitle">
+                Chọn vài nét tính cách để AI khắc hoạ ĐÚNG nhân vật của bạn (không chọn thì AI dễ mặc
+                định thành lạnh lùng, thực dụng). Có thể chọn nhiều nét.
+              </p>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', margin: '4px 0 8px' }}>
+                Tính cách (chọn tối đa 4)
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {PERSONALITY_TRAITS.map((t) => {
+                  const on = personality.includes(t.key)
+                  return (
+                    <button
+                      key={t.key}
+                      onClick={() => setPersonality((cur) => {
+                        if (cur.includes(t.key)) return cur.filter((k) => k !== t.key)
+                        if (cur.length >= 4) return cur
+                        return [...cur, t.key]
+                      })}
+                      style={{
+                        border: `1px solid ${on ? 'var(--mint)' : 'var(--line)'}`,
+                        color: on ? 'var(--mint)' : 'var(--text-mid)',
+                        background: 'transparent', borderRadius: 999, padding: '5px 14px',
+                        fontSize: 12.5, cursor: 'pointer',
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', margin: '18px 0 8px' }}>
+                Siêu năng lực (tuỳ chọn)
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {SUPERPOWERS.map((p2) => (
+                  <button
+                    key={p2.key}
+                    onClick={() => setSuperpower(p2.key)}
+                    style={{
+                      border: `1px solid ${superpower === p2.key ? 'var(--amber)' : 'var(--line)'}`,
+                      color: superpower === p2.key ? 'var(--amber)' : 'var(--text-mid)',
+                      background: 'transparent', borderRadius: 999, padding: '5px 14px',
+                      fontSize: 12.5, cursor: 'pointer',
+                    }}
+                  >
+                    {p2.label}
+                  </button>
+                ))}
+              </div>
+              {superpower === 'custom' && (
+                <textarea
+                  className="input"
+                  style={{ width: '100%', marginTop: 10, minHeight: 70 }}
+                  placeholder="Mô tả siêu năng lực của bạn (VD: điều khiển thời tiết trong phạm vi nhỏ, nói chuyện với Pokémon hệ Ma...)"
+                  value={customPower}
+                  onChange={(e) => setCustomPower(e.target.value)}
+                />
+              )}
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
+                Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến
+                nhân vật thành bất khả chiến bại.
+              </div>
+            </div>
+          )}
+
           {stepKey === 'origin' && (
             <>
               <p className="page-subtitle">
@@ -652,6 +797,32 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
 
         {error && (
           <div className="status-pill status-pill--error" style={{ marginTop: 10 }}>{error}</div>
+        )}
+
+        {/* LƯU hồ sơ nhân vật (đợt 61) — hiện ở trang cuối để lần sau chơi lại
+            không phải setup từ đầu. */}
+        {step === STEPS.length - 1 && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              className="input"
+              style={{ flex: 1, minWidth: 160 }}
+              placeholder="Đặt tên để lưu nhân vật này…"
+              value={presetSaveName}
+              onChange={(e) => setPresetSaveName(e.target.value)}
+            />
+            <button
+              className="btn"
+              disabled={loading}
+              onClick={() => {
+                const nm = presetSaveName.trim() || trainerName.trim() || 'Nhân vật'
+                setPresets(saveCharacterPreset(nm, collectSetup()))
+                setPresetSaveName('')
+                setError(null)
+              }}
+            >
+              💾 Lưu nhân vật
+            </button>
+          </div>
         )}
 
         <div className="btn-row" style={{ marginTop: 12 }}>

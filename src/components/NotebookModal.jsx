@@ -7,7 +7,7 @@ import {
   forceUpdateSummary,
 } from '../utils/storySummary.js'
 import { useGame } from '../context/GameContext.jsx'
-import { getMemoryCount, subscribeMemory } from '../utils/storyMemory.js'
+import { getMemoryCount, subscribeMemory, listMemories } from '../utils/storyMemory.js'
 
 // ============ SỔ TAY CỐT TRUYỆN (đợt 30) ============
 // Modal xem/quản lý cả 3 lớp trí nhớ: (1) tóm tắt cốt truyện (sửa tay được —
@@ -15,8 +15,10 @@ import { getMemoryCount, subscribeMemory } from '../utils/storyMemory.js'
 // keyword. Có nút xoá từng mục — mục sai thì dọn ngay khỏi trí nhớ AI.
 
 export default function NotebookModal({ onClose }) {
-  const { apiConfig, messages } = useGame()
-  const [tab, setTab] = useState('summary') // 'summary' | 'npc' | 'fact'
+  const { apiConfig, messages, memoryApiConfig } = useGame()
+  const [tab, setTab] = useState('summary') // 'summary' | 'npc' | 'fact' | 'vector'
+  const embCfg = memoryApiConfig?.embedding
+  const vectorOn = Boolean(embCfg?.baseUrl && embCfg?.model)
   const [sumError, setSumError] = useState(null)
   const [nb, setNb] = useState(() => getNotebook())
   const [sum, setSum] = useState(() => getSummary())
@@ -58,13 +60,14 @@ export default function NotebookModal({ onClose }) {
           <button className="btn" style={{ padding: '4px 10px' }} onClick={onClose}>Đóng</button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
-          3 lớp trí nhớ đang hoạt động: ký ức vector ({memCount}) · tóm tắt cốt truyện · sổ tay keyword
-          ({nb.npcs.length} NPC, {nb.facts.length} fact)
+          3 lớp trí nhớ: ký ức vector [{vectorOn ? `BẬT · ${memCount} mục` : 'TẮT'}] · tóm tắt cốt truyện · sổ
+          tay keyword ({nb.npcs.length} NPC, {nb.facts.length} fact)
         </div>
         <div className="btn-row" style={{ gap: 8, marginBottom: 12 }}>
           {tabBtn('summary', 'Tóm tắt')}
           {tabBtn('npc', `NPC (${nb.npcs.length})`)}
           {tabBtn('fact', `Fact (${nb.facts.length})`)}
+          {tabBtn('vector', `Vector (${memCount})`)}
         </div>
 
         {tab === 'summary' && (
@@ -150,6 +153,41 @@ export default function NotebookModal({ onClose }) {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {tab === 'vector' && (
+          <div>
+            <div
+              style={{
+                display: 'inline-block', fontSize: 11.5, fontWeight: 700, borderRadius: 999,
+                padding: '3px 12px', marginBottom: 10,
+                border: `1px solid ${vectorOn ? 'var(--mint)' : 'var(--line)'}`,
+                color: vectorOn ? 'var(--mint)' : 'var(--text-dim)',
+              }}
+            >
+              {vectorOn ? '● Ký ức vector ĐANG HOẠT ĐỘNG' : '○ Ký ức vector đang TẮT'}
+            </div>
+            <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '0 0 10px', lineHeight: 1.6 }}>
+              {vectorOn
+                ? `Mỗi lượt truyện được lưu thành một "ký ức". Khi truyện dài, app tự truy hồi những diễn biến cũ LIÊN QUAN nhất để nhắc lại cho AI. Hiện có ${memCount} mục.`
+                : 'Chưa bật. Vào Cài đặt API → mục "API EMBEDDING" điền endpoint /embeddings để bật ký ức dài hạn — giúp AI không quên diễn biến cũ khi truyện dài.'}
+            </p>
+            {vectorOn && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {listMemories().length === 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>Chưa có ký ức nào — sẽ tự tích luỹ khi bạn chơi.</p>
+                )}
+                {[...listMemories()].reverse().map((m) => (
+                  <div key={m.id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3, fontFamily: 'var(--font-mono)' }}>
+                      lượt #{m.turn}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-mid)', lineHeight: 1.5 }}>{m.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

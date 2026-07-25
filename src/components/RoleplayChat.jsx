@@ -283,6 +283,12 @@ export default function RoleplayChat() {
     mainPreset,
     assistantPrefill,
     outcomeApiConfig,
+    // FIX đợt 62: đợt 50 dùng animeApiConfig cho "API chau chuốt văn phong"
+    // nhưng QUÊN destructure ở đây → ReferenceError "animeApiConfig is not
+    // defined" ném ra giữa callAI, làm HỎNG MỌI LƯỢT CHƠI (người chơi beta
+    // báo "cứ lỗi api"). Bài học: thêm biến từ context phải kiểm tra cả nơi
+    // khai báo lẫn nơi dùng.
+    animeApiConfig,
     memoryApiConfig,
     playerIdentity,
     playerCharacter,

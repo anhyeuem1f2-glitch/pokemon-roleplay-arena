@@ -103,6 +103,35 @@ export function parseWikiExtract(json) {
   return null
 }
 
+
+// ============ ĐI NHỜ CẦU NỐI KHI BỊ CORS (đợt 62) ============
+// Bulbapedia không gửi header CORS cho origin lạ (dù đã kèm origin=*), nên
+// gọi thẳng từ trình duyệt bị chặn → tính năng tra cứu canon coi như chết.
+// Bản deploy có sẵn /api-bridge (Cloudflare Worker / Netlify Edge) chuyển
+// tiếp phía máy chủ. Gọi THẲNG trước cho nhanh, hỏng thì mới đi nhờ, và ghi
+// nhớ để các lần sau đi luôn đường chạy được.
+let wikiNeedsBridge = false
+
+function bridgeAvailable() {
+  return typeof window !== 'undefined' && /^https?:/.test(window.location.origin)
+}
+
+async function fetchWiki(url, init) {
+  if (wikiNeedsBridge && bridgeAvailable()) {
+    return fetch('/api-bridge', { ...init, headers: { 'x-target-url': url } })
+  }
+  try {
+    return await fetch(url, init)
+  } catch (err) {
+    if (bridgeAvailable()) {
+      const res = await fetch('/api-bridge', { ...init, headers: { 'x-target-url': url } })
+      wikiNeedsBridge = true // nhớ lại, khỏi phí một lần gọi hỏng mỗi lượt
+      return res
+    }
+    throw err
+  }
+}
+
 /** Fetch tóm tắt 1 trang Bulbapedia (cache + TTL + timeout). */
 export async function fetchWikiSummary(title) {
   const c = loadCache()
@@ -114,7 +143,7 @@ export async function fetchWikiSummary(title) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 5000)
   try {
-    const res = await fetch(url, { signal: ctrl.signal })
+    const res = await fetchWiki(url, { signal: ctrl.signal })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const json = await res.json()
     const text = parseWikiExtract(json)

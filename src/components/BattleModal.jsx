@@ -826,9 +826,16 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           <span className="page-title" style={{ margin: 0 }}>
             Trận đấu
           </span>
+          {/* Đợt 64: ghi rõ hệ quả như bên ShopModal — ẨN chỉ cất bảng đi,
+              trận VẪN đang diễn ra (máu/trạng thái đối thủ được giữ). */}
           {!finished && (
-            <button className="btn" onClick={onClose} style={{ padding: '4px 10px' }}>
-              Ẩn
+            <button
+              className="btn"
+              onClick={onClose}
+              style={{ padding: '4px 10px' }}
+              title="Cất bảng trận đi — trận VẪN tiếp diễn, máu và trạng thái đối thủ được giữ nguyên; bấm lại quả bóng để quay vào"
+            >
+              ✕ Ẩn (trận vẫn tiếp diễn)
             </button>
           )}
         </div>

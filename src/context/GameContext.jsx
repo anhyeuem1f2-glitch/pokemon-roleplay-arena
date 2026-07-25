@@ -80,12 +80,20 @@ export function GameProvider({ children }) {
     } catch { /* ignore */ }
     return []
   })
+  // Đợt 64: BÁO cho người chơi biết khi truyện KHÔNG lưu được nữa (quota
+  // localStorage đầy — truyện dài + ảnh đại diện base64). Trước đây lỗi bị
+  // nuốt im lặng: người chơi tưởng đã lưu, F5 một cái là mất cả buổi chơi.
+  const [storageFull, setStorageFull] = useState(false)
   const setMessages = useCallback((next) => {
     setMessagesState((cur) => {
       const resolved = typeof next === 'function' ? next(cur) : next
-      // Truyện dài có thể vượt quota localStorage — lỗi chỉ bỏ qua, phiên
-      // hiện tại vẫn chạy bình thường (chỉ mất khả năng khôi phục sau F5).
-      try { localStorage.setItem('trainer-arena:messages', JSON.stringify(resolved)) } catch { /* ignore */ }
+      try {
+        localStorage.setItem('trainer-arena:messages', JSON.stringify(resolved))
+        setStorageFull(false)
+      } catch {
+        // Phiên hiện tại vẫn chạy bình thường, chỉ mất khả năng khôi phục sau F5.
+        setStorageFull(true)
+      }
       return resolved
     })
   }, [])
@@ -541,6 +549,7 @@ export function GameProvider({ children }) {
     setMessages,
     resetChat,
     storyTone, setStoryTone,
+    storageFull,
     gameStarted,
     setGameStarted,
     playerName,

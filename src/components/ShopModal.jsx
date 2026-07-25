@@ -182,8 +182,15 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
           <span className="page-title" style={{ margin: 0 }}>
             🛒 {shopName}
           </span>
-          <button className="btn" style={{ padding: '4px 10px' }} onClick={onClose}>
-            Ẩn
+          {/* Đợt 64: ghi rõ hệ quả — người chơi hay nhầm "Ẩn" với "không mua".
+              ẨN = cất bảng đi, truyện KHÔNG chạy tiếp, mở lại bất cứ lúc nào. */}
+          <button
+            className="btn"
+            style={{ padding: '4px 10px' }}
+            onClick={onClose}
+            title="Cất bảng giá đi, chưa quyết định gì — truyện không chạy tiếp, bấm lại nút cửa hàng để mở ra"
+          >
+            ✕ Ẩn (chưa quyết)
           </button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-mid)', marginBottom: 6 }}>
@@ -307,9 +314,17 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
             <button className="btn btn--primary" style={{ flex: 1 }} onClick={buy} disabled={!anyPicked || overBudget}>
               Mua & tiếp tục câu chuyện
             </button>
-            <button className="btn" onClick={() => onFinish([], 0)}>
-              Rời không mua
+            <button
+              className="btn"
+              onClick={() => onFinish([], 0)}
+              title="Xác nhận KHÔNG mua gì — truyện viết tiếp cảnh bạn rời cửa hàng"
+            >
+              Không mua & đi tiếp
             </button>
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.5 }}>
+            "Ẩn" = tạm cất bảng giá, truyện đứng yên, mở lại được. "Không mua & đi tiếp" = chốt là
+            không mua, truyện viết tiếp.
           </div>
         </div>
       </div>

@@ -298,7 +298,7 @@ export default function RoleplayChat() {
     storyDate,
     advanceStoryDate,
     party,
-    setParty, storyTone,
+    setParty, storyTone, storageFull,
     hunger,
     adjustHunger,
     stateApiConfig,
@@ -331,6 +331,7 @@ export default function RoleplayChat() {
   // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
   function wipeAllMemory() {
     resetChat()
+    closeIndexBoundUi()
     try { clearMemory() } catch { /* ignore */ }
     try { clearSummary() } catch { /* ignore */ }
   }
@@ -344,6 +345,22 @@ export default function RoleplayChat() {
     }
     // Kéo coverage tóm tắt về, để lần tóm tắt sau không nhắc nội dung đã xoá.
     trimSummaryCoverage(newCount)
+  }
+
+  // Đóng mọi UI đang trỏ theo INDEX của mảng messages (đợt 64). Sau khi xoá
+  // tin, các index này lệch đi 1 → modal/ô sửa sẽ trỏ NHẦM sang tin khác
+  // (VD đang sửa tin số 5, xoá tin số 2 ở chỗ khác → lưu đè lên tin số 6).
+  function closeIndexBoundUi() {
+    setShopMsgIndex(null)
+    setTurnInfoIndex(null)
+    setEditingIndex(null)
+    setCtxMenu(null)
+    // Trận đang mở cũng trỏ theo index (để ghi snapshot đối thủ khi bấm Ẩn)
+    // → đóng luôn, tránh ghi snapshot nhầm sang tin khác.
+    if (activeBattleMsgIndex !== null) {
+      setActiveBattleMsgIndex(null)
+      setBattleOpen(false)
+    }
   }
 
   function handleDeleteMessage(i) {
@@ -364,7 +381,7 @@ export default function RoleplayChat() {
       cleanupMemoryFor(idxs, next.length)
       return next
     })
-    setEditingIndex(null)
+    closeIndexBoundUi()
   }
 
   function openCtxMenuAt(clientX, clientY, i) {
@@ -788,6 +805,10 @@ export default function RoleplayChat() {
   // handleBattleEnd: khoá shop (shopUsed) + thêm note kết quả trong CÙNG 1
   // mảng messages, rồi gọi AI kể tiếp dựa trên kết quả.
   async function handleShopFinish(bought, total) {
+    // Đợt 64: chặn khi lượt truyện đang chạy — trước đây kết thúc mua sắm
+    // giữa lúc AI đang viết sẽ chạy 2 callAI song song, tranh nhau ghi
+    // messages (lượt sau đè lượt trước).
+    if (loading) return
     const idx = shopMsgIndex
     setShopMsgIndex(null)
     if (idx === null) return
@@ -815,15 +836,25 @@ export default function RoleplayChat() {
       noteContent = `[Hệ thống] Người chơi rời ${shopName} mà không mua gì. Hãy viết tiếp câu chuyện.`
     }
 
-    const withUsed = messages.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm))
     const note = {
       role: 'user',
       hidden: true,
       resultLabel: bought.length > 0 ? `Đã mua sắm tại ${shopName}` : `Rời ${shopName}`,
       content: noteContent,
     }
-    const nextMessages = [...withUsed, note]
-    setMessages(nextMessages)
+    // Functional update (đợt 64): STATE phải dựng từ bản MỚI NHẤT, tránh
+    // closure cũ xoá mất cập nhật chạy nền (meta biến của API phụ...).
+    // LƯU Ý: React chạy hàm cập nhật ở pha render, KHÔNG đồng bộ tại đây —
+    // nên không được lấy kết quả từ trong đó ra để dùng ngay. Payload gửi
+    // AI dựng riêng từ closure là đủ đúng (meta không đi vào prompt).
+    setMessages((cur) => [
+      ...cur.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm)),
+      note,
+    ])
+    const nextMessages = [
+      ...messages.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm)),
+      note,
+    ]
     await callAI(nextMessages)
   }
 
@@ -848,12 +879,6 @@ export default function RoleplayChat() {
     // (chưa có cờ battleUsed) nên ghi đè mất cờ → pokeball vẫn bấm lại được
     // sau khi trận đã kết thúc (kết hợp resetBattle hồi máu = đánh lại vô hạn).
     const idx = activeBattleMsgIndex
-    const withUsed =
-      idx !== null
-        ? messages.map((mm, i) =>
-            i === idx ? { ...mm, battleUsed: true, enemySnapshot: undefined } : mm,
-          )
-        : messages
     if (idx !== null) setActiveBattleMsgIndex(null)
     const note = {
       role: 'user',
@@ -863,8 +888,14 @@ export default function RoleplayChat() {
         OUTCOME_TEXT[outcome] ?? outcome
       }.] Hãy tiếp tục kể câu chuyện dựa trên kết quả này, không nhắc lại diễn biến trận đấu chi tiết.`,
     }
-    const nextMessages = [...withUsed, note]
-    setMessages(nextMessages)
+    // Functional update (đợt 64) — cùng lý do và cùng lưu ý với
+    // handleShopFinish: state dựng từ bản mới nhất, payload AI dựng riêng.
+    const markUsed = (arr) =>
+      idx !== null
+        ? arr.map((mm, i) => (i === idx ? { ...mm, battleUsed: true, enemySnapshot: undefined } : mm))
+        : arr
+    setMessages((cur) => [...markUsed(cur), note])
+    const nextMessages = [...markUsed(messages), note]
     // API phụ 1 (chạy thoát) / API phụ 2 (thua) — nếu đã cấu hình, ưu tiên dùng
     // thay vì API chính, đúng theo kiến trúc nhiều API đã bàn.
     const override = outcome === 'escaped' ? outcomeApiConfig.escaped : outcome === 'lose' ? outcomeApiConfig.lose : null
@@ -1124,6 +1155,7 @@ export default function RoleplayChat() {
                       cleanupMemoryFor(idxs, next.length)
                       return next
                     })
+                    closeIndexBoundUi()
                   },
                 },
                 {
@@ -1227,6 +1259,15 @@ export default function RoleplayChat() {
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Đợt 64: cảnh báo khi bộ nhớ trình duyệt đã đầy — truyện KHÔNG còn
+            được lưu, F5 là mất. Trước đây lỗi bị nuốt im lặng. */}
+        {storageFull && (
+          <div className="status-pill status-pill--error" style={{ marginTop: 12, display: 'block', lineHeight: 1.6 }}>
+            ⚠ Bộ nhớ trình duyệt đã đầy — truyện hiện KHÔNG được lưu nữa (tải lại trang sẽ mất phần mới).
+            Hãy xoá bớt truyện cũ (chuột phải ô nhập → Xoá toàn bộ lịch sử) hoặc bỏ ảnh đại diện để lấy chỗ.
           </div>
         )}
 

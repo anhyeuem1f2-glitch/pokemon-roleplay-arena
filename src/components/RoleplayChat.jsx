@@ -8,13 +8,14 @@ import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { cleanAiOutput, extractThinking } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies , applyEvGain } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies , applyEvGain, buildPartyBehaviorNote } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
 import ShopModal from './ShopModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
 import BattleModal from './BattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
+import { renderInlineFormatting, stripInlineTags } from '../utils/inlineFormat.jsx'
 import SafariModal from './SafariModal.jsx'
 import { isSafariArea } from '../data/regions.js'
 import { musicManager } from '../utils/musicManager.js'
@@ -101,15 +102,17 @@ function PokeballTrigger({ onClick, used }) {
 // Tách nội dung tại vị trí marker [[BATTLE]], chèn quả pokeball xuống dòng riêng.
 // Quả pokeball chỉ dùng được 1 lần (used=true sau khi đã bấm vào trận).
 function StoryParagraph({ content, onOpenBattle, used }) {
+  // Đợt 63: render thẻ inline của preset (<span style="color…">, <i>, <b>…)
+  // thành định dạng thật thay vì hiện nguyên thẻ ra màn hình.
   if (!content.includes(BATTLE_MARKER)) {
-    return <p className="story-text">{content}</p>
+    return <p className="story-text">{renderInlineFormatting(content)}</p>
   }
   const parts = content.split(BATTLE_MARKER)
   return (
     <>
       {parts.map((part, i) => (
         <React.Fragment key={i}>
-          {part.trim() && <p className="story-text">{part}</p>}
+          {part.trim() && <p className="story-text">{renderInlineFormatting(part)}</p>}
           {i < parts.length - 1 && (
             <div>
               <PokeballTrigger onClick={onOpenBattle} used={used} />
@@ -540,6 +543,19 @@ export default function RoleplayChat() {
       // huống làm GỢI Ý một-lần ở cuối history — KHÔNG lưu vào messages nên
       // lượt sau tự biến mất, AI không bị gợi ý cũ ám mãi. Đa số lượt trả
       // null — đó mới là tự nhiên.
+      // ĐỘI HÌNH + HÀNH VI THEO TÍNH CÁCH (đợt 63): Pokémon phải cư xử đúng
+      // cá tính (nature) chứ không con nào cũng ngoan như nhau.
+      const partyNote = buildPartyBehaviorNote(party, playerMon)
+      if (partyNote) history = [...history, { role: 'user', content: partyNote }]
+
+      // QUYỀN TỰ DO SÁNG TẠO (đợt 63): người chơi phản ánh AI bị gò bó bởi
+      // input — chỉ thuật lại đúng câu lệnh, thế giới đứng im. Nhắc mỗi lượt
+      // để AI chủ động dựng cảnh sống động quanh hành động của người chơi.
+      history = [...history, {
+        role: 'user',
+        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng, Pokémon xung quanh làm gì đó theo bản tính, âm thanh/mùi/thời tiết, sự cố nhỏ chen ngang, câu chuyện nghe lỏm. Thế giới TIẾP DIỄN dù người chơi làm gì. Không hỏi lại người chơi, không liệt kê lựa chọn, không nhắc tới ghi chú này.]',
+      }]
+
       const nudge = maybeMakeNudge({
         identityKey: playerIdentity,
         location: playerLocation,
@@ -691,7 +707,7 @@ export default function RoleplayChat() {
       const embCfgAfter = memoryApiConfig?.embedding
       if (embCfgAfter?.baseUrl && embCfgAfter?.model) {
         const lastUser = [...nextMessages].reverse().find((m) => m.role === 'user')
-        rememberExchange(embCfgAfter, lastUser?.content ?? '', stateParsed.cleaned, nextMessages.length).catch(
+        rememberExchange(embCfgAfter, lastUser?.content ?? '', stripInlineTags(stateParsed.cleaned), nextMessages.length).catch(
           (memErr) => console.warn('[memory] ghi ký ức lỗi (bỏ qua):', memErr.message),
         )
       }

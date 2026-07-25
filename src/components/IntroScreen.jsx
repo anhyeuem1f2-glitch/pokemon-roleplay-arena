@@ -270,13 +270,26 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         ? `Xuất thân: ${originArea.name}, vùng ${originRegion?.name}. Mở đầu diễn ra tại/gắn với nơi này (trừ khi tình huống mở đầu nói khác).`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
       `Ngày bắt đầu (lịch trong truyện): ngày ${d}/${m}/năm ${y}, buổi sáng, mùa ${getSeason(m)}.`,
-      `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Việc nhận Pokémon ĐẦU TIÊN phải là một cột mốc có ý nghĩa của chương đầu${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận, tuỳ hoàn cảnh)' : ' (hoặc muộn hơn nếu hoàn cảnh hợp lý hơn như vậy)'}, đến từ diễn biến tự nhiên; khi đó dùng tag [[POKEMON Tên | Lv..]]. TUYỆT ĐỐI không phát Pokémon ngay trong đoạn mở đầu.`,
+      // Đợt 63: nới luật — trước đây CẤM TUYỆT ĐỐI phát Pokémon ở mở đầu,
+      // nên khi cảnh mở màn CHÍNH LÀ đi nhận Pokémon khởi đầu thì AI bị kẹt:
+      // đuổi người chơi lên đường mà chưa giới thiệu/trao Pokémon nào (người
+      // chơi beta phản ánh). Giờ: mặc định vẫn để dành làm cột mốc, NHƯNG
+      // nếu cảnh mở màn xoay quanh việc nhận Pokémon thì phải diễn TRỌN VẸN.
+      `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật thì dùng tag [[POKEMON Tên | Lv..]].`,
       opening
         ? `TÌNH HUỐNG MỞ ĐẦU BẮT BUỘC BÁM THEO (đây là mong muốn của người chơi, phải là hạt nhân của đoạn mở đầu): ${opening.seed}`
         : openingKey === 'custom' && desiredOpening.trim()
           ? `TÌNH HUỐNG MỞ ĐẦU BẮT BUỘC BÁM THEO — người chơi tự viết, phải dựng đúng cảnh này làm mở màn (không thay bằng cảnh khác): "${desiredOpening.trim()}"`
           : `Người chơi không chọn tình huống cụ thể — TỰ SÁNG TẠO một khởi đầu hợp thân phận + xuất thân, đời thường và có sức sống.`,
-      `Viết đoạn mở đầu CÓ CHIỀU SÂU, khoảng 400-700 từ (nhiều đoạn văn), giàu chi tiết giác quan và không khí — KHÔNG viết ngắn cụt lủn.`,
+      // Đợt 63: KHÔNG ép số chữ khi người chơi đang dùng preset — preset có
+      // luật độ dài riêng, ép thêm ở đây làm chính văn sai yêu cầu preset
+      // (người chơi beta báo "số chữ không đúng với preset").
+      mainPreset
+        ? `Độ dài đoạn mở đầu: TUÂN THEO đúng yêu cầu của preset đang dùng.`
+        : `Viết đoạn mở đầu CÓ CHIỀU SÂU, khoảng 400-700 từ (nhiều đoạn văn), giàu chi tiết giác quan và không khí — KHÔNG viết ngắn cụt lủn.`,
+      // Đợt 63: trả lại quyền TỰ DO SÁNG TẠO — người chơi phản ánh AI bị gò
+      // bó bởi input, chỉ thuật đúng câu lệnh chứ không dựng cảnh sống động.
+      `QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động dựng thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng của họ, Pokémon quanh cảnh đang làm gì đó theo bản tính, âm thanh/mùi/thời tiết, một sự cố nhỏ chen ngang, một câu chuyện phiếm nghe lỏm... Thế giới phải TIẾP DIỄN dù người chơi có làm gì hay không.`,
       `Bắt đầu thẳng vào câu chuyện, không hỏi lại người chơi, không liệt kê lựa chọn.`,
     ].filter(Boolean).join('\n')
 

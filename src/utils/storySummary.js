@@ -8,6 +8,7 @@
 
 import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from './outputCleanup.js'
+import { stripInlineTags } from './inlineFormat.jsx'
 
 const STORAGE_KEY = 'trainer-arena:story-summary-v1'
 /** Cập nhật tóm tắt mỗi khi có thêm ngần này tin kể từ lần tóm tắt trước.
@@ -116,7 +117,7 @@ export async function maybeUpdateSummary(apiCfg, messages, { force = false } = {
     const transcript = slice
       // Tin hidden là chỉ dẫn hệ thống (kết quả trận/mua sắm/directive) —
       // gắn nhãn riêng để model tóm tắt không tưởng nhầm là lời người chơi.
-      .map((m) => `${m.role === 'assistant' ? 'DIỄN BIẾN' : m.hidden ? 'HỆ THỐNG' : 'NGƯỜI CHƠI'}: ${clip(m.content)}`)
+      .map((m) => `${m.role === 'assistant' ? 'DIỄN BIẾN' : m.hidden ? 'HỆ THỐNG' : 'NGƯỜI CHƠI'}: ${clip(stripInlineTags(m.content))}`)
       .join('\n')
     const prompt = [
       'Bạn là thư ký cốt truyện của một game nhập vai Pokémon. Nhiệm vụ: cập nhật bản TÓM TẮT CỐT TRUYỆN.',

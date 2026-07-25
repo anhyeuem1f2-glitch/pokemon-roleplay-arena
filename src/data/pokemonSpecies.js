@@ -514,3 +514,62 @@ export function randomWildMon(list = POKEMON_SPECIES, movesDb = null) {
   const level = 8 + Math.floor(Math.random() * 8)
   return buildWildMon(speciesEntry, level, movesDb)
 }
+
+// ============ TÍNH CÁCH → HÀNH VI (đợt 63) ============
+// Yêu cầu beta: "tính cách giờ không chỉ tăng giảm chỉ số mà còn là cách mà
+// Pokémon hành động". Bảng dưới mô tả NÉT HÀNH VI của từng nature để bơm
+// vào prompt — AI phải cho Pokémon cư xử đúng cá tính, không phải con nào
+// cũng ngoan ngoãn như nhau.
+export const NATURE_BEHAVIOR = {
+  Hardy: 'lì lợm, không dễ nao núng, ít bộc lộ cảm xúc',
+  Docile: 'ngoan ngoãn, dễ bảo, hiếm khi cãi lệnh',
+  Serious: 'nghiêm túc, tập trung, không thích đùa giỡn giữa trận',
+  Bashful: 'bẽn lẽn, hay nấp sau chân huấn luyện viên khi gặp người lạ',
+  Quirky: 'kỳ quặc, hành động khó đoán, thỉnh thoảng làm trò lạ đời',
+  Lonely: 'sợ bị bỏ rơi, bám huấn luyện viên, khó chịu khi bị cho ra rìa',
+  Brave: 'gan dạ, xông lên trước, không lùi kể cả trước đối thủ mạnh hơn',
+  Adamant: 'bướng bỉnh, quyết làm theo ý mình, ghét bị ngăn cản',
+  Naughty: 'nghịch ngợm, hay chọc phá, thích trêu đồng đội và đồ đạc',
+  Bold: 'dạn dĩ, chắn trước bảo vệ đồng đội, không sợ va chạm',
+  Relaxed: 'thong thả, chậm rãi, hay lười biếng nằm dài',
+  Impish: 'tinh quái, bày trò nghịch ngầm rồi giả vờ vô can',
+  Lax: 'lơ đễnh, dễ mất tập trung, hay ngáp giữa lúc quan trọng',
+  Timid: 'nhút nhát, giật mình vì tiếng động, tránh đối đầu trực diện',
+  Hasty: 'nóng vội, làm trước nghĩ sau, hay chạy vọt lên trước',
+  Jolly: 'vui vẻ, hiếu động, nhảy nhót và kêu vui suốt ngày',
+  Naive: 'ngây thơ, cả tin, dễ bị dụ bằng đồ ăn hoặc trò chơi',
+  Modest: 'khiêm tốn, kín đáo, không phô trương sức mạnh',
+  Mild: 'ôn hoà, dịu dàng, ít khi tỏ ra hung hăng',
+  Quiet: 'trầm lặng, ít kêu, quan sát nhiều hơn hành động',
+  Rash: 'bốc đồng, ra đòn thiếu tính toán khi bị khiêu khích',
+  Calm: 'điềm tĩnh, giữ bình tĩnh cả khi bất lợi',
+  Gentle: 'hiền lành, nhẹ nhàng với trẻ nhỏ và Pokémon yếu hơn',
+  Sassy: 'đanh đá, hay "cãi" lại bằng tiếng kêu, thái độ khó chiều',
+  Careful: 'cẩn trọng, dè chừng người lạ, kiểm tra kỹ trước khi tin',
+}
+
+/** Mô tả 1 Pokémon cho prompt: tên, level, tính cách + nét hành vi. */
+export function describeMonForPrompt(mon) {
+  if (!mon?.name) return null
+  const beh = mon.nature ? NATURE_BEHAVIOR[mon.nature] : null
+  const parts = [`${mon.name} (Lv.${mon.level ?? '?'}`]
+  if (mon.types?.length) parts.push(`, hệ ${mon.types.join('/')}`)
+  parts.push(')')
+  let line = parts.join('')
+  if (mon.nature) line += ` — tính cách ${mon.nature}${beh ? `: ${beh}` : ''}`
+  return line
+}
+
+/** Note bơm vào prompt để AI cho Pokémon hành xử ĐÚNG cá tính (đợt 63). */
+export function buildPartyBehaviorNote(party, activeMon) {
+  const list = (party ?? []).filter((m) => m?.name)
+  if (!list.length) return null
+  const lines = list.map((m) => {
+    const tag = activeMon && m.name === activeMon.name ? ' [đang ra trận]' : ''
+    return `- ${describeMonForPrompt(m)}${tag}`
+  })
+  return [
+    '[Hệ thống — ĐỘI HÌNH POKÉMON CỦA NGƯỜI CHƠI. Mỗi con có TÍNH CÁCH riêng: hãy cho chúng HÀNH ĐỘNG đúng cá tính đó (phản ứng, tiếng kêu, thói quen, cách nghe lời hay bướng bỉnh) chứ không phải con nào cũng ngoan như nhau. Tính cách ảnh hưởng cả hành vi ngoài trận lẫn cách chiến đấu. Không nhắc tới ghi chú này:]',
+    ...lines,
+  ].join('\n')
+}

@@ -442,6 +442,9 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     stats, // {hp,atk,def,spa,spd,spe} thật hoặc null — BattleModal dùng để tính sát thương đúng
     // Build cá thể (đợt 48) — baseStats lưu kèm để tính lại khi nhận EV.
     ivs, evs, nature,
+    // EXP khởi điểm đúng mốc đầu cấp (đợt 65) — không có trường này thì
+    // Pokémon mới bắt/nhận sẽ bị coi như 0 EXP và tụt cấp khi cộng EXP.
+    exp: level * level * level,
     baseStats: speciesEntry.baseStats ?? null,
     maxHp,
     hp: maxHp,
@@ -492,14 +495,35 @@ export function buildMonSmart(speciesEntry, level, movesDb = null, opponentTypes
  * phải random). Ưu tiên tên dài hơn trước để tránh khớp nhầm (VD tên ngắn là
  * 1 phần của tên dài hơn).
  */
-export function detectMentionedSpecies(text, speciesList) {
+export function detectMentionedSpecies(text, speciesList, options = {}) {
   if (!text || !speciesList?.length) return null
   const lower = text.toLowerCase()
-  const sorted = [...speciesList].sort((a, b) => b.name.length - a.name.length)
-  for (const entry of sorted) {
-    if (lower.includes(entry.name.toLowerCase())) return entry
+  // Đợt 65 — BUG người chơi báo: "đánh con nào cũng ra Charmander".
+  // Nguyên nhân: hàm này quét cả tên Pokémon CỦA NGƯỜI CHƠI trong chính văn
+  // ("Charmander của tôi lao vào cắn Rattata hoang") rồi sắp xếp theo ĐỘ DÀI
+  // TÊN — "Charmander" (10 ký tự) luôn thắng "Rattata" (7) → đối thủ hoang
+  // dã biến thành bản sao Pokémon của chính người chơi, lượt nào cũng vậy.
+  // Sửa: (1) loại trừ tên trong đội hình người chơi; (2) chọn theo VỊ TRÍ
+  // XUẤT HIỆN CUỐI (tên nhắc sau thường là đối thủ vừa xuất hiện) thay vì
+  // theo độ dài tên.
+  const exclude = new Set(
+    (options.excludeNames ?? [])
+      .filter(Boolean)
+      .map((n) => String(n).toLowerCase()),
+  )
+  let best = null
+  for (const entry of speciesList) {
+    const name = entry.name.toLowerCase()
+    if (exclude.has(name)) continue
+    const at = lower.lastIndexOf(name)
+    if (at === -1) continue
+    // Ưu tiên tên xuất hiện MUỘN NHẤT; nếu cùng vị trí thì tên dài hơn
+    // (tránh "Rat" ăn trước "Raticate").
+    if (!best || at > best.at || (at === best.at && name.length > best.name.length)) {
+      best = { entry, at, name }
+    }
   }
-  return null
+  return best?.entry ?? null
 }
 
 /**
@@ -572,4 +596,78 @@ export function buildPartyBehaviorNote(party, activeMon) {
     '[Hệ thống — ĐỘI HÌNH POKÉMON CỦA NGƯỜI CHƠI. Mỗi con có TÍNH CÁCH riêng: hãy cho chúng HÀNH ĐỘNG đúng cá tính đó (phản ứng, tiếng kêu, thói quen, cách nghe lời hay bướng bỉnh) chứ không phải con nào cũng ngoan như nhau. Tính cách ảnh hưởng cả hành vi ngoài trận lẫn cách chiến đấu. Không nhắc tới ghi chú này:]',
     ...lines,
   ].join('\n')
+}
+
+
+// ============ HỆ KINH NGHIỆM / LÊN CẤP (đợt 65) ============
+// Người chơi beta báo: "làm game quên mất exp, Pokémon không lên cấp được".
+// Đúng — trước đây thắng trận chỉ cộng EV chứ KHÔNG có EXP, nên level đứng
+// yên vĩnh viễn. Dưới đây là hệ EXP theo công thức game gốc.
+//
+// Nhóm tăng trưởng: dùng MEDIUM FAST (n^3) — nhóm phổ biến nhất trong game
+// gốc, công thức gọn và dễ kiểm chứng: tổng EXP để đạt cấp n là n³.
+export const MAX_LEVEL = 100
+
+/** Tổng EXP cần để ĐẠT cấp `level` (medium fast: n³). */
+export function expForLevel(level) {
+  const n = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)))
+  return n * n * n
+}
+
+/** Cấp tương ứng với tổng EXP đang có. */
+export function levelFromExp(exp) {
+  const e = Math.max(0, Number(exp) || 0)
+  let lv = Math.floor(Math.cbrt(e))
+  if (lv < 1) lv = 1
+  if (lv > MAX_LEVEL) lv = MAX_LEVEL
+  return lv
+}
+
+/** Tiến độ tới cấp kế tiếp: {current, need, ratio} — dùng cho thanh EXP. */
+export function expProgress(mon) {
+  const lv = mon?.level ?? 1
+  if (lv >= MAX_LEVEL) return { current: 0, need: 0, ratio: 1 }
+  const base = expForLevel(lv)
+  const next = expForLevel(lv + 1)
+  const total = Math.max(base, Number(mon?.exp) || base)
+  return {
+    current: total - base,
+    need: next - base,
+    ratio: Math.max(0, Math.min(1, (total - base) / (next - base))),
+  }
+}
+
+/** EXP nhận được khi HẠ một Pokémon (mô phỏng công thức gốc b×L/7).
+ * Không có bảng base-exp-yield riêng nên suy ra từ BST (đủ sát: loài mạnh
+ * cho nhiều EXP hơn). Trainer thưởng gấp 1.5 như game gốc. */
+export function expGainFrom(defeated, { isTrainerMon = false } = {}) {
+  if (!defeated) return 0
+  const bst = defeated.baseStats
+    ? Object.values(defeated.baseStats).reduce((a, b) => a + b, 0)
+    : 300
+  const baseYield = Math.max(20, Math.round(bst / 3))
+  const lv = Math.max(1, defeated.level ?? 1)
+  const raw = Math.floor((baseYield * lv) / 7)
+  return Math.max(1, Math.round(raw * (isTrainerMon ? 1.5 : 1)))
+}
+
+/**
+ * Cộng EXP cho 1 Pokémon, tự lên cấp và tính lại chỉ số.
+ * Trả về { mon, gained, levelsGained, newLevel } — KHÔNG sửa mon gốc.
+ */
+export function applyExpGain(mon, amount) {
+  if (!mon || !amount || amount <= 0) return { mon, gained: 0, levelsGained: 0, newLevel: mon?.level ?? 1 }
+  const oldLevel = mon.level ?? 1
+  if (oldLevel >= MAX_LEVEL) return { mon, gained: 0, levelsGained: 0, newLevel: MAX_LEVEL }
+  // Mon cũ (trước đợt 65) chưa có trường exp → coi như đang ở mốc đầu cấp.
+  const curExp = Number.isFinite(mon.exp) ? mon.exp : expForLevel(oldLevel)
+  const newExp = curExp + amount
+  const newLevel = Math.min(MAX_LEVEL, levelFromExp(newExp))
+  let next = { ...mon, exp: newExp, level: newLevel }
+  if (newLevel > oldLevel) {
+    // Lên cấp: tính lại chỉ số theo IV/EV/nature; recomputeMonStats giữ
+    // nguyên lượng máu đã mất và cộng thêm phần maxHp tăng lên.
+    next = recomputeMonStats(next)
+  }
+  return { mon: next, gained: amount, levelsGained: Math.max(0, newLevel - oldLevel), newLevel }
 }

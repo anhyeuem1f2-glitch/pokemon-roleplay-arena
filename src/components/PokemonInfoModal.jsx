@@ -2,7 +2,7 @@ import React from 'react'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import HealthBar from './HealthBar.jsx'
-import { describeNature } from '../data/pokemonSpecies.js'
+import { describeNature, expProgress, MAX_LEVEL } from '../data/pokemonSpecies.js'
 
 const STAT_LABELS = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ' }
 
@@ -56,6 +56,26 @@ export default function PokemonInfoModal({ mon, onClose, hungerMon = null }) {
           {mon.status ? ` · trạng thái: ${mon.status}` : ''}
           {mon.nature ? ` · ${describeNature(mon.nature)}` : ''}
         </div>
+
+        {/* Thanh KINH NGHIỆM (đợt 65) — người chơi phải thấy được tiến độ
+            lên cấp, trước đây không có hệ EXP nào cả. */}
+        {(() => {
+          const p = expProgress(mon)
+          const maxed = (mon.level ?? 1) >= MAX_LEVEL
+          return (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: 'var(--text-mid)' }}>
+                <span>Kinh nghiệm</span>
+                <span style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+                  {maxed ? 'Đạt cấp tối đa' : `${p.current}/${p.need} → Lv.${(mon.level ?? 1) + 1}`}
+                </span>
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: 'var(--bg-deep)', border: '1px solid var(--line)', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.round(p.ratio * 100)}%`, height: '100%', background: 'var(--amber)' }} />
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Độ no (đợt 48): chuyển từ HUD chính vào đây — chỉ hiện với con
             ĐANG RA TRẬN (độ no theo dõi theo con active). */}

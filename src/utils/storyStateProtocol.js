@@ -25,6 +25,7 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Nhân vật hoặc Pokémon ĂN UỐNG / bỏ bữa / lao lực rõ rệt trong diễn biến: [[HUNGER người+25]] hoặc [[HUNGER pokemon+30]] (độ NO 0-100; ăn = cộng, đói lả/vận động nặng = trừ; app tự trừ dần theo ngày nên chỉ tag khi có sự kiện rõ ràng).
 - Thời gian trong truyện trôi qua (ngủ một đêm, đi đường nhiều ngày, chờ đợi...): [[DATE +1]] (số ngày trôi); chuyển buổi trong cùng ngày: [[DATE buổi=sáng|trưa|chiều|tối|đêm]]. Ngày giờ hiện tại luôn được cung cấp trong ngữ cảnh — lời kể về thời gian phải khớp với nó.
 - NPC CÓ TÊN xuất hiện lần đầu, hoặc lộ thông tin quan trọng mới: khai báo hồ sơ bằng [[NPC Tên | tuổi=24 | nghề=Kiểm lâm | đội=Pikachu Lv25, Luxray Lv30 | ghi chú=em gái của trưởng gym]] — các trường tuổi/nghề/đội/ghi chú đều tuỳ chọn, cập nhật NPC cũ thì chỉ cần ghi trường thay đổi. QUY TẮC TẠO NPC: tên phải ĐA DẠNG đúng chất thế giới Pokémon (đừng lặp lại mãi vài cái tên quen tay như "Elara"); tuổi + nghề nghiệp hợp bối cảnh (dân thường đa số KHÔNG phải trainer); nếu là trainer thì đội hình 1-4 Pokémon hợp nghề/vùng, LEVEL PHẢI HỢP LÝ với khu vực hiện tại và trình độ người chơi (dân thường/tân binh thấp, kiểm lâm/cảnh sát trung bình, gym leader cao) — không lạm phát level.
+- Pokémon được LUYỆN TẬP có chủ đích trong lượt này (tập chiêu, chạy bền, đối luyện, huấn luyện cùng NPC...): [[TRAIN cường độ]] với cường độ 1-3 (1 = tập nhẹ/ngắn, 2 = tập nghiêm túc cả buổi, 3 = tập khổ luyện cật lực). VD: [[TRAIN 2]]. Chỉ khai khi thực sự có cảnh luyện tập, KHÔNG khai cho việc đi đường hay đánh trận thường.
 - Sự kiện/thoả thuận/mốc thời gian/địa danh QUAN TRỌNG cần nhớ lâu dài: [[FACT từ khoá 1, từ khoá 2 | nội dung CHI TIẾT]] — hoạt động như một entry World Info: phần trước dấu | là 1-3 TỪ KHOÁ KÍCH HOẠT (cách nhau bằng dấu phẩy: tên người, tên Pokémon, địa danh, tên vật phẩm...), phần sau là NỘI DUNG ĐẦY ĐỦ của sự kiện (ai, cái gì, ở đâu, điều kiện/hệ quả) để lần sau đọc lại là hiểu ngay ngữ cảnh — KHÔNG viết cụt kiểu vài chữ. VD: [[FACT Cubone, bà lão Lavender | Ngày 12/4 tại Lavender, người chơi hứa với bà lão Yui sẽ quay lại giúp tìm con Cubone bị mất trước mùa đông; bà hứa trả công bằng chiếc Moon Stone gia truyền]]. Chỉ ghi thông tin THẬT đã xảy ra, mỗi fact 1 dòng riêng.
 Không bịa thay đổi không có trong diễn biến. Không dùng tag nào khác ngoài danh sách trên (và [[BATTLE]]). Mọi tag ĐẶT Ở CUỐI TIN, mỗi tag 1 dòng riêng — KHÔNG nhét tag vào giữa câu văn hay vào phần suy nghĩ. QUY TẮC CHĂM GHI SỔ (quan trọng): lượt nào xuất hiện NHÂN VẬT CÓ TÊN mới → PHẢI có [[NPC]]; lượt nào có sự kiện/thoả thuận/lời hứa/vật phẩm/địa điểm đáng nhớ lại về sau → PHẢI có [[FACT]] với nội dung chi tiết. Thà ghi hơi nhiều còn hơn bỏ sót — sổ tay này là trí nhớ dài hạn duy nhất của truyện.`
 
@@ -36,6 +37,8 @@ Không bịa thay đổi không có trong diễn biến. Không dùng tag nào k
 const MONEY_RE = /\[\[\s*MONEY\s*([+-]?\d+)\s*\]\]/gi
 const POKEMON_RE = /\[\[\s*POKEMON\s+([^\]|]+?)\s*\|\s*Lv\.?\s*(\d+)\s*\]\]/gi
 const DATE_ADV_RE = /\[\[\s*DATE\s*\+\s*(\d+)\s*\]\]/gi
+// Đợt 67: buổi luyện tập có chủ đích → EXP cho Pokémon. cường độ 1-3.
+const TRAIN_RE = /\[\[\s*TRAIN(?:\s+([^\]]*))?\s*\]\]/gi
 const DATE_PART_RE = /\[\[\s*DATE\s+buổi\s*=\s*(sáng|trưa|chiều|tối|đêm)\s*\]\]/gi
 const MOVE_RE = /\[\[\s*MOVE\s+([^\]]+?)\s*\]\]/gi
 const HUNGER_RE = /\[\[\s*HUNGER\s+(người|nguoi|player|pokemon|pokémon)\s*([+-]\d+)\s*\]\]/gi
@@ -52,7 +55,7 @@ const SHOP_RE = /\[\[\s*SHOP\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
  * Regex neo theo DÒNG nên [[BATTLE]] và [[DMG]] không bị đụng tới.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], hunger: [], moves: [], dateAdvance: 0, datePart: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], hunger: [], moves: [], dateAdvance: 0, training: 0, datePart: null, cleaned: text ?? '' }
   let money = 0
   const rel = []
   const body = []
@@ -63,6 +66,7 @@ export function parseStoryStateTags(text) {
   const hunger = []
   const moves = []
   let dateAdvance = 0
+  let training = 0
   let datePart = null
 
   for (const m of text.matchAll(MONEY_RE)) money += parseInt(m[1], 10)
@@ -117,6 +121,10 @@ export function parseStoryStateTags(text) {
     pokemons.push({ species: m[1].trim(), level: Math.max(1, Math.min(100, parseInt(m[2], 10))) })
   }
   for (const m of text.matchAll(DATE_ADV_RE)) dateAdvance += parseInt(m[1], 10)
+  for (const m of text.matchAll(TRAIN_RE)) {
+    const n = parseInt((m[1] ?? '').trim(), 10)
+    training += Number.isFinite(n) ? Math.max(1, Math.min(3, n)) : 1
+  }
   for (const m of text.matchAll(DATE_PART_RE)) datePart = m[1]
   // [[HUNGER người+25]] — độ no của người / Pokémon (đợt 36).
   for (const m of text.matchAll(MOVE_RE)) moves.push(m[1].trim())
@@ -134,6 +142,7 @@ export function parseStoryStateTags(text) {
     .replace(FACT_RE, '')
     .replace(POKEMON_RE, '')
     .replace(DATE_ADV_RE, '')
+    .replace(TRAIN_RE, '')
     .replace(DATE_PART_RE, '')
     .replace(MOVE_RE, '')
     .replace(HUNGER_RE, '')
@@ -146,7 +155,8 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, rel, body, shops, npcs, facts, pokemons, hunger, moves, dateAdvance, datePart, cleaned }
+  return { money, rel, body, shops, npcs, facts, pokemons, hunger, moves, dateAdvance,
+    training, datePart, cleaned }
 }
 
 /**

@@ -671,3 +671,36 @@ export function applyExpGain(mon, amount) {
   }
   return { mon: next, gained: amount, levelsGained: Math.max(0, newLevel - oldLevel), newLevel }
 }
+
+
+// ============ EXP TỪ LUYỆN TẬP / THỜI GIAN TRÔI (đợt 67) ============
+// Người chơi báo: "phải thiết lập việc huấn luyện cũng tăng EXP chứ",
+// "thử time skip xem có tăng lv không — không được". Đúng: trước đây EXP
+// chỉ đến từ trận đấu qua BattleModal, nên roleplay thuần (đi đường, tập
+// luyện, nghỉ dưỡng vài ngày) không làm Pokémon lớn lên chút nào.
+//
+// Nguyên tắc cân bằng: EXP từ thời gian phải THẤP HƠN NHIỀU so với đánh
+// trận (không thì người chơi chỉ cần bấm "ngủ 30 ngày" là max cấp). Dùng
+// mốc theo cấp hiện tại để cấp thấp lớn nhanh, cấp cao chậm dần — giống
+// cảm giác game gốc.
+
+/** EXP cho MỘT ngày trôi qua (nghỉ ngơi/di chuyển bình thường). */
+export function expFromDays(mon, days) {
+  if (!mon || !days || days <= 0) return 0
+  const lv = Math.max(1, mon.level ?? 1)
+  if (lv >= MAX_LEVEL) return 0
+  // ~2% quãng đường lên cấp kế tiếp cho mỗi ngày.
+  const span = expForLevel(lv + 1) - expForLevel(lv)
+  return Math.max(1, Math.round(span * 0.02 * Math.min(days, 30)))
+}
+
+/** EXP cho một buổi LUYỆN TẬP có chủ đích (mạnh hơn ngày trôi thường). */
+export function expFromTraining(mon, intensity = 1) {
+  if (!mon) return 0
+  const lv = Math.max(1, mon.level ?? 1)
+  if (lv >= MAX_LEVEL) return 0
+  const span = expForLevel(lv + 1) - expForLevel(lv)
+  // ~8% quãng đường/buổi ở cường độ 1; cường độ do AI khai (1-3).
+  const k = Math.max(1, Math.min(3, Number(intensity) || 1))
+  return Math.max(1, Math.round(span * 0.08 * k))
+}

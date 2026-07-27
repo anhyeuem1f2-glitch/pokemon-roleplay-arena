@@ -8,7 +8,7 @@ import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, buildPartyBehaviorNote } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
 import ShopModal from './ShopModal.jsx'
@@ -259,6 +259,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
+  if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
   if (parsed.datePart) out.push(`🕐 Chuyển buổi: ${parsed.datePart}${tag}`)
   if (movedTo) out.push(`🗺 Di chuyển tới: ${movedTo.areaKey} (${movedTo.regionKey})${tag}`)
   return out
@@ -482,6 +483,23 @@ export default function RoleplayChat() {
       }
     } catch (e2) { console.warn('[state] POKEMON lỗi:', e2.message) }
     try {
+      // EXP TỪ LUYỆN TẬP / THỜI GIAN (đợt 67) — người chơi báo "huấn luyện
+      // và time skip không tăng cấp". Áp cho TOÀN ĐỘI (cả đội cùng tập/cùng
+      // đi đường), mức thấp hơn nhiều so với đánh trận để không phá cân bằng.
+      const trainLv = parsed.training ?? 0
+      const daysPassed = parsed.dateAdvance ?? 0
+      if (trainLv > 0 || daysPassed > 0) {
+        const grow = (mon) => {
+          if (!mon) return mon
+          const amount =
+            (trainLv > 0 ? expFromTraining(mon, trainLv) : 0) +
+            (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)
+          return amount > 0 ? applyExpGain(mon, amount).mon : mon
+        }
+        setPlayerMon((cur) => grow(cur))
+        setParty((cur) => cur.map(grow))
+      }
+
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {
         advanceStoryDate(parsed.dateAdvance ?? 0, parsed.datePart)
       }

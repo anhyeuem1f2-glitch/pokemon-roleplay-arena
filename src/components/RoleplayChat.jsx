@@ -7,7 +7,7 @@ import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
-import { cleanAiOutput, extractThinking } from '../utils/outputCleanup.js'
+import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, buildPartyBehaviorNote } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
@@ -627,10 +627,15 @@ export default function RoleplayChat() {
       // CHAU CHUỐT VĂN PHONG (đợt 50): nếu cấu hình API phụ (slot Combat
       // Anime cũ), model phụ đánh bóng câu chữ theo tông truyện — chạy SAU
       // khi đã bóc tag (tag không bị model phụ nuốt), lỗi thì giữ nguyên văn.
-      let displayText = stateParsed.cleaned
+      // Đợt 66: CẮT phần model tự kể sau [[BATTLE]] — người chơi chưa đánh
+      // thì truyện không được phép có kết quả trận. Cắt SAU khi đã bóc tag
+      // trạng thái để các tag cuối tin ([[MONEY]], [[FACT]]...) vẫn áp đủ.
+      let displayText = truncateAfterInteractiveMarker(stateParsed.cleaned)
       if (animeApiConfig?.baseUrl && animeApiConfig?.model) {
         try {
-          displayText = await polishProse({ ...apiConfig, ...animeApiConfig }, stateParsed.cleaned, buildToneNote(storyTone))
+          displayText = truncateAfterInteractiveMarker(
+            await polishProse({ ...apiConfig, ...animeApiConfig }, displayText, buildToneNote(storyTone)),
+          )
         } catch (polErr) {
           console.warn('[polish] bỏ qua chau chuốt:', polErr.message)
         }
@@ -869,25 +874,27 @@ export default function RoleplayChat() {
       musicManager.playJingle(VICTORY_TRACK_KEYS)
       // EV thật khi HẠ đối thủ (đợt 48): cộng vào chỉ số base cao nhất của
       // loài bị hạ, cap 252/chỉ số & 510 tổng, tính lại stats ngay.
-      if (outcome === 'win' && enemyMon) {
-        // EXP + LÊN CẤP (đợt 65) — trước đây chỉ có EV nên Pokémon không bao
-        // giờ lên cấp (bug người chơi báo). Áp cho con ĐANG RA TRẬN.
-        const gain = expGainFrom(enemyMon)
-        let levelUpInfo = null
-        setPlayerMon((cur) => {
-          if (!cur) return cur
-          const withEv = applyEvGain(cur, enemyMon)
-          const res = applyExpGain(withEv, gain)
-          if (res.levelsGained > 0) {
-            levelUpInfo = { name: res.mon.name, newLevel: res.newLevel, levels: res.levelsGained }
-          }
-          return res.mon
-        })
-        setParty((cur) => cur.map((pm) => {
-          if (!playerMon || pm.name !== playerMon.name || pm.level !== playerMon.level) return pm
-          return applyExpGain(applyEvGain(pm, enemyMon), gain).mon
-        }))
-        expNoteRef.current = { gain, enemyName: enemyMon.name, getLevelUp: () => levelUpInfo }
+      // EXP + LÊN CẤP (đợt 65, sửa lại ở đợt 66). Cho cả 'win' lẫn 'caught'
+      // — trong game gốc bắt được Pokémon cũng nhận kinh nghiệm.
+      if (['win', 'caught'].includes(outcome) && enemyMon && playerMon) {
+        // LỖI ĐỢT 65 (người chơi báo "có ống EXP nhưng EXP không chạy"):
+        // thông tin lên cấp được gán BÊN TRONG hàm cập nhật state, mà React
+        // chạy hàm đó ở pha render — đọc ra ngay sau đó luôn rỗng, nên phần
+        // báo lên cấp không bao giờ tới AI. Nay TÍNH TRƯỚC, rồi mới áp.
+        const gain = expGainFrom(enemyMon, { isTrainerMon: Boolean(enemyMon.isTrainerMon) })
+        const evApplied = applyEvGain(playerMon, enemyMon)
+        const res = applyExpGain(evApplied, gain)
+        setPlayerMon(res.mon)
+        // Đồng bộ về đội hình: khớp theo TÊN (bỏ điều kiện trùng level —
+        // sau khi lên cấp thì level đã khác, khớp cả level sẽ trượt).
+        setParty((cur) => cur.map((pm) => (pm?.name === playerMon.name ? res.mon : pm)))
+        expNoteRef.current = {
+          gain,
+          enemyName: enemyMon.name,
+          levelUp: res.levelsGained > 0
+            ? { name: res.mon.name, newLevel: res.newLevel, levels: res.levelsGained }
+            : null,
+        }
       }
     } else if (outcome === 'lose') {
       musicManager.playJingle(DEFEAT_TRACK_KEYS)
@@ -901,7 +908,16 @@ export default function RoleplayChat() {
     const note = {
       role: 'user',
       hidden: true,
-      resultLabel: OUTCOME_LABEL[outcome] ?? outcome,
+      // Đợt 66: ghi EXP/lên cấp thẳng lên nhãn kết quả — người chơi nhìn
+      // thấy ngay "Thắng · +120 EXP · Lv.7!" thay vì phải đoán xem hệ EXP
+      // có chạy hay không.
+      resultLabel: (() => {
+        const base = OUTCOME_LABEL[outcome] ?? outcome
+        const info = expNoteRef.current
+        if (!info) return base
+        const lv = info.levelUp ? ` · Lv.${info.levelUp.newLevel}!` : ''
+        return `${base} · +${info.gain} EXP${lv}`
+      })(),
       content: `[Hệ thống: trận đấu Pokémon vừa kết thúc, kết quả là ${
         OUTCOME_TEXT[outcome] ?? outcome
       }.]${(() => {
@@ -909,7 +925,7 @@ export default function RoleplayChat() {
         const info = expNoteRef.current
         expNoteRef.current = null
         if (!info) return ''
-        const lv = info.getLevelUp?.()
+        const lv = info.levelUp
         const base = ` Pokémon của người chơi nhận được ${info.gain} điểm kinh nghiệm sau khi hạ ${info.enemyName}.`
         return lv
           ? `${base} ĐẶC BIỆT: ${lv.name} đã LÊN CẤP ${lv.levels > 1 ? `${lv.levels} bậc, ` : ''}đạt Lv.${lv.newLevel} — hãy kể khoảnh khắc trưởng thành này một cách đáng nhớ (ánh sáng, dáng vẻ tự tin hơn, phản ứng của người chơi).`

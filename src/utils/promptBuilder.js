@@ -13,7 +13,10 @@ export function applyPlaceholders(text, charName, userName) {
     .replace(/\{\{user\}\}|<user>/gi, userName || 'người chơi')
 }
 
-export const BATTLE_INSTRUCTION = `QUAN TRỌNG: Nếu trong đoạn bạn viết, nhân vật chính bị thách đấu hoặc chuẩn bị bước vào một trận chiến Pokémon, hãy DỪNG LẠI ngay trước khi trận đấu diễn ra và chèn chính xác dòng ${BATTLE_MARKER} ở cuối tin nhắn (không viết diễn biến trận đấu bằng lời, hệ thống sẽ tự xử lý phần chiến đấu). Sau đó chờ hệ thống báo lại kết quả trận đấu (thắng/thua/chạy thoát) rồi mới viết tiếp diễn biến câu chuyện dựa theo kết quả đó.`
+export const BATTLE_INSTRUCTION = `QUAN TRỌNG — ĐIỂM DỪNG CHỜ NGƯỜI CHƠI:
+1) TRẬN ĐẤU: nếu nhân vật chính bị thách đấu hoặc sắp bước vào một trận chiến Pokémon, hãy DỪNG BÚT ngay trước khi trận đấu diễn ra, chèn chính xác dòng ${BATTLE_MARKER} rồi KẾT THÚC TIN NHẮN TẠI ĐÓ. TUYỆT ĐỐI KHÔNG viết thêm BẤT KỲ CHỮ NÀO sau dòng ${BATTLE_MARKER} — không kể diễn biến trận, không kể ai thắng ai thua, không kể ai bỏ chạy, không kể cảnh sau trận. Người chơi sẽ tự đánh; hệ thống báo lại kết quả THẬT (thắng / thua / NGƯỜI CHƠI chạy thoát / đối phương bỏ chạy) rồi bạn mới viết tiếp. Nếu bạn tự bịa kết quả, nó sẽ MÂU THUẪN với kết quả thật và làm hỏng câu chuyện.
+2) KẾT QUẢ TRẬN: khi hệ thống báo kết quả, hãy đọc KỸ ai là người chạy. "NGƯỜI CHƠI ĐÃ CHẠY THOÁT" nghĩa là nhân vật chính bỏ chạy (không phải đối phương). Kể đúng như vậy, không đảo ngược.
+3) MUA SẮM: khi nhân vật chính bước vào cửa hàng, hãy tả tới lúc đứng trước quầy/nhìn kệ hàng rồi DỪNG, kèm tag [[SHOP tên cửa hàng]] — ĐỪNG tự quyết định người chơi mua gì, đừng tả cảnh trả tiền hay cầm hàng ra về. Người chơi sẽ tự chọn trong bảng giá của hệ thống. Nếu nhân vật CHẮC CHẮN có chi tiền trong lời kể (ăn uống, thuê trọ, hối lộ...) thì BẮT BUỘC kèm tag [[MONEY -số]] tương ứng, nếu không hệ thống sẽ không trừ tiền và số dư sẽ sai.`
 
 /**
  * @param {object} character { name, description, personality, scenario, lorebook }

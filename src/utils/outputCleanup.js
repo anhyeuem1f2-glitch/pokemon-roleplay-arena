@@ -183,3 +183,24 @@ export function extractThinking(raw) {
   if (ci > 0) return raw.slice(0, ci).trim()
   return ''
 }
+
+// ============ CẮT CHÍNH VĂN TẠI ĐIỂM CHỜ NGƯỜI CHƠI (đợt 66) ============
+// Người chơi beta báo: "chiến đấu bị đặt ở GIỮA chat, tớ còn chưa bấm vào
+// đánh mà bên dưới đã ghi đánh xong rồi; bấm chiến đấu xong prompt lại ra
+// một phần đoạn sau chiến đấu nữa" → truyện loạn, và kết quả AI tự bịa
+// thường NGƯỢC với kết quả thật (tester bỏ chạy nhưng truyện kể là đối
+// phương bỏ chạy).
+//
+// Gốc rễ: model được dặn "chèn [[BATTLE]] ở cuối tin rồi dừng", nhưng thực
+// tế nó chèn giữa bài rồi kể tiếp luôn cả trận. Không thể tin model tuân
+// thủ → app tự CẮT: mọi thứ sau điểm chờ đều bị bỏ, vì phần đó chưa được
+// phép xảy ra (người chơi chưa đánh / chưa mua).
+const BATTLE_MARK = '[[BATTLE]]'
+
+export function truncateAfterInteractiveMarker(text) {
+  if (!text) return text
+  const i = text.indexOf(BATTLE_MARK)
+  if (i === -1) return text
+  // Giữ phần dẫn nhập + chính marker, bỏ toàn bộ phần model tự kể sau đó.
+  return text.slice(0, i + BATTLE_MARK.length).trimEnd()
+}

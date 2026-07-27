@@ -71,3 +71,50 @@ GHI CHÚ
 - BẢN QUYỀN: nhạc Pokémon gốc thuộc Nintendo/Game Freak — file bạn bỏ
   vào đây là bạn tự chịu trách nhiệm; khi public cho cộng đồng nên cân
   nhắc dùng bản fan-made/royalty-free hoặc nhạc "lấy cảm hứng".
+
+
+=====================================================================
+ CẬP NHẬT ĐỢT 67 — NHẠC THEO NGỮ CẢNH TRONG CHÍNH VĂN
+=====================================================================
+
+App giờ ĐỌC chính văn lượt mới nhất để đoán "cảnh" đang diễn ra và đổi
+nhạc cho khớp (không chỉ theo vị trí bản đồ như trước). Quy tắc: cảnh
+nào được nhắc MUỘN NHẤT trong đoạn thì thắng — "sau trận gym hôm qua,
+cậu bước vào Trung tâm Pokémon" sẽ phát nhạc Trung tâm, không phải gym.
+
+FILE MỚI DÙNG CHO NGỮ CẢNH (đã đổi tên từ bộ nhạc bạn gửi):
+
+  pokecenter.mp3          Trung tâm Pokémon (nurse Joy, chữa trị, hồi phục)
+                          ← "pokemon center.mp3"
+  rest.mp3                Cắm trại, nghỉ chân, quây quần, cho Pokémon ăn,
+                          vuốt ve chải lông        ← "chill with pokemon.mp3"
+  night.mp3               Đêm khuya / buổi tối (theo giờ trong truyện)
+                          ← "super chill.mp3"
+
+  battle-gym.mp3          Đấu Gym Leader            ← "gym battle.mp3"
+  battle-trainer.mp3      Đấu trainer thường        ← "trainer battle.mp3"
+  battle-trainer-hard.mp3 Trainer cứng / cao thủ    ← "hard trainer.mp3"
+  battle-champion.mp3     Champion / Tứ Đại Thiên Vương ← "vs champion.mp3"
+  battle-champion-cynthia.mp3  Riêng Cynthia        ← "vs cynthia.mp3"
+
+FILE ĐÃ CÓ SẴN, ĐƯỢC ĐỔI TÊN CHO ĐÚNG CHUẨN:
+
+  battle.mp3              Trận chung (fallback cuối) ← "battle.mp3"
+  battle-wild.mp3         Pokémon hoang dã           ← "battle 2.mp3"
+  battle-boss.mp3         Đầu đàn / boss             ← "boss.mp3"
+  battle-legendary.mp3    Huyền thoại bậc thấp       ← "legend cấp thấp.mp3"
+  battle-legendary-high.mp3  Huyền thoại bậc cao
+                          ← "vs legenderi pokemon lv 200.mp3"
+  exploration.mp3         Khám phá chung             ← "exploration.mp3"
+  area-forest.mp3         Rừng / đường mòn           ← "explore.mp3"
+  area-city.mp3           Đô thị lớn                 ← "new city.mp3"
+  area-town.mp3           Thị trấn yên bình          ← "peace.mp3"
+  area-victory-road.mp3   Indigo / Victory Road      ← "indigo leage.mp3"
+  area-endgame.mp3        Không gian huyền ảo, dị thường ← "huyền ảo.mp3"
+  region-kanto.mp3        Theme vùng Kanto           ← "gen1.mp3"
+
+THỨ TỰ ƯU TIÊN KHI PHÁT:
+  1. Nhạc trận (khi mở bảng chiến đấu) — theo loại đối thủ + cảnh trong văn
+  2. Nhạc theo CẢNH trong chính văn (Trung tâm, cắm trại, gym...)
+  3. Nhạc theo BUỔI (đêm/tối → night.mp3)
+  4. Nhạc theo vị trí bản đồ (area-* → region-* → exploration)

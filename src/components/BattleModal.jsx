@@ -5,6 +5,7 @@ import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
 import { buildWildMon } from '../data/pokemonSpecies.js'
+import { getBossTier } from '../data/bossTiers.js'
 import { TYPE_COLORS } from '../data/pokemonTypes.js'
 import { applyEnvToDamage } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
@@ -339,7 +340,7 @@ function hasGimmickItem(inventory, kind) {
 }
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, pokedexSpecies, movesDb } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb } = useGame()
   const [log, setLog] = useState([`Một ${enemyMon.name} hoang dã xuất hiện!`])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
@@ -780,6 +781,142 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     }
   }
 
+  // ============ LƯỢT PHẢN ĐÒN CỦA ĐỐI PHƯƠNG (đợt 68) ============
+  // Dùng vật phẩm và ĐỔI POKÉMON đều TỐN 1 LƯỢT — đối phương được đánh tự
+  // do, đúng luật game gốc. Tách riêng để 2 tính năng mới dùng chung.
+  function enemyFreeHit(targetMon, setTarget) {
+    const canAct = checkCanAct(enemyMon, setEnemyMon, enemyMon.name)
+    if (!canAct) return targetMon.hp
+    const enemyMove = enemyMon.moves[Math.floor(Math.random() * enemyMon.moves.length)]
+    const dmg = applyEnvToDamage(
+      computeDamage(enemyMove, enemyMon, targetMon, eStages, pStages),
+      enemyMove, environment,
+    )
+    const hpAfter = Math.max(0, targetMon.hp - dmg)
+    setTarget((m) => ({ ...m, hp: hpAfter }))
+    pushLog(`${enemyMon.name} dùng ${enemyMove.name}! Gây ${dmg} sát thương.`)
+    if (hpAfter <= 0) {
+      pushLog(`${targetMon.name} đã gục ngã! Bạn thua...`)
+      setFinished(true)
+    }
+    return hpAfter
+  }
+
+  /** Trừ 1 vật phẩm khỏi túi (đợt 68 — "biến không cập nhật trong trận"). */
+  function consumeItem(itemId) {
+    setInventory((cur) =>
+      (cur ?? [])
+        .map((it) => (it.id === itemId ? { ...it, qty: (it.qty ?? 1) - 1 } : it))
+        .filter((it) => (it.qty ?? 0) > 0),
+    )
+  }
+
+  const HEAL_AMOUNT = {
+    potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30, fullrestore: 9999,
+  }
+  const STATUS_CURE = {
+    antidote: ['psn'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
+    fullrestore: ['psn', 'par', 'slp', 'brn', 'frz'],
+  }
+  const BALL_BONUS = { pokeball: 0, greatball: 12, ultraball: 25 }
+
+  /** Dùng 1 vật phẩm trong trận. */
+  function handleUseItem(item) {
+    if (busy || battleOver || finished) return
+    const id = item.id
+    // --- Poké Ball: bắt Pokémon ---
+    if (BALL_BONUS[id] !== undefined) {
+      if (!isWild) {
+        pushLog('Không thể bắt Pokémon của huấn luyện viên khác!')
+        return
+      }
+      setBusy(true)
+      setMenu('main')
+      consumeItem(id)
+      // Tỉ lệ bắt: máu càng thấp càng dễ, có trạng thái thì dễ hơn, bóng xịn
+      // cộng thêm. Công thức đơn giản hoá nhưng giữ đúng "cảm giác" game gốc.
+      const hpRatio = enemyMon.hp / Math.max(1, enemyMon.maxHp)
+      const statusBonus = enemyMon.status ? (enemyMon.status === 'slp' || enemyMon.status === 'frz' ? 20 : 10) : 0
+      const tier = getBossTier(enemyMon.name)
+      const legendPenalty = tier?.key === 'high' ? 45 : tier ? 25 : 0
+      const chance = Math.max(3, Math.min(95,
+        Math.round(45 * (1 - hpRatio) + 12 + statusBonus + (BALL_BONUS[id] ?? 0) - legendPenalty),
+      ))
+      const roll = Math.random() * 100
+      pushLog(`Bạn ném ${item.name}! (khả năng ~${chance}%)`)
+      if (roll < chance) {
+        const caught = { ...enemyMon, hp: enemyMon.maxHp, status: null, sleepTurns: undefined }
+        if ((party ?? []).length < 6) {
+          setParty((cur) => [...(cur ?? []), caught])
+          pushLog(`Tuyệt vời! ${enemyMon.name} đã được bắt và vào đội hình!`)
+        } else {
+          pushLog(`Bắt được ${enemyMon.name}, nhưng đội đã đầy 6 — nó được gửi về nhà.`)
+        }
+        setEndReason('caught')
+        setFinished(true)
+        setBusy(false)
+        return
+      }
+      pushLog(`${enemyMon.name} thoát ra khỏi bóng!`)
+      enemyFreeHit(playerMon, setPlayerMon)
+      setBusy(false)
+      return
+    }
+
+    // --- Hồi máu / chữa trạng thái ---
+    const heal = HEAL_AMOUNT[id]
+    const cures = STATUS_CURE[id]
+    const isRevive = id === 'revive'
+    if (heal === undefined && !cures && !isRevive) {
+      pushLog(`${item.name} không dùng được trong trận đấu.`)
+      return
+    }
+    if (isRevive) {
+      pushLog('Không có Pokémon nào gục ngã để hồi sinh.')
+      return
+    }
+    if (heal !== undefined && playerMon.hp >= playerMon.maxHp && !(cures && playerMon.status)) {
+      pushLog(`${playerMon.name} đang khoẻ mạnh — chưa cần dùng ${item.name}.`)
+      return
+    }
+    setBusy(true)
+    setMenu('main')
+    consumeItem(id)
+    if (heal !== undefined) {
+      const healed = Math.min(playerMon.maxHp, playerMon.hp + heal)
+      const gained = healed - playerMon.hp
+      setPlayerMon((m) => ({ ...m, hp: healed }))
+      pushLog(`Bạn dùng ${item.name} — ${playerMon.name} hồi ${gained} HP.`)
+    }
+    if (cures && playerMon.status && cures.includes(playerMon.status)) {
+      setPlayerMon((m) => ({ ...m, status: null, sleepTurns: undefined }))
+      pushLog(`${playerMon.name} đã khỏi ${STATUS_INFO[playerMon.status]?.label?.toLowerCase() ?? 'trạng thái xấu'}!`)
+    }
+    // Dùng đồ tốn 1 lượt.
+    enemyFreeHit({ ...playerMon, hp: Math.min(playerMon.maxHp, playerMon.hp + (heal ?? 0)) }, setPlayerMon)
+    setBusy(false)
+  }
+
+  /** Đổi sang Pokémon khác trong đội (tốn 1 lượt). */
+  function handleSwitchMon(target) {
+    if (busy || battleOver || finished) return
+    if (!target || target.name === playerMon.name) return
+    if ((target.hp ?? 0) <= 0) {
+      pushLog(`${target.name} đã gục ngã, không thể ra trận.`)
+      return
+    }
+    setBusy(true)
+    setMenu('main')
+    pushLog(`Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
+    // Lưu lại trạng thái con vừa rút về vào đội hình, rồi đưa con mới ra.
+    setParty((cur) => (cur ?? []).map((pm) => (pm.name === playerMon.name ? { ...playerMon } : pm)))
+    setPlayerMon({ ...target })
+    // Bậc chỉ số reset khi đổi Pokémon (đúng luật game gốc).
+    setPStages({ ...STAGE_ZERO })
+    enemyFreeHit(target, setPlayerMon)
+    setBusy(false)
+  }
+
   function handleRun() {
     if (busy || finished) return
     pushLog(`Bạn đã chạy thoát khỏi trận đấu.`)
@@ -1022,14 +1159,31 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
               </p>
             ) : (
               <div style={{ margin: '4px 0 12px' }}>
-                {inventory.map((it) => (
-                  <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
-                    <span>{it.name}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>x{it.qty}</span>
-                  </div>
-                ))}
+                {/* Đợt 68: bấm để DÙNG THẬT (trước đây chỉ xem được). */}
+                {inventory.map((it) => {
+                  const usable = BALL_BONUS[it.id] !== undefined || HEAL_AMOUNT[it.id] !== undefined || STATUS_CURE[it.id]
+                  return (
+                    <button
+                      key={it.id}
+                      onClick={() => handleUseItem(it)}
+                      disabled={busy || !usable}
+                      title={usable ? `Dùng ${it.name} (tốn 1 lượt)` : 'Vật phẩm này không dùng được trong trận'}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', width: '100%',
+                        alignItems: 'center', gap: 8, padding: '7px 10px', marginBottom: 4,
+                        border: '1px solid var(--line)', borderRadius: 8,
+                        background: 'transparent', color: usable ? 'var(--text-main)' : 'var(--text-dim)',
+                        opacity: usable ? 1 : 0.45, cursor: usable && !busy ? 'pointer' : 'default',
+                        fontSize: 12.5, textAlign: 'left',
+                      }}
+                    >
+                      <span>{it.name}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>x{it.qty}</span>
+                    </button>
+                  )
+                })}
                 <p style={{ fontSize: 10.5, color: 'var(--text-dim)', margin: '6px 0 0' }}>
-                  (Sử dụng item trong trận sẽ được nối ở đợt sau — hiện mới xem được.)
+                  Dùng vật phẩm tốn 1 lượt — đối phương sẽ được đánh trả.
                 </p>
               </div>
             )}
@@ -1039,9 +1193,48 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           </div>
         ) : menu === 'party' ? (
           <div>
-            <p style={{ fontSize: 12.5, color: 'var(--text-dim)', margin: '4px 0 12px' }}>
-              {playerMon.name} hiện là Pokémon duy nhất trong đội. (Đổi Pokémon đang phát triển.)
-            </p>
+            {/* Đợt 68: đổi Pokémon THẬT (trước đây chỉ báo "đang phát triển"). */}
+            {(party ?? []).filter((pm) => pm?.name !== playerMon.name).length === 0 ? (
+              <p style={{ fontSize: 12.5, color: 'var(--text-dim)', margin: '4px 0 12px' }}>
+                {playerMon.name} là Pokémon duy nhất trong đội — chưa có ai để đổi.
+              </p>
+            ) : (
+              <div style={{ margin: '4px 0 12px' }}>
+                {(party ?? []).map((pm) => {
+                  const isActive = pm?.name === playerMon.name
+                  const fainted = (pm?.hp ?? 0) <= 0
+                  return (
+                    <button
+                      key={`${pm?.name}-${pm?.level}`}
+                      onClick={() => handleSwitchMon(pm)}
+                      disabled={busy || isActive || fainted}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', width: '100%',
+                        alignItems: 'center', gap: 8, padding: '8px 10px', marginBottom: 4,
+                        border: `1px solid ${isActive ? 'var(--mint)' : 'var(--line)'}`,
+                        borderRadius: 8, background: 'transparent',
+                        color: fainted ? 'var(--text-dim)' : 'var(--text-main)',
+                        opacity: fainted ? 0.45 : 1,
+                        cursor: busy || isActive || fainted ? 'default' : 'pointer',
+                        fontSize: 12.5, textAlign: 'left',
+                      }}
+                    >
+                      <span>
+                        {pm?.name} <span style={{ color: 'var(--text-dim)' }}>Lv.{pm?.level}</span>
+                        {isActive && <span style={{ color: 'var(--mint)' }}> · đang ra trận</span>}
+                        {fainted && <span style={{ color: '#d94f4f' }}> · đã gục</span>}
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
+                        {pm?.hp}/{pm?.maxHp}
+                      </span>
+                    </button>
+                  )
+                })}
+                <p style={{ fontSize: 10.5, color: 'var(--text-dim)', margin: '6px 0 0' }}>
+                  Đổi Pokémon tốn 1 lượt — đối phương sẽ được đánh trả.
+                </p>
+              </div>
+            )}
             <button className="btn" style={{ width: '100%' }} onClick={() => setMenu('main')}>
               ← Quay lại
             </button>

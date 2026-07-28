@@ -28,7 +28,22 @@
 // dính lỗi mạng/CORS mới tự chuyển sang cầu nối, rồi GHI NHỚ để các lượt sau
 // đi thẳng đường đã chạy được.
 const BRIDGE_PATH = '/api-bridge'
-const bridgeNeeded = new Set() // các baseUrl đã xác định phải đi qua cầu nối
+// Đợt 68: nhớ qua CÁC PHIÊN (localStorage). Trước đây chỉ nhớ trong phiên
+// → lượt gọi ĐẦU TIÊN mỗi lần mở lại trang luôn đi đường trực tiếp, thất
+// bại, rồi mới rơi sang cầu nối — và lượt đó KHÔNG bật stream nên hay dính
+// lỗi 524 (Cloudflare cắt kết nối nếu 100s chưa thấy phản hồi).
+const BRIDGE_MEMO_KEY = 'trainer-arena:bridge-needed'
+function loadBridgeMemo() {
+  try {
+    const raw = localStorage.getItem(BRIDGE_MEMO_KEY)
+    return new Set(raw ? JSON.parse(raw) : [])
+  } catch { return new Set() }
+}
+const bridgeNeeded = loadBridgeMemo() // các baseUrl đã xác định phải đi qua cầu nối
+function rememberBridgeNeeded(baseUrl) {
+  bridgeNeeded.add(baseUrl)
+  try { localStorage.setItem(BRIDGE_MEMO_KEY, JSON.stringify([...bridgeNeeded])) } catch { /* ignore */ }
+}
 // null = chưa biết; false = host chưa deploy cầu nối (thiếu file cấu hình).
 let bridgeDeployed = null
 
@@ -83,7 +98,7 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
             bridgeDeployed = false
           } else if (res.status !== 404 || isLast) {
             // Cầu nối chạy được → nhớ lại, mọi lượt sau đi luôn đường này.
-            bridgeNeeded.add(baseUrl)
+            rememberBridgeNeeded(baseUrl)
             endpointMemo.set(memoKey, url)
             return { res, url }
           }
@@ -196,6 +211,16 @@ export async function chatCompletion(config, messages, options = {}) {
   })
 
   if (!res.ok) {
+    // Đợt 68: 524 là Cloudflare cắt kết nối vì chờ quá 100 giây — không phải
+    // lỗi key hay endpoint. Giải thích rõ để người chơi không đi sửa nhầm chỗ.
+    if (res.status === 524 || res.status === 504) {
+      throw new Error(
+        `Máy chủ AI phản hồi quá chậm nên kết nối bị cắt (lỗi ${res.status}). ` +
+        `Model đang nghĩ lâu hơn giới hạn cho phép. Cách xử lý: giảm "Max tokens" trong Cài đặt API ` +
+        `(VD 8000-16000), đổi sang model nhanh hơn (bản flash/mini), hoặc bấm "Thử lại lượt này" — ` +
+        `lượt sau thường nhanh hơn vì đã bật chế độ truyền dữ liệu dần.`,
+      )
+    }
     let detail = ''
     try {
       const errJson = await res.json()
@@ -343,6 +368,16 @@ export async function embedTexts(config, texts) {
     throw new Error(`Không gọi được API embedding (lỗi mạng/CORS): ${networkErr.message}`)
   }
   if (!res.ok) {
+    // Đợt 68: 524 là Cloudflare cắt kết nối vì chờ quá 100 giây — không phải
+    // lỗi key hay endpoint. Giải thích rõ để người chơi không đi sửa nhầm chỗ.
+    if (res.status === 524 || res.status === 504) {
+      throw new Error(
+        `Máy chủ AI phản hồi quá chậm nên kết nối bị cắt (lỗi ${res.status}). ` +
+        `Model đang nghĩ lâu hơn giới hạn cho phép. Cách xử lý: giảm "Max tokens" trong Cài đặt API ` +
+        `(VD 8000-16000), đổi sang model nhanh hơn (bản flash/mini), hoặc bấm "Thử lại lượt này" — ` +
+        `lượt sau thường nhanh hơn vì đã bật chế độ truyền dữ liệu dần.`,
+      )
+    }
     let detail = ''
     try {
       const j = await res.json()
@@ -400,6 +435,16 @@ export async function rerankDocs(config, query, documents, topN) {
     throw new Error(`Không gọi được API rerank (lỗi mạng/CORS): ${networkErr.message}`)
   }
   if (!res.ok) {
+    // Đợt 68: 524 là Cloudflare cắt kết nối vì chờ quá 100 giây — không phải
+    // lỗi key hay endpoint. Giải thích rõ để người chơi không đi sửa nhầm chỗ.
+    if (res.status === 524 || res.status === 504) {
+      throw new Error(
+        `Máy chủ AI phản hồi quá chậm nên kết nối bị cắt (lỗi ${res.status}). ` +
+        `Model đang nghĩ lâu hơn giới hạn cho phép. Cách xử lý: giảm "Max tokens" trong Cài đặt API ` +
+        `(VD 8000-16000), đổi sang model nhanh hơn (bản flash/mini), hoặc bấm "Thử lại lượt này" — ` +
+        `lượt sau thường nhanh hơn vì đã bật chế độ truyền dữ liệu dần.`,
+      )
+    }
     let detail = ''
     try {
       const j = await res.json()

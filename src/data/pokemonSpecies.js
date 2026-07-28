@@ -445,6 +445,10 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     // EXP khởi điểm đúng mốc đầu cấp (đợt 65) — không có trường này thì
     // Pokémon mới bắt/nhận sẽ bị coi như 0 EXP và tụt cấp khi cộng EXP.
     exp: level * level * level,
+    // MÃ ĐỊNH DANH cá thể (đợt 69): trước đây đồng bộ playerMon ↔ party khớp
+    // theo TÊN, nên 2 con cùng loài (hoặc tên đổi) là lệch nhau — người chơi
+    // báo "🧬 bảo lên Lv.8 mà HUD vẫn Lv.6". uid không đổi trọn đời cá thể.
+    uid: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     baseStats: speciesEntry.baseStats ?? null,
     maxHp,
     hp: maxHp,
@@ -703,4 +707,19 @@ export function expFromTraining(mon, intensity = 1) {
   // ~8% quãng đường/buổi ở cường độ 1; cường độ do AI khai (1-3).
   const k = Math.max(1, Math.min(3, Number(intensity) || 1))
   return Math.max(1, Math.round(span * 0.08 * k))
+}
+
+
+/** Khớp 2 bản ghi CÙNG MỘT cá thể Pokémon (đợt 69).
+ * Ưu tiên uid; mon cũ chưa có uid thì lùi về khớp tên (tương thích ngược). */
+export function isSameMon(a, b) {
+  if (!a || !b) return false
+  if (a.uid && b.uid) return a.uid === b.uid
+  return a.name === b.name
+}
+
+/** Thay thế cá thể tương ứng trong đội hình bằng bản mới. */
+export function syncMonInParty(party, mon) {
+  if (!mon) return party ?? []
+  return (party ?? []).map((pm) => (isSameMon(pm, mon) ? mon : pm))
 }

@@ -54,6 +54,26 @@ export function GameProvider({ children }) {
     try { localStorage.setItem('trainer-arena:worldbook', JSON.stringify(next)) } catch { /* ignore */ }
   }, [])
 
+  // --- Tính cách + thiên phú (đợt 69) ---
+  // BUG người chơi báo: "Thiên Phú không xài được, chỉ có miêu tả trên văn
+  // bản chứ không áp vào biến". Đúng: đợt 61 chỉ gửi note này ở LƯỢT MỞ ĐẦU
+  // (IntroScreen), các lượt sau AI không hề biết → tính cách/thiên phú bay
+  // mất sau vài tin. Nay lưu vào context, chèn MỌI LƯỢT và hiện trên HUD.
+  const [playerTraits, setPlayerTraitsState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('trainer-arena:player-traits')
+      if (saved) return JSON.parse(saved)
+    } catch { /* ignore */ }
+    return { personality: [], superpower: 'none', customPower: '' }
+  })
+  const setPlayerTraits = useCallback((next) => {
+    setPlayerTraitsState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      try { localStorage.setItem('trainer-arena:player-traits', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
   // --- Tông truyện (đợt 50): độ khó + thể loại, chọn ở màn tạo nhân vật ---
   const [storyTone, setStoryToneState] = useState(() => {
     try {
@@ -549,6 +569,7 @@ export function GameProvider({ children }) {
     setMessages,
     resetChat,
     storyTone, setStoryTone,
+    playerTraits, setPlayerTraits,
     storageFull,
     gameStarted,
     setGameStarted,

@@ -4,6 +4,7 @@ import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
+import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -55,7 +56,7 @@ function AffinityBar({ value }) {
 
 export default function PlayerHUD({ mobile = false }) {
   const {
-    playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger,
+    playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger, playerTraits,
     party, setParty, playerMon, setPlayerMon,
     relationships, inventory, setInventory,
   } = useGame()
@@ -139,6 +140,31 @@ export default function PlayerHUD({ mobile = false }) {
       </div>
 
       {/* Độ no (đợt 36): tự trừ theo ngày trôi + AI tag khi ăn uống */}
+      {/* Tính cách + Thiên phú (đợt 69) — người chơi báo "thiên phú không
+          áp vào biến"; giờ hiện thẳng trên HUD như một chỉ số nhân vật. */}
+      {(playerTraits?.personality?.length > 0 || (playerTraits?.superpower && playerTraits.superpower !== 'none')) && (
+        <>
+          <SectionTitle>Tính cách &amp; Thiên phú</SectionTitle>
+          <div style={{ fontSize: 11, lineHeight: 1.7, marginBottom: 10 }}>
+            {playerTraits?.personality?.length > 0 && (
+              <div style={{ color: 'var(--text-mid)' }}>
+                {playerTraits.personality
+                  .map((k) => PERSONALITY_TRAITS.find((t) => t.key === k)?.label)
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
+            )}
+            {playerTraits?.superpower && playerTraits.superpower !== 'none' && (
+              <div style={{ color: 'var(--amber)', marginTop: 3 }}>
+                ✦ {playerTraits.superpower === 'custom'
+                  ? (playerTraits.customPower || 'Năng lực riêng')
+                  : (SUPERPOWERS.find((sp) => sp.key === playerTraits.superpower)?.label ?? playerTraits.superpower)}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       <SectionTitle>Độ no</SectionTitle>
       {/* Đợt 48 (yêu cầu beta): thanh Pokémon chuyển vào modal chi tiết —
           bấm ô đội hình của con đang ra trận mới thấy, HUD gọn lại. */}

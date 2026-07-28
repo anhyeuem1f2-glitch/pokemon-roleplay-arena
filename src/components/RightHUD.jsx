@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import SaveModal from './SaveModal.jsx'
 import { useGame } from '../context/GameContext.jsx'
 import { getArea, getRegion } from '../data/regions.js'
 import RegionMap from './RegionMap.jsx'
@@ -12,6 +13,7 @@ import { getWeather } from '../data/weather.js'
 // bấm vào mở modal bản đồ thật với vị trí hiện tại; dưới là 2 nút hệ thống.
 
 export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
+  const [saveOpen, setSaveOpen] = useState(false)
   const { playerLocation, setPlayerLocation, storyDate,
   } = useGame()
   const [mapOpen, setMapOpen] = useState(false)
@@ -111,6 +113,12 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       <button className="btn" style={{ width: '100%' }} onClick={onOpenSettings}>
         ⚙ Cài đặt
       </button>
+      {/* Đợt 69: Lưu/Tải game như Pokémon gốc. */}
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => setSaveOpen(true)}>
+        💾 Lưu / Tải game
+      </button>
+      {saveOpen && <SaveModal onClose={() => setSaveOpen(false)} />}
+
       <button className="btn" style={{ width: '100%' }} onClick={onHome}>
         ⌂ Màn hình chính
       </button>

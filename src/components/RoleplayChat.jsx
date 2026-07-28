@@ -7,8 +7,9 @@ import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
+import { buildCharacterTraitsNote } from '../data/characterTraits.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty, isSameMon } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
 import ShopModal from './ShopModal.jsx'
@@ -253,7 +254,12 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
   if (parsed.money) out.push(`💰 Tiền ${parsed.money > 0 ? '+' : ''}${parsed.money}${tag}`)
   for (const r of parsed.rel ?? []) out.push(`💞 Hảo cảm ${r.name} ${r.delta > 0 ? '+' : ''}${r.delta}${r.note ? ` (${r.note})` : ''}${tag}`)
   for (const b of parsed.body ?? []) out.push(`🩹 Thương tích ${b.part} ${b.delta > 0 ? '+' : ''}${b.delta}${tag}`)
-  for (const h of parsed.hunger ?? []) out.push(`🍙 Độ no ${h.target} ${h.delta > 0 ? '+' : ''}${h.delta}${tag}`)
+  // FIX đợt 69: parser trả về {who, delta} nhưng chỗ này đọc h.target →
+  // hiện "Độ no undefined +20" (người chơi báo "lỗi underfiend lúc + độ no").
+  for (const h of parsed.hunger ?? []) {
+    const label = h.who === 'mon' ? 'Pokémon' : 'người chơi'
+    out.push(`🍙 Độ no ${label} ${h.delta > 0 ? '+' : ''}${h.delta}${tag}`)
+  }
   for (const pk of parsed.pokemons ?? []) out.push(`🔴 Nhận Pokémon: ${pk.name} Lv.${pk.level}${tag}`)
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
@@ -299,7 +305,7 @@ export default function RoleplayChat() {
     storyDate,
     advanceStoryDate,
     party,
-    setParty, storyTone, storageFull,
+    setParty, storyTone, storageFull, playerTraits,
     hunger,
     adjustHunger,
     stateApiConfig,
@@ -496,8 +502,11 @@ export default function RoleplayChat() {
             (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)
           return amount > 0 ? applyExpGain(mon, amount).mon : mon
         }
-        setPlayerMon((cur) => grow(cur))
-        setParty((cur) => cur.map(grow))
+        // Tính TRƯỚC cho con đang ra trận rồi đồng bộ, để playerMon và bản
+        // trong đội hình không bao giờ lệch nhau (đợt 69).
+        const grownActive = playerMon ? grow(playerMon) : null
+        if (grownActive) setPlayerMon(grownActive)
+        setParty((cur) => (cur ?? []).map((pm) => (isSameMon(pm, playerMon) ? grownActive ?? pm : grow(pm))))
       }
 
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {
@@ -582,6 +591,10 @@ export default function RoleplayChat() {
       // null — đó mới là tự nhiên.
       // ĐỘI HÌNH + HÀNH VI THEO TÍNH CÁCH (đợt 63): Pokémon phải cư xử đúng
       // cá tính (nature) chứ không con nào cũng ngoan như nhau.
+      // TÍNH CÁCH + THIÊN PHÚ (đợt 69): gửi MỌI LƯỢT, không chỉ lượt mở đầu.
+      const traitsNote = buildCharacterTraitsNote(playerTraits ?? {})
+      if (traitsNote) history = [...history, { role: 'user', content: `[Hệ thống — ${traitsNote} Không nhắc tới ghi chú này.]` }]
+
       const partyNote = buildPartyBehaviorNote(party, playerMon)
       if (partyNote) history = [...history, { role: 'user', content: partyNote }]
 
@@ -905,7 +918,8 @@ export default function RoleplayChat() {
         setPlayerMon(res.mon)
         // Đồng bộ về đội hình: khớp theo TÊN (bỏ điều kiện trùng level —
         // sau khi lên cấp thì level đã khác, khớp cả level sẽ trượt).
-        setParty((cur) => cur.map((pm) => (pm?.name === playerMon.name ? res.mon : pm)))
+        // Đợt 69: đồng bộ theo uid (khớp tên gây lệch cấp HUD ↔ trận).
+        setParty((cur) => syncMonInParty(cur, res.mon))
         expNoteRef.current = {
           gain,
           enemyName: enemyMon.name,

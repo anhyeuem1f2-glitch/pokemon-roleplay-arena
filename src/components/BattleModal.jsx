@@ -1,16 +1,17 @@
-import React, { useState, useRef, useMemo } from 'react'
+import React, { useState, useRef, useMemo, useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
-import { buildWildMon } from '../data/pokemonSpecies.js'
+import { buildWildMon, isSameMon, syncMonInParty } from '../data/pokemonSpecies.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { TYPE_COLORS } from '../data/pokemonTypes.js'
 import { applyEnvToDamage } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import MonAvatar from './MonAvatar.jsx'
+import BagPanel from './BagPanel.jsx'
 
 // Hiệu ứng trạng thái — đợt đầu tiên (bỏng/tê liệt/ngủ), sẽ bổ sung dần theo
 // yêu cầu (VD độc, đóng băng, giảm/tăng chỉ số theo giai đoạn...).
@@ -495,7 +496,21 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   // Chặn bấm "Tiếp tục câu chuyện" nhiều lần liên tiếp (tránh gửi trùng kết quả).
   const continuingRef = useRef(false)
 
-  const battleOver = playerMon.hp <= 0 || enemyMon.hp <= 0
+  // FIX đợt 69 (người chơi báo: "đội có 3 Pokémon mà 1 con chết là thua luôn,
+  // chưa kịp xuất con thứ 2"): trước đây con ĐANG RA TRẬN gục là battleOver
+  // ngay → khoá hết menu, ép bấm Tiếp tục và tính THUA dù còn Pokémon khoẻ.
+  // Nay chỉ thua khi TOÀN ĐỘI gục.
+  const healthyBackups = (party ?? []).filter(
+    (pm) => pm && !isSameMon(pm, playerMon) && (pm.hp ?? 0) > 0,
+  )
+  const mustSwitch = playerMon.hp <= 0 && healthyBackups.length > 0
+  const battleOver = enemyMon.hp <= 0 || (playerMon.hp <= 0 && healthyBackups.length === 0)
+
+  // Con ra trận vừa gục nhưng còn dự bị → tự mở bảng đội hình cho người chơi
+  // chọn con thay thế (đợt 69).
+  useEffect(() => {
+    if (mustSwitch && !finished) setMenu('party')
+  }, [mustSwitch, finished])
 
   function pushLog(line) {
     setLog((l) => [...l, line])
@@ -897,23 +912,29 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     setBusy(false)
   }
 
-  /** Đổi sang Pokémon khác trong đội (tốn 1 lượt). */
+  /** Đổi sang Pokémon khác trong đội. Tốn 1 lượt, TRỪ khi con cũ vừa gục
+   * (đổi thay thế sau khi gục là miễn phí — đúng luật game gốc). */
   function handleSwitchMon(target) {
-    if (busy || battleOver || finished) return
-    if (!target || target.name === playerMon.name) return
+    if (busy || finished) return
+    if (battleOver) return
+    if (!target || isSameMon(target, playerMon)) return
     if ((target.hp ?? 0) <= 0) {
       pushLog(`${target.name} đã gục ngã, không thể ra trận.`)
       return
     }
+    const wasFainted = (playerMon.hp ?? 0) <= 0
     setBusy(true)
     setMenu('main')
-    pushLog(`Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
+    pushLog(wasFainted
+      ? `${playerMon.name} không thể chiến đấu nữa! Bạn tung ${target.name} ra trận!`
+      : `Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
     // Lưu lại trạng thái con vừa rút về vào đội hình, rồi đưa con mới ra.
-    setParty((cur) => (cur ?? []).map((pm) => (pm.name === playerMon.name ? { ...playerMon } : pm)))
+    setParty((cur) => syncMonInParty(cur, { ...playerMon }))
     setPlayerMon({ ...target })
     // Bậc chỉ số reset khi đổi Pokémon (đúng luật game gốc).
     setPStages({ ...STAGE_ZERO })
-    enemyFreeHit(target, setPlayerMon)
+    // Đổi sau khi con cũ GỤC = thay thế bắt buộc → không bị đánh trả.
+    if (!wasFainted) enemyFreeHit(target, setPlayerMon)
     setBusy(false)
   }
 
@@ -1064,6 +1085,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                 <span style={{ fontSize: 11, color: '#e05252' }}>DMAX còn {dynaTurnsLeft} lượt</span>
               )}
             </div>
+            )}
             {/* Popup chọn Mega X/Y cho loài có 2 forme */}
             {megaPickOpen && (
               <div className="panel" style={{ position: 'absolute', top: 40, left: 0, zIndex: 5, padding: 8, display: 'flex', gap: 6 }}>
@@ -1152,60 +1174,36 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             </div>
           </div>
         ) : menu === 'bag' ? (
-          <div>
-            {inventory.length === 0 ? (
-              <p style={{ fontSize: 12.5, color: 'var(--text-dim)', margin: '4px 0 12px' }}>
-                Túi đồ trống — mua vật phẩm tại các cửa hàng trong truyện.
-              </p>
-            ) : (
-              <div style={{ margin: '4px 0 12px' }}>
-                {/* Đợt 68: bấm để DÙNG THẬT (trước đây chỉ xem được). */}
-                {inventory.map((it) => {
-                  const usable = BALL_BONUS[it.id] !== undefined || HEAL_AMOUNT[it.id] !== undefined || STATUS_CURE[it.id]
-                  return (
-                    <button
-                      key={it.id}
-                      onClick={() => handleUseItem(it)}
-                      disabled={busy || !usable}
-                      title={usable ? `Dùng ${it.name} (tốn 1 lượt)` : 'Vật phẩm này không dùng được trong trận'}
-                      style={{
-                        display: 'flex', justifyContent: 'space-between', width: '100%',
-                        alignItems: 'center', gap: 8, padding: '7px 10px', marginBottom: 4,
-                        border: '1px solid var(--line)', borderRadius: 8,
-                        background: 'transparent', color: usable ? 'var(--text-main)' : 'var(--text-dim)',
-                        opacity: usable ? 1 : 0.45, cursor: usable && !busy ? 'pointer' : 'default',
-                        fontSize: 12.5, textAlign: 'left',
-                      }}
-                    >
-                      <span>{it.name}</span>
-                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>x{it.qty}</span>
-                    </button>
-                  )
-                })}
-                <p style={{ fontSize: 10.5, color: 'var(--text-dim)', margin: '6px 0 0' }}>
-                  Dùng vật phẩm tốn 1 lượt — đối phương sẽ được đánh trả.
-                </p>
-              </div>
-            )}
-            <button className="btn" style={{ width: '100%' }} onClick={() => setMenu('main')}>
-              ← Quay lại
-            </button>
-          </div>
+          <BagPanel
+            inventory={inventory}
+            busy={busy}
+            onBack={() => setMenu('main')}
+            canUse={(it) =>
+              BALL_BONUS[it.id] !== undefined
+              || HEAL_AMOUNT[it.id] !== undefined
+              || Boolean(STATUS_CURE[it.id])}
+            onUse={handleUseItem}
+          />
         ) : menu === 'party' ? (
           <div>
+            {mustSwitch && (
+              <div className="status-pill status-pill--error" style={{ display: 'block', marginBottom: 8 }}>
+                {playerMon.name} đã gục — hãy chọn Pokémon khác ra trận (không tốn lượt).
+              </div>
+            )}
             {/* Đợt 68: đổi Pokémon THẬT (trước đây chỉ báo "đang phát triển"). */}
-            {(party ?? []).filter((pm) => pm?.name !== playerMon.name).length === 0 ? (
+            {(party ?? []).filter((pm) => !isSameMon(pm, playerMon)).length === 0 ? (
               <p style={{ fontSize: 12.5, color: 'var(--text-dim)', margin: '4px 0 12px' }}>
                 {playerMon.name} là Pokémon duy nhất trong đội — chưa có ai để đổi.
               </p>
             ) : (
               <div style={{ margin: '4px 0 12px' }}>
                 {(party ?? []).map((pm) => {
-                  const isActive = pm?.name === playerMon.name
+                  const isActive = isSameMon(pm, playerMon)
                   const fainted = (pm?.hp ?? 0) <= 0
                   return (
                     <button
-                      key={`${pm?.name}-${pm?.level}`}
+                      key={pm?.uid ?? `${pm?.name}-${pm?.level}`}
                       onClick={() => handleSwitchMon(pm)}
                       disabled={busy || isActive || fainted}
                       style={{
@@ -1235,15 +1233,24 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                 </p>
               </div>
             )}
-            <button className="btn" style={{ width: '100%' }} onClick={() => setMenu('main')}>
-              ← Quay lại
-            </button>
+            {!mustSwitch && (
+              <button className="btn" style={{ width: '100%' }} onClick={() => setMenu('main')}>
+                ← Quay lại
+              </button>
+            )}
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <MenuButton label="FIGHT" sub="Chọn chiêu thức" color="var(--coral)" onClick={() => setMenu('fight')} disabled={busy || battleOver} />
-            <MenuButton label="BAG" sub="Vật phẩm" color="var(--amber)" onClick={() => setMenu('bag')} disabled={busy || battleOver} />
-            <MenuButton label="POKÉMON" sub="Đổi Pokémon" color="var(--mint)" onClick={() => setMenu('party')} disabled={busy || battleOver} />
+            {/* Đợt 69: con đang ra trận gục mà còn dự bị → CHỈ cho đổi Pokémon. */}
+            <MenuButton label="FIGHT" sub="Chọn chiêu thức" color="var(--coral)" onClick={() => setMenu('fight')} disabled={busy || battleOver || mustSwitch} />
+            <MenuButton label="BAG" sub="Vật phẩm" color="var(--amber)" onClick={() => setMenu('bag')} disabled={busy || battleOver || mustSwitch} />
+            <MenuButton
+              label="POKÉMON"
+              sub={mustSwitch ? 'BẮT BUỘC đổi!' : 'Đổi Pokémon'}
+              color="var(--mint)"
+              onClick={() => setMenu('party')}
+              disabled={busy || battleOver}
+            />
             <MenuButton
               label="RUN"
               sub={isWild ? 'Chạy trốn' : 'Không thể chạy'}

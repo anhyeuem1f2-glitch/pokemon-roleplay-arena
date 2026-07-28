@@ -118,6 +118,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
     messages,
     storyTone, setStoryTone,
+    setPlayerTraits,
     setInventory, setRelationships, setBodyStatus, setHunger, playerProfile, setPlayerProfile,
   } = useGame()
 
@@ -239,6 +240,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setStoryDate({ day: d, month: m, year: y, part: 'sáng' })
 
     // LUÔN tay trắng (đợt 34): nhận Pokémon đầu tiên là cột mốc trong truyện.
+    // Đợt 69: lưu tính cách/thiên phú để MỌI LƯỢT sau đều gửi cho AI.
+    setPlayerTraits({ personality, superpower, customPower })
     setPlayerMon(null)
     setParty([])
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương

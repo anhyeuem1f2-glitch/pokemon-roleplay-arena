@@ -7,6 +7,8 @@ import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
 import { buildWildMon, isSameMon, syncMonInParty } from '../data/pokemonSpecies.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
+import { musicManager } from '../utils/musicManager.js'
+import { resolveBattleTrackKeys, resolveLowHpTrackKeys, LOW_HP_RATIO } from '../data/musicTracks.js'
 import { TYPE_COLORS } from '../data/pokemonTypes.js'
 import { applyEnvToDamage } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
@@ -342,7 +344,7 @@ function hasGimmickItem(inventory, kind) {
 }
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox } = useGame()
   const [log, setLog] = useState([`Một ${enemyMon.name} hoang dã xuất hiện!`])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
@@ -365,6 +367,30 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   const [dynaTurnsLeft, setDynaTurnsLeft] = useState(0)
   const [megaPickOpen, setMegaPickOpen] = useState(false) // loài có 2 mega (X/Y) → hỏi chọn
   const preGimmickRef = useRef(null) // bản gốc playerMon trước khi biến hình — để trả về khi hết trận
+
+  // ===== NHẠC "SẮP GỤC" (đợt 71) =====
+  // Chủ dự án thêm file low hp.mp3: chỉ bật khi Pokémon đang ra trận tụt
+  // dưới 20% máu, tắt ngay khi hồi lên hoặc trận kết thúc. Đây là override
+  // ĐÈ LÊN nhạc trận (đẩy vào sau nên thắng), và mang theo danh sách nhạc
+  // trận làm dự phòng để nếu thiếu file thì nhạc trận vẫn chạy chứ không câm.
+  const hpRatio = (playerMon?.hp ?? 0) / Math.max(1, playerMon?.maxHp ?? 1)
+  const lowHp = Boolean(playerMon) && playerMon.hp > 0 && hpRatio <= LOW_HP_RATIO
+  useEffect(() => {
+    if (lowHp && !finished) {
+      musicManager.pushOverride('low-hp', resolveLowHpTrackKeys(resolveBattleTrackKeys(enemyMon)))
+    } else {
+      musicManager.popOverride('low-hp')
+    }
+  }, [lowHp, finished, enemyMon])
+  // Rời bảng chiến đấu thì dọn override (bấm Ẩn / unmount).
+  useEffect(() => () => musicManager.popOverride('low-hp'), [])
+  // Đợt 71: bấm "Ẩn" GIỮA TRẬN khi đang Mega/Dynamax/Tera thì trước đây
+  // Pokémon kẹt luôn ở dạng biến hình ngoài truyện (chỉ "Tiếp tục câu
+  // chuyện" mới trả về bản gốc). Từ đợt này máu được GIỮ LẠI sau trận nên
+  // kẹt dạng biến hình còn làm sai cả maxHp — trả về bản gốc khi unmount.
+  // revertGimmicks dùng functional updater nên an toàn, và tự no-op nếu
+  // handleContinue đã xử lý xong (preGimmickRef đã null).
+  useEffect(() => () => revertGimmicks(), [])
 
   // Các forme Mega của loài đang ra trận (dò từ pokedex thật: baseSpeciesId
   // trỏ về loài gốc + tên chứa "-Mega"). Charizard/Mewtwo có 2 bản X/Y.
@@ -734,7 +760,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         {
           role: 'system',
           content: [
-            `Bạn nhập vai một Pokémon ${isBoss ? 'HUYỀN THOẠI (boss)' : 'hoang dã'} đang giao chiến với người chơi, kiêm trọng tài. Trả lời hoàn toàn bằng tiếng Việt.`,
+            `Bạn nhập vai một Pokémon ${isBoss ? 'HUYỀN THOẠI (boss)' : isWild ? 'hoang dã' : 'CỦA MỘT HUẤN LUYỆN VIÊN KHÁC'} đang giao chiến với người chơi, kiêm trọng tài. Trả lời hoàn toàn bằng tiếng Việt.`,
+            // Đợt 71: dặn model biết đây là Pokémon có chủ (app vẫn chặn
+            // cứng ở dưới, đây chỉ là lớp cho lời kể hợp lý hơn).
+            isWild ? '' : 'QUAN TRỌNG: bạn ĐÃ CÓ CHỦ và trung thành với huấn luyện viên của mình. TUYỆT ĐỐI không dùng kết quả "join" — bạn không bao giờ bỏ chủ để theo người lạ. Cùng lắm là "calm" (nguôi giận, ngừng đánh).',
             `Đối phương (bạn đóng vai): ${enemyMon.name} Lv${enemyMon.level}, hệ ${enemyMon.types.join('/')}, HP còn ${hpPct}%${isBoss ? ', là boss huyền thoại kiêu hãnh' : ''}.`,
             `Pokémon phe người chơi: ${playerMon.name} Lv${playerMon.level}, HP còn ${Math.round((playerMon.hp / playerMon.maxHp) * 100)}%.`,
             `Người chơi vừa NÓI với bạn (thuyết phục dừng đánh / dụ dỗ đi theo / doạ nạt / trò chuyện). Phản hồi NGẮN 1-3 câu đúng bản chất Pokémon: phản ứng bằng hành vi, tiếng kêu, ánh mắt, cử chỉ — KHÔNG nói tiếng người.`,
@@ -763,12 +792,24 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         setEndReason('calm')
         setFinished(true)
       } else if (result === 'join') {
+        // ĐỢT 71: Pokémon CỦA TRAINER KHÁC không thể bỏ chủ mà theo mình —
+        // chặn ở phía app (quy tắc số 5), không tin model tự tuân thủ. Model
+        // vẫn được dặn trong prompt, nhưng nếu nó trả [[TALK result=join]]
+        // thì ở đây hạ xuống thành "hoà giải".
+        if (!isWild) {
+          pushLog(`${enemyMon.name} đã dịu đi, nhưng nó có chủ rồi — nó quay về bên huấn luyện viên của mình.`)
+          setEndReason('calm')
+          setFinished(true)
+          return
+        }
+        const lured = applyPerksToMon({ ...enemyMon }, playerTraits?.perks)
         if (party.length < 6) {
-          // Đợt 70: Pokémon dụ theo cũng là "sở hữu" → áp thiên phú cơ chế.
-          setParty([...party, applyPerksToMon({ ...enemyMon }, playerTraits?.perks)])
+          setParty([...party, lured])
           pushLog(`${enemyMon.name} quyết định ĐI THEO BẠN! Đã vào đội hình.`)
         } else {
-          pushLog(`${enemyMon.name} muốn đi theo bạn, nhưng đội hình đã đầy 6 — nó lưu luyến rời đi.`)
+          // Đợt 71: đội đầy thì vào HÒM PC thay vì biến mất như trước.
+          setPcBox((cur) => [...(cur ?? []), lured])
+          pushLog(`${enemyMon.name} đi theo bạn! Đội đã đầy 6 nên nó được gửi vào hòm PC.`)
         }
         setEndReason('join')
         setFinished(true)
@@ -872,7 +913,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           setParty((cur) => [...(cur ?? []), caught])
           pushLog(`Tuyệt vời! ${enemyMon.name} đã được bắt và vào đội hình!`)
         } else {
-          pushLog(`Bắt được ${enemyMon.name}, nhưng đội đã đầy 6 — nó được gửi về nhà.`)
+          // Đợt 71: trước đây con thứ 7 bị VỨT LUÔN (chỉ ghi log "gửi về
+          // nhà" cho có). Nay vào hòm PC thật, lấy ra được ở Trung tâm.
+          setPcBox((cur) => [...(cur ?? []), caught])
+          pushLog(`Bắt được ${enemyMon.name}! Đội đã đầy 6 nên nó được gửi vào hòm PC (${(pcBox ?? []).length + 1} con trong hòm).`)
         }
         setEndReason('caught')
         setFinished(true)
@@ -956,10 +1000,27 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     if (continuingRef.current) return
     continuingRef.current = true
     const outcome = endReason ?? (enemyMon.hp <= 0 ? 'win' : playerMon.hp <= 0 ? 'lose' : 'escaped')
-    // Biến hình (Mega/Dynamax/Tera) chỉ tồn tại TRONG trận — trả về bản gốc
-    // TRƯỚC khi resetBattle hồi máu, để ngoài truyện vẫn là con thường.
-    revertGimmicks()
-    resetBattle()
+    // ĐỢT 71: máu KHÔNG còn tự hồi khi hết trận. Vì vậy phải tính bản CUỐI
+    // CÙNG của con ra trận ngay tại đây rồi ghi MỘT lần, thay vì gọi
+    // revertGimmicks() (setState) rồi resetBattle() (setState nữa) — hai
+    // lần ghi liên tiếp dễ đè nhau và làm máu thật bị mất.
+    // Biến hình Mega/Dynamax/Tera chỉ tồn tại TRONG trận nên trả về bản gốc,
+    // nhưng GIỮ nguyên lượng máu và trạng thái đang có.
+    const base = preGimmickRef.current
+    const finalMon = base
+      ? {
+          ...base,
+          hp: Math.min(playerMon.dyna ? Math.round(playerMon.hp / 2) : playerMon.hp, base.maxHp),
+          status: playerMon.status,
+          sleepTurns: undefined,
+        }
+      : { ...playerMon, sleepTurns: undefined }
+    preGimmickRef.current = null
+    setPlayerMon(finalMon)
+    // Đồng bộ máu/trạng thái về ĐỘI HÌNH — nếu không, HUD vẫn hiện máu đầy
+    // trong khi con đang ra trận thoi thóp.
+    setParty((cur) => syncMonInParty(cur, finalMon))
+    resetBattle() // giờ chỉ reset đối thủ
     onBattleEnd(outcome)
   }
 

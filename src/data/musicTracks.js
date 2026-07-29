@@ -126,11 +126,31 @@ export function resolveBattleTrackKeys(enemyMon, sceneText = '') {
   return ['battle-wild', 'battle']
 }
 
-/** Nhạc màn hình mở đầu (title screen). */
-export const TITLE_TRACK_KEYS = ['title', 'exploration']
+/** Nhạc màn hình mở đầu (title screen).
+ * Đợt 71: chủ dự án thêm file "title and adventure.mp3" — đặt lên ĐẦU danh
+ * sách nên nó thắng; thiếu file thì tự lùi về title.mp3 → exploration.mp3
+ * như cũ (cơ chế fallback của musicManager). */
+export const TITLE_TRACK_KEYS = ['title and adventure', 'title', 'exploration']
 
 /** Nhạc trong cửa hàng. */
 export const SHOP_TRACK_KEYS = ['shop']
+
+/** Nhạc Trung tâm Pokémon (đợt 71) — dùng khi mở bảng Trung tâm.
+ * Chấp nhận cả tên file "pokemon center.mp3" chưa đổi tên chuẩn. */
+export const POKECENTER_TRACK_KEYS = ['pokecenter', 'pokemon center', 'rest', 'area-town']
+
+/** Nhạc POKÉMON SẮP GỤC (đợt 71) — chủ dự án thêm file "low hp.mp3".
+ * Đây là OVERRIDE ĐÈ LÊN nhạc trận, nên phải kèm sẵn danh sách nhạc trận
+ * phía sau làm dự phòng: thiếu file "low hp" mà danh sách chỉ có mỗi nó thì
+ * musicManager sẽ tắt nhạc hẳn (im lặng) thay vì giữ nhạc trận đang chạy.
+ * @param {string[]} battleKeys danh sách nhạc trận hiện hành
+ */
+export function resolveLowHpTrackKeys(battleKeys) {
+  return ['low hp', ...(battleKeys ?? ['battle'])]
+}
+
+/** Ngưỡng máu bật nhạc "sắp gục" — đúng mốc còi báo động của game gốc (1/5). */
+export const LOW_HP_RATIO = 0.2
 
 /** Jingle kết quả (phát 1 lần, không loop, xong tự quay lại nhạc nền). */
 export const VICTORY_TRACK_KEYS = ['victory']

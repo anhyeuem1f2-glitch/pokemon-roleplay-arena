@@ -35,10 +35,15 @@ function loadSettings() {
   return { enabled: true, volume: 0.5 }
 }
 
-/** Đường dẫn file nhạc — tôn trọng base path của Vite khi deploy dưới subpath. */
+/** Đường dẫn file nhạc — tôn trọng base path của Vite khi deploy dưới subpath.
+ * Đợt 71: MÃ HOÁ tên file. Các file mới có DẤU CÁCH trong tên
+ * ("title and adventure.mp3", "low hp.mp3", "pokemon center.mp3") — để
+ * nguyên dấu cách trong URL là một số máy chủ/proxy trả 404, nhạc câm mà
+ * không báo lỗi gì. encodeURIComponent xử lý cả dấu cách lẫn tiếng Việt có
+ * dấu (VD "huyền ảo.mp3"). */
 function trackUrl(key, ext) {
   const base = (import.meta.env?.BASE_URL ?? '/').replace(/\/+$/, '')
-  return `${base}/music/${key}.${ext}`
+  return `${base}/music/${encodeURIComponent(key)}.${ext}`
 }
 
 class MusicManager {

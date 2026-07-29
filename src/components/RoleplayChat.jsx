@@ -12,8 +12,10 @@ import { applyPerksToMon, trainingExpMultiplier } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
-import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
+import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
+import { detectTrainerBattle, detectPokecenter } from '../data/storyScenes.js'
 import ShopModal from './ShopModal.jsx'
+import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
 import BattleModal from './BattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
@@ -268,6 +270,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
+  if (parsed.pokecenter) out.push(`✚ Trung tâm Pokémon: ${parsed.pokecenter.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
   if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
   if (parsed.datePart) out.push(`🕐 Chuyển buổi: ${parsed.datePart}${tag}`)
@@ -442,6 +445,8 @@ export default function RoleplayChat() {
   }
   const [editDraft, setEditDraft] = useState('')
   const [shopMsgIndex, setShopMsgIndex] = useState(null) // index message đang mở shop
+  // Đợt 71: index message đang mở Trung tâm Pokémon + tab mở sẵn ('heal'|'pc').
+  const [pokecenterMsg, setPokecenterMsg] = useState(null) // {index, tab} | null
   const [lastPromptDebug, setLastPromptDebug] = useState(null)
   // Ghi nhớ tin nhắn nào đang mở trận, để chỉ đánh dấu "đã dùng" khi trận
   // THỰC SỰ kết thúc (thắng/thua/chạy) — bấm "Ẩn" để tạm đóng modal thì vẫn
@@ -714,6 +719,15 @@ export default function RoleplayChat() {
           ...(stateParsed.shops.length > 0
             ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name }
             : {}),
+          // ĐỢT 71 — TRUNG TÂM POKÉMON. Ưu tiên tag [[POKECENTER]] AI khai;
+          // model quên khai thì DÒ TỪ CHÍNH VĂN (quy tắc số 5: không tin
+          // model tuân thủ, phải có đường bắt ở phía app).
+          ...(() => {
+            const pc = stateParsed.pokecenter ?? (detectPokecenter(displayText).inside
+              ? { name: 'Trung tâm Pokémon' }
+              : null)
+            return pc ? { pokecenter: pc.name } : {}
+          })(),
         },
       ])
       // Tracking vị trí: chính văn nhắc địa danh nào trong bản đồ 9 vùng thì
@@ -920,6 +934,26 @@ export default function RoleplayChat() {
     await callAI(nextMessages)
   }
 
+  // Rời Trung tâm Pokémon (đợt 71) — gửi note ẩn để AI kể tiếp cảnh rời đi.
+  async function handlePokecenterFinish(what) {
+    const idx = pokecenterMsg?.index ?? null
+    setPokecenterMsg(null)
+    const note = {
+      role: 'user',
+      hidden: true,
+      resultLabel: what === 'heal' ? 'Đã chữa trị tại Trung tâm Pokémon' : 'Đã dùng máy PC',
+      content:
+        what === 'heal'
+          ? '[Hệ thống — viết tiếp CHÍNH VĂN] Người chơi đã đưa Pokémon cho y tá Joy chữa trị; máy hồi phục chạy xong, TOÀN ĐỘI đã khoẻ mạnh hoàn toàn. Hãy kể lại khoảnh khắc nhận Pokémon về (phản ứng của chúng khi khoẻ lại, lời chào của y tá) rồi để nhân vật RỜI KHỎI trung tâm và tiếp diễn câu chuyện.'
+          : '[Hệ thống — viết tiếp CHÍNH VĂN] Người chơi vừa dùng máy PC ở Trung tâm Pokémon để sắp xếp lại đội hình. Hãy kể ngắn gọn cảnh đó rồi để nhân vật RỜI KHỎI trung tâm và tiếp diễn câu chuyện.',
+    }
+    // Khoá nút của tin đó lại để không bấm đi bấm lại vô hạn.
+    const markUsed = (arr) =>
+      idx !== null ? arr.map((mm, i) => (i === idx ? { ...mm, pokecenter: undefined } : mm)) : arr
+    setMessages((cur) => [...markUsed(cur), note])
+    await callAI([...markUsed(messages), note])
+  }
+
   async function handleBattleEnd(outcome) {
     setBattleOpen(false)
     // Jingle kết quả (đợt 28): thắng/dụ được/hoà giải/bắt được → victory,
@@ -1095,6 +1129,24 @@ export default function RoleplayChat() {
                     window.alert('Bạn chưa có Pokémon nào — hãy để câu chuyện dẫn tới việc nhận Pokémon đầu tiên đã (né trận này bằng lời nói/bỏ chạy trong truyện).')
                     return
                   }
+                  // ===== ĐỢT 71 — HỆ QUẢ CỦA VIỆC BỎ TỰ HỒI MÁU =====
+                  // Trước đây mọi Pokémon đều đầy máu khi bắt đầu trận nên
+                  // không cần kiểm tra gì. Nay máu được giữ nguyên sau trận,
+                  // nên có 2 tình huống mới phải chặn/xử lý ngay tại đây:
+                  //   (a) CẢ ĐỘI đã gục → mở trận là `battleOver` bật ngay,
+                  //       người chơi thua trắng mà không kịp bấm gì.
+                  //   (b) Con đang ra trận đã gục nhưng còn con khoẻ → phải
+                  //       tự đẩy con khoẻ ra thay, không bắt người chơi mở
+                  //       bảng đội hình trong trạng thái đã thua.
+                  const roster = (party ?? []).length ? party : [playerMon]
+                  const healthy = roster.filter((pm) => pm && (pm.hp ?? 0) > 0)
+                  if (healthy.length === 0) {
+                    window.alert('Toàn đội Pokémon của bạn đã gục — không thể vào trận. Hãy tới TRUNG TÂM POKÉMON để chữa trị (hoặc dùng vật phẩm hồi phục trong túi đồ).')
+                    return
+                  }
+                  if ((playerMon.hp ?? 0) <= 0) {
+                    setPlayerMon(healthy[0])
+                  }
                   setActiveBattleMsgIndex(i)
                   // Chỉ chọn đối thủ 1 LẦN cho quả pokeball này — mở lại (sau
                   // khi bấm "Ẩn") phải là ĐÚNG con cũ, tiếp tục đúng HP hiện
@@ -1117,11 +1169,29 @@ export default function RoleplayChat() {
                     })
                     const speciesEntry =
                       mentioned || pokedexSpecies[Math.floor(Math.random() * pokedexSpecies.length)]
-                    // Level ĐA YẾU TỐ (đợt 40): khu an toàn/hiểm + có champion
-                    // canh không + con non/đầu đàn + giai đoạn tiến hoá loài.
-                    // KHÔNG kẹp theo đội người chơi — thế giới có logic riêng.
-                    const { level } = wildLevel({ location: playerLocation, entry: speciesEntry })
-                    const mon = buildMonSmart(speciesEntry, level, movesDb, playerMon?.types)
+                    // ĐỢT 71 — TRẬN NÀY VỚI AI? Trước đây app luôn dựng đối
+                    // thủ như Pokémon HOANG DÃ, nên trận với huấn luyện viên
+                    // vẫn ném bóng bắt được, vẫn chạy trốn được, và level lấy
+                    // theo "khí hậu sức mạnh" của khu chứ không theo thân
+                    // phận trainer. Nay dò từ chính văn.
+                    const battleCtx = detectTrainerBattle(m.content)
+                    // Level: trainer thì theo THÂN PHẬN (trainerMonLevel đã có
+                    // từ đợt 40 nhưng chưa từng được gọi ở luồng chơi chính);
+                    // hoang dã thì theo hoàn cảnh khu vực như cũ.
+                    const bestLv = Math.max(
+                      playerMon?.level ?? 0,
+                      ...(party ?? []).map((pm) => pm?.level ?? 0),
+                    )
+                    const level = battleCtx.isTrainer
+                      ? trainerBattleLevel({
+                          tier: battleCtx.tier, entry: speciesEntry,
+                          location: playerLocation, playerBestLevel: bestLv,
+                        })
+                      : wildLevel({ location: playerLocation, entry: speciesEntry }).level
+                    const mon = buildMonSmart(
+                      speciesEntry, level, movesDb, playerMon?.types, battleCtx.isTrainer,
+                    )
+                    if (battleCtx.isTrainer) mon.trainerLabel = battleCtx.label
                     setEnemyMon(mon)
                     setMessages((msgs) =>
                       msgs.map((mm, idx) =>
@@ -1173,6 +1243,44 @@ export default function RoleplayChat() {
                     }}
                   >
                     🛒 {m.shopUsed ? `Đã mua sắm — ${m.shopName}` : `Vào cửa hàng: ${m.shopName}`}
+                  </button>
+                </div>
+              )}
+              {/* Đợt 71: TRUNG TÂM POKÉMON — 2 nút như quầy trong game gốc. */}
+              {m.pokecenter && (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '6px 0' }}>
+                  <button
+                    onClick={() => setPokecenterMsg({ index: i, tab: 'menu' })}
+                    title="Chữa trị cho Pokémon"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 8,
+                      border: '1px solid #e05a5a', background: 'var(--bg-deep)',
+                      color: '#e05a5a', borderRadius: 999, padding: '6px 16px',
+                      cursor: 'pointer', fontSize: 13,
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 40 40">
+                      <rect x="15" y="4" width="10" height="32" rx="2.5" fill="#e05a5a" />
+                      <rect x="4" y="15" width="32" height="10" rx="2.5" fill="#e05a5a" />
+                    </svg>
+                    Chữa trị
+                  </button>
+                  <button
+                    onClick={() => setPokecenterMsg({ index: i, tab: 'pc' })}
+                    title="Mở máy PC — sắp xếp đội hình"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 8,
+                      border: '1px solid var(--mint)', background: 'var(--bg-deep)',
+                      color: 'var(--mint)', borderRadius: 999, padding: '6px 16px',
+                      cursor: 'pointer', fontSize: 13,
+                    }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 40 40">
+                      <rect x="4" y="6" width="32" height="22" rx="3" fill="none" stroke="var(--mint)" strokeWidth="3" />
+                      <rect x="15" y="30" width="10" height="3" fill="var(--mint)" />
+                      <rect x="10" y="33" width="20" height="3" rx="1.5" fill="var(--mint)" />
+                    </svg>
+                    Máy PC
                   </button>
                 </div>
               )}
@@ -1426,6 +1534,15 @@ export default function RoleplayChat() {
         />
       )}
 
+      {pokecenterMsg !== null && (
+        <PokecenterModal
+          centerName={messages[pokecenterMsg.index]?.pokecenter}
+          initialTab={pokecenterMsg.tab}
+          onClose={() => setPokecenterMsg(null)}
+          onFinish={handlePokecenterFinish}
+        />
+      )}
+
       {battleOpen && enemyMon && isSafariArea(playerLocation) && (
         <SafariModal
           onClose={() => setBattleOpen(false)}
@@ -1435,6 +1552,9 @@ export default function RoleplayChat() {
 
       {battleOpen && !isSafariArea(playerLocation) && (
         <BattleModal
+          // Đợt 71: Pokémon của huấn luyện viên khác thì KHÔNG bắt được,
+          // KHÔNG chạy trốn được, KHÔNG dụ đi theo được.
+          isWild={!enemyMon?.isTrainerMon}
           environment={envFromWeather(getWeather(storyDate, playerLocation).label)}
           onClose={() => {
             // Bấm "Ẩn": lưu lại đúng trạng thái đối thủ hiện tại (HP, trạng

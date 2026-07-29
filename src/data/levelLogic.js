@@ -170,3 +170,46 @@ export function receivedMonLevel({ entry, requestedLevel, location, rng = Math.r
   // AI không ghi level → sinh theo hoàn cảnh (như một cá thể thường của vùng).
   return wildLevel({ location, entry, role: 'normal', rng }).level
 }
+
+
+// ============ LEVEL TRẬN VỚI TRAINER TRONG TRUYỆN (đợt 71) ============
+// `trainerMonLevel` ở trên là công thức "canon" theo thân phận + tuổi + kinh
+// nghiệm, viết từ đợt 40 nhưng CHƯA TỪNG được luồng chơi chính gọi tới — mọi
+// trận đều dựng đối thủ bằng `wildLevel`. Khi đợt 71 nối dây trainer, tôi đo
+// thử: ở Pallet Town (dải nền 2-5), một "huấn luyện viên khác" bình thường ra
+// Lv17 và chủ gym ra Lv42. Cộng với hai thay đổi cùng đợt — KHÔNG chạy trốn
+// được khỏi trận trainer, và KHÔNG tự hồi máu sau trận — thì đó là án tử cho
+// người chơi beta đang ở Lv5-7.
+//
+// Nên trận trainer trong truyện dùng công thức MỀM này: lấy nền theo khu vực
+// (giữ nguyên cảm giác cũ) hoặc theo đội người chơi, tuỳ cái nào cao hơn, rồi
+// cộng một khoảng chênh theo THÂN PHẬN. Kết quả: thân phận vẫn có sức nặng
+// (chủ gym luôn là bức tường so với tân binh), độ khó tự giãn theo đà lớn lên
+// của người chơi, và không bao giờ nhảy vọt vô lý.
+//
+// Muốn độ khó CANON đúng như game gốc thì đổi `trainerBattleLevel` thành
+// `trainerMonLevel` ở RoleplayChat — công thức kia vẫn nguyên vẹn ở trên.
+export const TRAINER_TIER_EDGE = {
+  child: 0, youth: 1, rookie: 2, grunt: 3, veteran: 5, ace: 7,
+  admin: 8, gym: 9, boss: 12, elite: 13, champion: 16,
+}
+
+/**
+ * Level 1 Pokémon của trainer trong trận phát sinh từ chính văn.
+ * @param {object} params
+ * @param {string} params.tier thân phận (khoá của TRAINER_TIER_EDGE)
+ * @param {object} params.entry pokedex entry của loài
+ * @param {{regionKey,areaKey}|null} params.location
+ * @param {number} params.playerBestLevel level cao nhất trong đội người chơi
+ */
+export function trainerBattleLevel({ tier, entry, location, playerBestLevel = 0, rng = Math.random }) {
+  const areaBase = wildLevel({ location, entry, role: 'normal', rng }).level
+  const edge = TRAINER_TIER_EDGE[tier] ?? 2
+  // Sàn: không thấp hơn đội người chơi 1 cấp — trainer mà yếu hơn hẳn thì
+  // trận đấu vô nghĩa; trần mềm: không vượt quá đội người chơi + chênh lệch
+  // thân phận + 3, để một lần AI gọi nhầm "champion" không xoá sổ ván chơi.
+  const floor = playerBestLevel > 0 ? playerBestLevel - 1 : 0
+  const lv = Math.max(areaBase, floor) + edge
+  const ceiling = playerBestLevel > 0 ? playerBestLevel + edge + 3 : 100
+  return clampLv(Math.min(lv, ceiling))
+}

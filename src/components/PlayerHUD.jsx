@@ -221,7 +221,7 @@ export default function PlayerHUD({ mobile = false }) {
             <button
               key={i}
               onClick={() => mon && setInfoMon(mon)}
-              title={mon ? `${mon.name} Lv${mon.level} — bấm xem chi tiết` : 'Ô trống'}
+              title={mon ? `${mon.name} Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${(mon.hp ?? 0) <= 0 ? ' (đã gục — cần Trung tâm Pokémon)' : ''}${mon.status ? ` [${mon.status}]` : ''} — bấm xem chi tiết` : 'Ô trống'}
               style={{
                 aspectRatio: '1',
                 border: mon ? '1px solid var(--line)' : '1px dashed var(--line)',
@@ -250,6 +250,17 @@ export default function PlayerHUD({ mobile = false }) {
                   <span style={{ fontSize: 8.5, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
                     Lv{mon.level}
                   </span>
+                  {/* Đợt 71: máu KHÔNG còn tự hồi sau trận nữa, nên đội hình
+                      phải nhìn thấy được con nào đang thương tích — không thì
+                      người chơi chẳng biết khi nào cần vào Trung tâm. */}
+                  {(() => {
+                    const r = Math.max(0, Math.min(1, (mon.hp ?? 0) / Math.max(1, mon.maxHp ?? 1)))
+                    return (
+                      <div style={{ width: '82%', height: 3, borderRadius: 999, background: 'var(--bg-panel)', overflow: 'hidden', marginTop: 2 }}>
+                        <div style={{ width: `${r * 100}%`, height: '100%', background: r <= 0 ? '#6b6b6b' : r < 0.25 ? '#d94f4f' : r < 0.5 ? '#e8b84a' : 'var(--mint)' }} />
+                      </div>
+                    )
+                  })()}
                 </>
               ) : (
                 <span style={{ color: 'var(--text-dim)', fontSize: 14 }}>—</span>

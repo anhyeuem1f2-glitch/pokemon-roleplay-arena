@@ -114,7 +114,7 @@ function PickCard({ selected, title, desc, onClick, compact }) {
 export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const {
     apiConfig, character, stylePreset, mainPreset, assistantPrefill,
-    setPlayerName, setPlayerMon, setMessages, setGameStarted,
+    setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
     memoryApiConfig, playerIdentity, setPlayerIdentity,
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
@@ -249,6 +249,9 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setPlayerTraits({ personality, superpower, customPower, perks })
     setPlayerMon(null)
     setParty([])
+    // Đợt 71: hòm PC cũng phải sạch khi bắt đầu hành trình mới, không thì
+    // Pokémon của run trước còn nằm trong máy tính của run sau.
+    setPcBox([])
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
     // tích/độ no của run trước dính sang run mới (vì đều persist) — hành
     // trình MỚI phải sạch sẽ từ đầu.

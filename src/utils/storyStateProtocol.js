@@ -21,7 +21,7 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Nhân vật chính BỊ THƯƠNG hoặc HỒI PHỤC phần thân thể nào (thế giới này Pokémon tấn công con người là chuyện bình thường): [[BODY leftArm=+25]] (dương = thương thêm, âm = hồi phục; bộ phận: head, torso, leftArm, rightArm, leftLeg, rightLeg; 0 lành lặn, 100 là mất/hỏng hẳn — vết cào nhẹ +5~10, trúng đòn nặng +20~40, gãy/bỏng nặng +50+). Mô tả vết thương trong lời kể phải khớp với tag.
 - Câu chuyện dẫn tới việc MUA SẮM tại một cửa hàng: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật (30-300 món tuỳ quy mô, có thương hiệu Silph Co./Devon Corp./hãng nhỏ) — đừng tự liệt kê hàng trong chính văn, chỉ tả không khí cửa hàng. Cửa hàng nhỏ ven đường = quy mô nhỏ, siêu thị thành phố = lớn.
 - Người chơi THẬT SỰ có được một Pokémon mới trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
-- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]] — VD [[MOVE Cerulean City]], [[MOVE Viridian Forest]]; giúp bản đồ + level Pokémon hoang cập nhật đúng vị trí. Chỉ tag khi THỰC SỰ đổi chỗ.
+- Nhân vật BƯỚC VÀO TRUNG TÂM POKÉMON (Pokémon Center — nơi y tá Joy chữa trị): [[POKECENTER Tên trung tâm]] — hệ thống sẽ hiện 2 nút cho người chơi tự bấm: CHỮA TRỊ và MÁY PC. Vì vậy trong lời kể ĐỪNG tự ý viết rằng Pokémon đã được chữa xong hay đã đổi đội hình — chỉ tả cảnh bước vào, y tá chào hỏi, rồi DỪNG LẠI để người chơi chọn. Khi nhân vật rời đi thì kể rõ là đã rời khỏi trung tâm.\n- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]] — VD [[MOVE Cerulean City]], [[MOVE Viridian Forest]]; giúp bản đồ + level Pokémon hoang cập nhật đúng vị trí. Chỉ tag khi THỰC SỰ đổi chỗ.
 - Nhân vật hoặc Pokémon ĂN UỐNG / bỏ bữa / lao lực rõ rệt trong diễn biến: [[HUNGER người+25]] hoặc [[HUNGER pokemon+30]] (độ NO 0-100; ăn = cộng, đói lả/vận động nặng = trừ; app tự trừ dần theo ngày nên chỉ tag khi có sự kiện rõ ràng).
 - Thời gian trong truyện trôi qua (ngủ một đêm, đi đường nhiều ngày, chờ đợi...): [[DATE +1]] (số ngày trôi); chuyển buổi trong cùng ngày: [[DATE buổi=sáng|trưa|chiều|tối|đêm]]. Ngày giờ hiện tại luôn được cung cấp trong ngữ cảnh — lời kể về thời gian phải khớp với nó.
 - NPC CÓ TÊN xuất hiện lần đầu, hoặc lộ thông tin quan trọng mới: khai báo hồ sơ bằng [[NPC Tên | tuổi=24 | nghề=Kiểm lâm | đội=Pikachu Lv25, Luxray Lv30 | ghi chú=em gái của trưởng gym]] — các trường tuổi/nghề/đội/ghi chú đều tuỳ chọn, cập nhật NPC cũ thì chỉ cần ghi trường thay đổi. QUY TẮC TẠO NPC: tên phải ĐA DẠNG đúng chất thế giới Pokémon (đừng lặp lại mãi vài cái tên quen tay như "Elara"); tuổi + nghề nghiệp hợp bối cảnh (dân thường đa số KHÔNG phải trainer); nếu là trainer thì đội hình 1-4 Pokémon hợp nghề/vùng, LEVEL PHẢI HỢP LÝ với khu vực hiện tại và trình độ người chơi (dân thường/tân binh thấp, kiểm lâm/cảnh sát trung bình, gym leader cao) — không lạm phát level.
@@ -47,6 +47,9 @@ const FACT_RE = /\[\[\s*FACT\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 const REL_RE = /\[\[\s*REL\s+([^=\]|]+?)\s*=\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?)\s*)?\]\]/gi
 const BODY_RE = /\[\[\s*BODY\s+(head|torso|leftArm|rightArm|leftLeg|rightLeg)\s*=\s*([+-]?\d+)\s*\]\]/gi
 const SHOP_RE = /\[\[\s*SHOP\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
+// Đợt 71: nhân vật ĐANG Ở TRONG Trung tâm Pokémon → hiện nút Chữa trị + Máy PC.
+// Tên sau tag là tuỳ chọn ([[POKECENTER]] hoặc [[POKECENTER Trung tâm Viridian]]).
+const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
 
 /**
  * Parse mọi tag trạng thái trong text. Trả về:
@@ -55,7 +58,7 @@ const SHOP_RE = /\[\[\s*SHOP\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
  * Regex neo theo DÒNG nên [[BATTLE]] và [[DMG]] không bị đụng tới.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], hunger: [], moves: [], dateAdvance: 0, training: 0, datePart: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], hunger: [], moves: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
   const rel = []
   const body = []
@@ -68,6 +71,7 @@ export function parseStoryStateTags(text) {
   let dateAdvance = 0
   let training = 0
   let datePart = null
+  let pokecenter = null
 
   for (const m of text.matchAll(MONEY_RE)) money += parseInt(m[1], 10)
   for (const m of text.matchAll(REL_RE)) {
@@ -126,6 +130,7 @@ export function parseStoryStateTags(text) {
     training += Number.isFinite(n) ? Math.max(1, Math.min(3, n)) : 1
   }
   for (const m of text.matchAll(DATE_PART_RE)) datePart = m[1]
+  for (const m of text.matchAll(POKECENTER_RE)) pokecenter = { name: (m[1] ?? '').trim() || 'Trung tâm Pokémon' }
   // [[HUNGER người+25]] — độ no của người / Pokémon (đợt 36).
   for (const m of text.matchAll(MOVE_RE)) moves.push(m[1].trim())
   for (const m of text.matchAll(HUNGER_RE)) {
@@ -138,6 +143,7 @@ export function parseStoryStateTags(text) {
     .replace(REL_RE, '')
     .replace(BODY_RE, '')
     .replace(SHOP_RE, '')
+    .replace(POKECENTER_RE, '')
     .replace(NPC_RE, '')
     .replace(FACT_RE, '')
     .replace(POKEMON_RE, '')
@@ -156,7 +162,7 @@ export function parseStoryStateTags(text) {
     .trim()
 
   return { money, rel, body, shops, npcs, facts, pokemons, hunger, moves, dateAdvance,
-    training, datePart, cleaned }
+    training, datePart, pokecenter, cleaned }
 }
 
 /**

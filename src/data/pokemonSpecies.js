@@ -450,6 +450,12 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     // báo "🧬 bảo lên Lv.8 mà HUD vẫn Lv.6". uid không đổi trọn đời cá thể.
     uid: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     baseStats: speciesEntry.baseStats ?? null,
+    // Đợt 71: LƯU cờ này lên chính đối tượng mon. Trước đây `isTrainerMon`
+    // chỉ là tham số dùng nội bộ cho pickMoves rồi bị vứt đi — nên
+    // `enemyMon.isTrainerMon` luôn undefined, kéo theo 2 hậu quả: thưởng EXP
+    // x1.5 cho trận trainer không bao giờ áp, và app không có cách nào biết
+    // để chặn bắt Pokémon của huấn luyện viên khác.
+    isTrainerMon: Boolean(isTrainerMon),
     maxHp,
     hp: maxHp,
     moves,

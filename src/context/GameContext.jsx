@@ -164,11 +164,16 @@ export function GameProvider({ children }) {
   const [enemyMon, setEnemyMon] = useState(SAMPLE_ENEMY_MON)
 
   const resetBattle = useCallback(() => {
-    // Null-guard (đợt 32): chế độ khởi đầu "tay trắng" có thể chưa có
-    // playerMon — đừng crash.
-    setPlayerMon((m) => (m ? { ...m, hp: m.maxHp, status: null, sleepTurns: undefined } : m))
+    // ĐỢT 71 — BỎ TỰ HỒI MÁU SAU TRẬN (yêu cầu của chủ dự án).
+    // Trước đây kết thúc trận là Pokémon của người chơi tự đầy máu và sạch
+    // trạng thái, nên thương tích chẳng có sức nặng gì. Nay CHỈ reset đối
+    // thủ (con này bị vứt đi ngay sau trận); máu và trạng thái của người
+    // chơi được GIỮ NGUYÊN, muốn hồi thì phải vào Trung tâm Pokémon hoặc
+    // dùng vật phẩm — đúng như game gốc.
+    // Null-guard (đợt 32): chế độ khởi đầu "tay trắng" có thể chưa có mon.
     setEnemyMon((m) => (m ? { ...m, hp: m.maxHp, status: null, sleepTurns: undefined } : m))
   }, [])
+
 
   // --- Preset / hướng dẫn văn phong (thay cho câu hướng dẫn mặc định) ---
   const [stylePreset, setStylePresetState] = useState(() => {
@@ -451,6 +456,34 @@ export function GameProvider({ children }) {
     })
   }, [])
 
+  // --- HÒM PC (đợt 71): Pokémon gửi vào máy tính, không giới hạn 6 như đội.
+  // Trước đây bắt được con thứ 7 là app chỉ ghi log "được gửi về nhà" rồi
+  // VỨT LUÔN — người chơi mất trắng. Nay nó vào hòm PC và lấy ra được qua
+  // giao diện máy tính ở Trung tâm Pokémon.
+  const [pcBox, setPcBoxState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('trainer-arena:pc-box')
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const setPcBox = useCallback((next) => {
+    setPcBoxState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      try { localStorage.setItem('trainer-arena:pc-box', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
+
+  /** Hồi phục TOÀN ĐỘI về đầy máu + sạch trạng thái (Trung tâm Pokémon). */
+  const healAll = useCallback(() => {
+    const heal = (m) => (m ? { ...m, hp: m.maxHp, status: null, sleepTurns: undefined } : m)
+    setPlayerMon((m) => heal(m))
+    setParty((cur) => (cur ?? []).map(heal))
+  }, [setPlayerMon, setParty])
+
   // --- Túi đồ (mua từ shop, dùng dần trong trận/truyện) ---
   const [inventory, setInventoryState] = useState(() => {
     try {
@@ -615,6 +648,9 @@ export function GameProvider({ children }) {
     setBodyStatus,
     party,
     setParty,
+    pcBox,
+    setPcBox,
+    healAll,
     relationships,
     setRelationships,
     inventory,

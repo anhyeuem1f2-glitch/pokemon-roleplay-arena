@@ -4,6 +4,8 @@ import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
+import { applyPerksToMon } from '../data/playerPerks.js'
+import { PerkPicker } from './TraitsModal.jsx'
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
@@ -145,6 +147,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const [personality, setPersonality] = useState([])
   const [superpower, setSuperpower] = useState('none')
   const [customPower, setCustomPower] = useState('')
+  // Đợt 70: thiên phú CƠ CHẾ (áp thẳng vào số liệu game), chọn nhiều được.
+  const [perks, setPerks] = useState([])
   // Mở đầu
   const [openingKey, setOpeningKey] = useState('auto')
   const [desiredOpening, setDesiredOpening] = useState('')
@@ -159,7 +163,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       avatarUrl: playerProfile.avatarUrl || '',
       playerIdentity, customName, customDesc,
       originRegionKey, originAreaKey,
-      personality, superpower, customPower,
+      personality, superpower, customPower, perks,
       storyTone,
       openingKey, desiredOpening,
     }
@@ -180,6 +184,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setPersonality(d.personality ?? [])
     setSuperpower(d.superpower ?? 'none')
     setCustomPower(d.customPower ?? '')
+    setPerks(d.perks ?? [])
     if (d.storyTone) setStoryTone(d.storyTone)
     setOpeningKey(d.openingKey ?? 'auto')
     setDesiredOpening(d.desiredOpening ?? '')
@@ -241,7 +246,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
 
     // LUÔN tay trắng (đợt 34): nhận Pokémon đầu tiên là cột mốc trong truyện.
     // Đợt 69: lưu tính cách/thiên phú để MỌI LƯỢT sau đều gửi cho AI.
-    setPlayerTraits({ personality, superpower, customPower })
+    setPlayerTraits({ personality, superpower, customPower, perks })
     setPlayerMon(null)
     setParty([])
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
@@ -268,7 +273,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       appearance.trim() ? `Ngoại hình: ${appearance.trim()}.` : '',
       `Thân phận: ${identity.name} — ${identity.desc} Để thân phận thấm vào bối cảnh một cách TỰ NHIÊN, không kể lể dồn dập.`,
       // Tính cách + siêu năng lực (đợt 61).
-      buildCharacterTraitsNote({ personality, superpower, customPower }),
+      buildCharacterTraitsNote({ personality, superpower, customPower, perks }),
       originArea
         ? `Xuất thân: ${originArea.name}, vùng ${originRegion?.name}. Mở đầu diễn ra tại/gắn với nơi này (trừ khi tình huống mở đầu nói khác).`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
@@ -327,7 +332,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         const entry = pokedexSpecies.find((sp) => sp.name.toLowerCase() === pk.species.toLowerCase())
         if (entry) {
           const { buildMonSmart } = await import('../data/pokemonSpecies.js')
-          const mon = buildMonSmart(entry, pk.level, movesDb)
+          // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
+          const mon = applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), perks)
           setPlayerMon((cur) => cur ?? mon)
           setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
         }
@@ -650,6 +656,21 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
                 Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến
                 nhân vật thành bất khả chiến bại.
+              </div>
+
+              {/* Đợt 70: THIÊN PHÚ CƠ CHẾ — khác siêu năng lực ở trên, thứ này
+                  áp thẳng vào số liệu game chứ không chỉ là chất liệu kể chuyện.
+                  Chọn được nhiều, và sau này vẫn sửa lại được ở HUD. */}
+              <div style={{ fontSize: 12, color: 'var(--text-mid)', margin: '20px 0 6px', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                Thiên phú cơ chế <span style={{ color: 'var(--mint)', textTransform: 'none' }}>(áp thẳng vào số liệu game)</span>
+              </div>
+              <PerkPicker
+                perks={perks}
+                onToggle={(k) => setPerks((cur) => (cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k]))}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
+                Không bắt buộc — bỏ trống là chơi tiêu chuẩn. Vào truyện rồi vẫn sửa được ở khung
+                “Tính cách &amp; Thiên phú” bên trái.
               </div>
             </div>
           )}

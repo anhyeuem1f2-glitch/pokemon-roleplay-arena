@@ -5,6 +5,7 @@ import { cleanAiOutput } from '../utils/outputCleanup.js'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import { musicManager } from '../utils/musicManager.js'
+import { applyPerksToMon } from '../data/playerPerks.js'
 
 // ============ CHẾ ĐỘ SAFARI (đợt 37) ============
 // Kích hoạt khi người chơi Ở TRONG khu Safari (area.safari) và mở "pokeball"
@@ -18,7 +19,7 @@ import { musicManager } from '../utils/musicManager.js'
 const SAFARI_BALLS = 30
 
 export default function SafariModal({ onClose, onSafariEnd }) {
-  const { enemyMon, party, setParty, playerMon, setPlayerMon, apiConfig, playerLocation } = useGame()
+  const { enemyMon, party, setParty, playerMon, setPlayerMon, apiConfig, playerLocation, playerTraits } = useGame()
   const [balls, setBalls] = useState(SAFARI_BALLS)
   const [catchScore, setCatchScore] = useState(20) // 0-100, ≥ ngưỡng random thì bắt được
   const [fleeChance, setFleeChance] = useState(15) // % bỏ chạy mỗi lượt sau hành động
@@ -121,8 +122,10 @@ export default function SafariModal({ onClose, onSafariEnd }) {
     continuingRef.current = true
     if (finished === 'caught') {
       if (party.length < 6) {
-        setParty([...party, { ...enemyMon }])
-        if (!playerMon) setPlayerMon({ ...enemyMon })
+        // Đợt 70: áp thiên phú cơ chế cho Pokémon bắt được ở Safari.
+        const caught = applyPerksToMon({ ...enemyMon }, playerTraits?.perks)
+        setParty([...party, caught])
+        if (!playerMon) setPlayerMon(caught)
       }
     }
     onSafariEnd(finished === 'caught' ? 'caught' : finished === 'fled' ? 'flee' : 'escaped')

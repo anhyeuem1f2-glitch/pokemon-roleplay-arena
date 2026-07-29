@@ -723,3 +723,52 @@ export function syncMonInParty(party, mon) {
   if (!mon) return party ?? []
   return (party ?? []).map((pm) => (isSameMon(pm, mon) ? mon : pm))
 }
+
+
+// ============ CHỐT AN TOÀN CHỐNG TỤT CẤP (đợt 70) ============
+// Tester báo 3 lần liền cùng một triệu chứng: "trước trận lên Lv6, tiếp tục
+// diễn biến lại tụt về Lv5", "không nhận Exp", "đáng lẽ lên Lv7 mà không
+// lên". Nguyên nhân gốc đã sửa ở RoleplayChat (đọc playerMon từ closure cũ),
+// NHƯNG theo quy tắc số 5 của dự án — cái gì làm hỏng trải nghiệm thì phải
+// CHẶN Ở PHÍA APP chứ không chỉ sửa một chỗ gọi. Level/EXP của MỘT cá thể là
+// bất biến chỉ-tăng: bất kỳ luồng nào (API phụ chạy nền, dev tool, save cũ,
+// code viết sau này) ghi đè bằng bản cũ hơn đều bị chặn tại đây.
+
+/** Hai bản ghi có phải CÙNG một cá thể không — chặt hơn isSameMon.
+ * Một bên có uid còn bên kia không = con vừa dựng mới thay cho con cũ (khác
+ * cá thể), KHÔNG được coi là một → tránh khoá nhầm khi đổi Pokémon ra trận. */
+function sameIndividual(a, b) {
+  if (!a || !b) return false
+  if (a.uid && b.uid) return a.uid === b.uid
+  if (a.uid || b.uid) return false
+  return a.name === b.name
+}
+
+/** Chặn một lần ghi đè làm TỤT level/EXP của cùng một cá thể. */
+export function guardMonRegression(prev, next) {
+  if (!prev || !next || !sameIndividual(prev, next)) return next
+  const prevLv = prev.level ?? 1
+  const nextLv = next.level ?? 1
+  const prevExp = Number.isFinite(prev.exp) ? prev.exp : expForLevel(prevLv)
+  const nextExp = Number.isFinite(next.exp) ? next.exp : expForLevel(nextLv)
+  if (nextLv >= prevLv && nextExp >= prevExp) return next
+  console.warn(
+    `[guard] Chặn ghi đè làm tụt cấp ${prev.name}: Lv${prevLv}/${prevExp}exp → Lv${nextLv}/${nextExp}exp. Giữ mốc cao hơn.`,
+  )
+  const kept = { ...next, level: Math.max(prevLv, nextLv), exp: Math.max(prevExp, nextExp) }
+  // Chỉ tính lại chỉ số khi LEVEL thực sự bị kéo về — nếu chỉ có exp lùi thì
+  // giữ nguyên stats, tránh đụng vào các biến hình tạm (Dynamax nhân đôi
+  // maxHp, Mega đổi baseStats) vốn cùng level nên không rơi vào nhánh này.
+  return kept.level !== nextLv ? recomputeMonStats(kept) : kept
+}
+
+/** Bản áp cho cả đội hình: khớp từng cá thể với bản trước đó rồi chặn tụt. */
+export function guardPartyRegression(prev, next) {
+  if (!Array.isArray(next)) return next
+  const before = Array.isArray(prev) ? prev : []
+  if (before.length === 0) return next
+  return next.map((m) => {
+    const old = before.find((p) => sameIndividual(p, m))
+    return old ? guardMonRegression(old, m) : m
+  })
+}

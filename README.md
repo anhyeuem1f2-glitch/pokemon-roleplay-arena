@@ -1964,3 +1964,251 @@ RoleplayChat.
 **7. Cờ PUBLIC BETA:** bản build production ẨN "Chế độ Dev" (kéo theo ẩn Combat Anime bên trong) — mở lại bằng `?dev=1`. `npm run build` chạy sạch (dist ~500KB). Hướng dẫn deploy đầy đủ trong **DEPLOY.md** (Vercel/Netlify/GitHub Pages; key API do từng người chơi tự nhập, lưu localStorage máy họ).
 
 **Audit:** worldbook ăn đúng chuẩn ST (key/secondary/logic/constant/order/budget — kiểm lại OK); preset pipeline qua buildPresetPrompt + regex script chạy cả 2 nhánh (đợt 47). Kiểm tra: 8 test đợt này + regression đợt 45/47 pass, esbuild toàn bộ src OK, build production OK.
+
+## Cập nhật (đợt 49) — FIX nút "Chế độ Dev" vẫn lộ trên bản deploy
+
+Hai thay đổi: (1) cờ Dev bỏ hẳn phụ thuộc `import.meta.env.PROD` — nút Dev giờ mặc định ẨN Ở MỌI MÔI TRƯỜNG, chỉ hiện khi URL có `?dev=1` (deterministic, không lệ thuộc cấu hình build của hosting); (2) **fix gốc rễ vụ nút "sống dai"**: màn hình chính (IntroScreen) có nút "Chế độ Dev" RIÊNG mà đợt 48 bỏ sót — chỉ ẩn nút ở header màn chơi. Xác minh bằng cách grep bundle đã compile: nút title screen giờ nằm sau điều kiện `has("dev")`. Bài học ghi lại: ẩn 1 tính năng phải grep toàn bộ điểm vào (`grep -rn "Chế độ Dev" src`), không sửa theo trí nhớ.
+
+## Cập nhật (đợt 50) — Trang TÔNG TRUYỆN (độ khó + thể loại), API chau chuốt văn phong, reroll cho tin người chơi, extractor đọc input
+
+**1. Trang "Tông truyện" mới trong wizard tạo nhân vật** (giữa Xuất thân và Mở đầu): chọn ĐỘ KHÓ — ✨ Sảng văn (dễ, main được ưu ái, không chết), 🌸 Anime (chuẩn, thế giới tươi sáng đúng chất anime), ⚖ Thực tế (khó, hậu quả thật, CÓ THỂ chết → [GAME OVER]; note yêu cầu rõ: "KHÔNG cố tỏ ra tăm tối/tàn khốc để gây ấn tượng" — fix phàn nàn giọng văn đen tối quá). Bên dưới chọn tối đa 3 THỂ LOẠI trong 16 loại (sảng văn, hài, romance, harem, bi kịch, trinh thám, kinh dị, học đường, thi đấu, sinh tồn, gây dựng thế lực...). Lưu persist (`storyTone`), note tông chèn system message vào MỌI lượt gọi API chính (RoleplayChat + mở đầu + giả lập). Câu "Tông REALISTIC... mặt tối" hardcode cũ bị xoá.
+
+**2. Slot "API Combat Anime" đổi vai thành "API chau chuốt văn phong"** (anime battle chưa mở beta nên slot thừa): nếu cấu hình, sau mỗi lượt model phụ đánh bóng câu chữ theo tông truyện — luật sắt không đổi nội dung/sự kiện/thoại, chạy SAU khi bóc tag (tag không bị nuốt), lỗi/kết quả ngắn bất thường → giữ nguyên văn. Viewer 🧬 ghi rõ "✍ Văn đã qua API chau chuốt". BattleModal talk vẫn dùng slot này như cũ, không hỏng.
+
+**3. Bỏ checkbox "Cho phép romance"** trong Đạo diễn tình huống — romance giờ là THỂ LOẠI ở trang Tông truyện, đạo diễn luôn được phép dùng chất liệu romance theo tông.
+
+**4. Menu chuột phải tin NGƯỜI CHƠI thêm "↻ Gửi lại (viết lại lượt trả lời)"** (fix phản hồi "nút reroll đâu" — người chơi hay chuột phải vào tin của mình): chỉ tin người chơi MỚI NHẤT, cắt lượt AI phía sau rồi gọi lại.
+
+**5. API cập nhật biến đọc cả INPUT người chơi**: kèm input vào prompt extractor với chỉ dẫn "có thể sai chính tả — hiểu theo ngữ cảnh, tag dùng tên CHUẨN" (case thực tế: người chơi gõ "chamnder" → tag phải là Charmander).
+
+**Kiểm tra:** 7 unit test tone pass, esbuild toàn bộ src OK, `npm run build` OK.
+
+## Cập nhật (đợt 51) — Nút "Thử lại" trên banner lỗi API
+
+Lượt gọi API lỗi (VD proxy 502 upstream) giờ có nút **↻ Thử lại lượt này** ngay cạnh thông báo lỗi — gọi lại từ đúng tin người chơi cuối, không cần gõ lại nên KHÔNG còn cảnh tin nhắn bị nhân đôi trong truyện (bug lộ ra khi proxy chập chờn). Chỉ hiện khi tin cuối cùng là tin người chơi (tức lượt AI chưa trả lời được).
+
+## Cập nhật (đợt 52) — Lớp cập nhật biến (sổ tay keyword) LUÔN BẬT
+
+Trước đây API cập nhật biến chỉ chạy khi người dùng cấu hình model phụ riêng → không cấu hình là sổ tay FACT phụ thuộc hoàn toàn vào việc model chính có "nhớ" khai tag hay không (thực chiến: 0 fact sau cả buổi chơi). Giờ: (1) extractor **luôn chạy mỗi lượt** — có API phụ thì dùng, không thì fallback API CHÍNH (call nhỏ, maxTokens 400, temperature 0, chạy nền); (2) STORY_STATE_INSTRUCTION thêm "QUY TẮC CHĂM GHI SỔ": xuất hiện nhân vật có tên mới → PHẢI [[NPC]], sự kiện/lời hứa/vật phẩm đáng nhớ → PHẢI [[FACT]] chi tiết — thà ghi nhiều còn hơn bỏ sót; (3) mô tả mục cài đặt cập nhật theo. Lưu ý chi phí: mỗi lượt giờ mặc định 3 call (chính văn + tóm tắt + cập nhật biến).
+
+## Cập nhật (đợt 53) — FIX "kiểm tra OK nhưng vào chơi lỗi kết nối" + giao diện MOBILE
+
+**1. FIX gốc lỗi kết nối của người chơi beta.** Console cho thấy app gọi `https://gcli.ggchan.dev/chat/completions` — THIẾU `/v1` → route không tồn tại → server trả lỗi KHÔNG kèm header CORS → trình duyệt báo "blocked by CORS policy / Failed to fetch". Ba sửa đổi:
+- **Tự dò endpoint**: gọi `{base}/chat/completions`, nếu lỗi mạng/404 thì tự thử `{base}/v1/chat/completions`, rồi GHI NHỚ biến thể chạy được (chỉ retry ở các lỗi KHÔNG tốn token). Áp dụng cho cả `/models`.
+- **"Kiểm tra kết nối" giờ test ĐÚNG đường thật** (POST chat/completions, maxTokens 1) thay vì GET `/models` — trước đây `/models` chạy được trong khi POST bị chặn nên nút báo OK giả, đúng ca người chơi phản ánh.
+- **Thông báo lỗi hướng dẫn được**: nêu rõ kiểm tra Base URL có `/v1`, và giải thích vì sao proxy chạy ngon trong SillyTavern (ST gọi từ máy chủ) nhưng web bị chặn (trình duyệt yêu cầu proxy gửi `Access-Control-Allow-Origin`).
+
+**2. Giao diện MOBILE (≤820px).** Bố cục 3 cột đổi thành xếp dọc; 2 HUD thu vào 2 nút bật/tắt "👤 Nhân vật" / "🗺 Bản đồ & menu" (mặc định đóng để chính văn chiếm trọn màn hình); HUD ở chế độ mobile bỏ sticky/100vh, tràn ngang. **Chạm giữ ~500ms thay cho chuột phải** để mở menu tin nhắn (điện thoại không có chuột phải; vuốt để cuộn thì huỷ). Header thu gọn ("Cài đặt API" → "API"), lưới nhiều cột trong wizard xếp dọc, input ép 16px (chặn iOS tự zoom khi focus), panel/nút giảm padding. Thêm favicon (hết 404 trong console) và `viewport-fit=cover`.
+
+**Kiểm tra:** 8 unit test endpoint fallback/CORS pass (gồm ca base có sẵn `/v1` không bị nhân đôi, ca ghi nhớ endpoint), 4 regression test cũ pass, esbuild toàn bộ src OK, build production OK.
+
+## Cập nhật (đợt 54) — Ảnh đại diện: tải ảnh từ máy
+
+Trước đây avatar chỉ nhận link ảnh (và chỉ sửa được trong Dev). Giờ có `AvatarPicker` dùng ở 2 nơi: **bước "Hồ sơ"** khi tạo nhân vật và **bấm thẳng vào khung avatar trên HUD** khi đang chơi. Hỗ trợ: tải file từ máy, kéo-thả ảnh vào khung, dán link, xoá ảnh.
+
+Ảnh được xử lý trước khi lưu (`src/utils/imageUpload.js`): cắt vuông ở giữa → thu về tối đa 320px → JPEG q0.82, thường chỉ 20-45KB, vì localStorage chỉ ~5MB và còn phải chứa lịch sử truyện (persist từ đợt 46). Nền trong suốt được tô màu nền tối của app trước khi xuất JPEG (không thì thành đen). Chặn trước file không phải ảnh và file >12MB, báo lỗi tiếng Việt rõ ràng; hiển thị dung lượng ảnh sau nén. Ảnh nằm hoàn toàn trong trình duyệt người chơi, không gửi đi đâu. Bắt đầu hành trình mới giữ nguyên avatar vừa chọn (chỉ reset tiền/đồ/quan hệ). Tiện thể sửa câu mô tả cũ ở bước Hồ sơ còn nói "tông realistic... mặt tối thật sự" — mâu thuẫn với hệ Tông truyện của đợt 50.
+
+## Cập nhật (đợt 55) — FIX "phản hồi rỗng (finish_reason: length)" với model thinking
+
+Người chơi beta dùng `gemini-3.1-pro-preview` báo lỗi phản hồi rỗng dù kết nối đã thông (lỗi CORS đợt 53 đã hết). Nguyên nhân: **max tokens mặc định của app là 1024**, trong khi các model "thinking" hiện nay (Gemini 2.5/3.x Pro, o-series, Claude thinking) tính CẢ token suy nghĩ nội bộ vào `max_tokens` — 1024 bị đốt sạch cho phần suy nghĩ, không còn chỗ viết chữ nào ra, trả về rỗng kèm `finish_reason: length`. Người chơi mới vào web có localStorage trắng nên dính ngay từ lượt đầu.
+
+Ba sửa đổi: (1) **mặc định 1024 → 8192** ở cả aiClient, ApiSetup và GameContext; (2) **tự thử lại 1 lần** khi gặp rỗng + `finish_reason: length`/`MAX_TOKENS` (hoặc chỉ có `reasoning_content`) với hạn mức ×4 (tối thiểu 16384) — lượt hỏng vốn không sinh nội dung nên thử lại là đáng, và chặn ở đúng 1 lần để không đốt token vô hạn; rỗng kèm `finish_reason: stop` thì KHÔNG thử lại; (3) **thông báo lỗi hướng dẫn được**: giải thích cơ chế thinking-token, khuyên đặt 30000-60000, và cảnh báo riêng nếu tên model có đuôi `-search` (bản này thường trả metadata tìm kiếm thay vì văn bản thuần). Chú thích ở ô Max tokens viết lại cho đúng thực tế.
+
+**Kiểm tra:** 6 unit test pass (tự thử lại ra nội dung, đúng 2 call không lặp vô hạn, stop+rỗng không retry, tôn trọng maxTokens người dùng, reasoning-only cũng retry, cảnh báo -search).
+
+## Cập nhật (đợt 56) — CẦU NỐI CORS phía máy chủ (fix proxy bị trình duyệt chặn)
+
+Tester dùng `gcli.ggchan.dev` vẫn không chơi được dù URL đã đúng `/v1/chat/completions` (fix đợt 53 chạy tốt): proxy đó **thật sự không gửi header `Access-Control-Allow-Origin`** nên trình duyệt chặn — không có cách nào vượt qua từ phía client. SillyTavern gọi được vì ST là server chạy trên máy người dùng, không chịu ràng buộc CORS.
+
+Giải pháp: thêm **Netlify Edge Function `/api-bridge`** (`netlify/edge-functions/api-bridge.ts`) chuyển tiếp request phía máy chủ rồi trả về kèm header CORS hợp lệ. Chọn Edge Function thay vì Netlify Function thường vì bản thường timeout 10s — quá ngắn cho một lượt sinh truyện dài.
+
+Phía app: gọi **TRỰC TIẾP trước** (nhanh nhất, không qua trung gian), chỉ khi dính lỗi mạng/CORS mới tự chuyển sang cầu nối, rồi GHI NHỚ theo baseUrl để mọi lượt sau đi thẳng đường đã chạy được — proxy nào vốn hỗ trợ CORS (như catiecli) vẫn gọi thẳng như cũ, không tốn thêm chặng nào. Người chơi không phải cấu hình gì.
+
+An toàn: cầu nối chỉ nhận request có `Origin` đúng bằng chính site (không thành proxy mở cho người ngoài), chỉ cho đích `https`, chặn địa chỉ nội bộ (SSRF cơ bản), và không ghi log — API key chỉ đi xuyên qua tới đích do chính người dùng chọn. Kèm `netlify.toml` khai báo build + edge function.
+
+**Lưu ý:** cầu nối chỉ hoạt động trên bản deploy Netlify; chạy `npm run dev` ở local sẽ không có `/api-bridge` (khi đó cần proxy hỗ trợ CORS sẵn, hoặc dùng `netlify dev`).
+
+**Kiểm tra:** 3 unit test ca kết hợp "CORS chặn + thiếu /v1" (vẫn ra nội dung, cuối cùng dùng đúng /v1 qua cầu nối, lượt sau chỉ 1 call), 1 test proxy có CORS vẫn gọi thẳng, regression aiClient pass, build production OK.
+
+## Cập nhật (đợt 57) — Hỗ trợ Cloudflare Pages + tự phát hiện cầu nối chưa deploy
+
+**1. Cầu nối CORS nay có bản cho CẢ HAI nền tảng:** `functions/api-bridge.js` (Cloudflare Pages Functions — tự động phục vụ route `/api-bridge` theo tên file) bên cạnh bản Netlify đã có. Deploy ở đâu cũng chạy, không phải sửa code.
+
+**2. Tự chẩn đoán "cầu nối chưa deploy".** Ca thực tế: lần deploy trước chỉ upload `src`, thiếu `netlify.toml` + thư mục `netlify/` → `/api-bridge` không tồn tại → app báo lỗi CORS chung chung, rất khó lần ra. Giờ client phân biệt được: nếu `/api-bridge` trả 404 kèm HTML (trang 404 của host) thay vì JSON thì báo thẳng "cầu nối chưa được deploy — hãy upload thư mục functions (Cloudflare) hoặc netlify + netlify.toml (Netlify)".
+
+**3. Mở `/api-bridge` bằng trình duyệt giờ trả JSON `{ok:true,bridge:"online"}`** — cách kiểm tra 5 giây xem cầu nối đã sống chưa sau mỗi lần deploy (trước đây trả lỗi 400 khó hiểu).
+
+**4. DEPLOY.md thêm mục Cloudflare Pages** đầy đủ các bước + phần kiểm tra cầu nối, kèm ghi chú rõ: đổi host KHÔNG tự sửa CORS, thứ sửa là cầu nối, và phải upload đúng file của nền tảng đang dùng.
+
+**Kiểm tra:** 3 unit test mới (nhận ra cầu nối chưa deploy + hướng dẫn đúng, cầu nối deploy rồi chạy được), các test cầu nối đợt 56 vẫn pass.
+
+## Ghi chú vận hành (đợt 57b) — vì sao cầu nối trên Netlify vẫn lỗi dù đã deploy đúng
+
+Đã xác minh cầu nối sống trên Netlify (mở `/api-bridge` trả JSON). Lỗi còn lại đến từ giới hạn nền tảng: **Netlify Edge Functions có "Response header timeout: 40 giây"** (tài liệu chính thức). Cầu nối phải chờ model sinh xong cả đoạn truyện mới trả về, mà model thinking (Gemini 3.x Pro) thường vượt 40s → Netlify cắt kết nối → client nhận `Failed to fetch`, biểu hiện y hệt lỗi CORS nên rất dễ chẩn đoán nhầm.
+
+**Cloudflare Workers không có giới hạn này**: chỉ tính CPU time, còn thời gian chờ phản hồi từ API ngoài là miễn phí — đúng kiểu tải của một cầu nối (gần như không dùng CPU, chỉ chờ mạng). Vì vậy khuyến nghị deploy lên **Cloudflare Pages** (đã có sẵn `functions/api-bridge.js`), giữ Netlify làm bản dự phòng. DEPLOY.md đã ghi rõ lý do và các bước.
+
+## Cập nhật (đợt 58) — Bật STREAM khi đi qua cầu nối (fix timeout 40s của Netlify)
+
+Netlify Edge Functions có giới hạn "Response header timeout: 40s". Cầu nối chờ model sinh xong cả đoạn mới trả về → lượt truyện dài vượt 40s bị Netlify cắt → client nhận `Failed to fetch` (trông y hệt lỗi CORS). Fix: khi đi qua cầu nối, app gửi `stream: true` và đọc SSE — **header về ngay từ chunk đầu** nên không bao giờ chạm giới hạn 40s, tổng thời gian sinh dài bao lâu cũng được.
+
+Thiết kế thận trọng: chỉ bật stream khi ĐI QUA CẦU NỐI (nơi có giới hạn), gọi trực tiếp giữ nguyên cách cũ để không đụng các proxy không hỗ trợ stream. Nếu proxy phớt lờ tham số `stream` và trả JSON thường, client tự nhận ra qua `content-type` và đọc như cũ. Chunk SSE lỗi định dạng bị bỏ qua thay vì làm hỏng cả lượt; stream rỗng vẫn dùng chung cơ chế thử lại của đợt 55.
+
+**Kiểm tra:** 6 unit test (ghép chunk SSE đúng, chỉ bật stream khi qua cầu nối, proxy có CORS vẫn gọi thẳng JSON, proxy bỏ qua stream vẫn đọc được, lượt đầu chưa biết vẫn ra nội dung), build OK.
+
+## Cập nhật (đợt 60) — FIX /api-bridge bị SPA nuốt trên Cloudflare Workers
+
+Triệu chứng: deploy Workers thành công nhưng mở `/api-bridge` lại ra trang game thay vì JSON → cầu nối coi như không tồn tại, người chơi dùng proxy thiếu CORS vẫn lỗi.
+
+Nguyên nhân (theo tài liệu Cloudflare): `not_found_handling: "single-page-application"` chặn các request điều hướng và trả `index.html` **trước khi worker chạy** — nên `/api-bridge` không bao giờ tới được handler. Fix: thêm `"run_worker_first": ["/api-bridge"]` vào `assets` để riêng đường dẫn này cho worker xử lý trước (dạng mảng cần wrangler ≥ 4.20, dự án đã ghim ^4.114). Chỉ 1 route đi qua worker nên các file tĩnh vẫn được phục vụ trực tiếp, không phát sinh thêm request tính phí.
+
+## Cập nhật (đợt 61) — Tính cách + siêu năng lực, lưu/nạp nhân vật, chuột phải ô nhập, tab Vector
+
+**1. Bước "Tính cách" mới trong wizard** (giữa Thân phận và Xuất thân): chọn tối đa 4 nét trong 16 (ấm áp, vui vẻ, dũng cảm, hiền lành, tò mò, trung thành, tinh nghịch, kiêu hãnh, điềm tĩnh, lạnh lùng...). Note gửi AI ghi rõ "khắc hoạ ĐÚNG các nét này, KHÔNG tự mặc định thành lạnh lùng/thực dụng/vô cảm nếu không có trong danh sách" — fix việc AI hay vẽ nhân vật chính thành lạnh lùng thực dụng. Kèm **siêu năng lực** (8 lựa chọn: Aura, Psychic, Viridian Force, Thấu hiểu Pokémon, Linh cảm, Cảm ứng nguyên tố, hoặc tự mô tả), luôn kèm nhắc "có chừng mực, có giới hạn và cái giá — không bất khả chiến bại".
+
+**2. Lưu / nạp hồ sơ nhân vật** (`characterPresets.js`): nút 💾 ở trang cuối lưu toàn bộ thiết lập (tên, ngoại hình, avatar, thân phận, tính cách, năng lực, tông truyện, mở đầu). Trang Hồ sơ hiện danh sách nhân vật đã lưu để nạp lại 1 chạm — chơi lại nhân vật cũ không phải setup từ đầu. Trùng tên ghi đè, giữ tối đa 20, có nút xoá.
+
+**3. Chuột phải ô nhập** (`RoleplayChat`): ⌫ Xoá nội dung đang gõ · ↩ Xoá lượt trả lời gần nhất · 🗑 Xoá toàn bộ lịch sử. (Nếu đang bôi đen chữ trong ô thì nhường menu copy/paste của trình duyệt.)
+
+**4. Xoá tin nhắn dọn dẹp trí nhớ liên đới**: xoá 1 tin người chơi giờ xoá LUÔN tin AI trả lời ngay sau; đồng thời xoá ký ức vector thuộc khoảng lượt đó (`forgetMemoriesInTurnRange`) và kéo lùi coverage tóm tắt (`trimSummaryCoverage`) để bản tóm tắt/ký ức không còn "nhớ" nội dung đã xoá. "Xoá toàn bộ lịch sử" giờ cũng wipe cả ký ức + tóm tắt (trước đây chỉ xoá messages).
+
+**5. Sổ tay thêm tab "Vector"**: hiển thị trạng thái ký ức vector ĐANG BẬT/TẮT (theo cấu hình API Embedding) và liệt kê từng mục ký ức kèm số lượt — người chơi kiểm chứng được lớp trí nhớ dài hạn có chạy không và nó đang nhớ những gì.
+
+**Kiểm tra:** 12 unit test (traits/superpower note, preset save/load/ghi-đè, xoá ký ức theo khoảng lượt), esbuild toàn bộ src OK, build production OK.
+
+## Cập nhật (đợt 62) — FIX LỖI NGHIÊM TRỌNG "animeApiConfig is not defined" + wiki đi qua cầu nối
+
+**1. FIX bug làm hỏng MỌI LƯỢT CHƠI.** Đợt 50 dùng `animeApiConfig` cho tính năng "API chau chuốt văn phong" nhưng QUÊN destructure nó từ `useGame()` trong RoleplayChat → mỗi lượt gọi API đều ném `ReferenceError: animeApiConfig is not defined` (người chơi beta thấy nó nằm ở ô báo lỗi API nên tưởng lỗi API/lỗi tông truyện). Đây là lỗi chí mạng: chơi 1 lượt là dính, không phụ thuộc cấu hình gì cả.
+
+**2. Chặn tái diễn bằng LINTER.** Thêm `npm run lint` (eslint rule `no-undef`) + `.eslintrc.check.json`. Đã xác minh linter bắt đúng loại bug này (test thử file có `animeApiConfig` chưa khai báo → báo lỗi ngay), và quét toàn bộ `src` hiện còn **0 lỗi no-undef**. eslint để ở devDependencies nên không ảnh hưởng build deploy. Từ nay trước khi đóng gói phải chạy `npm run lint`.
+
+**3. Tra cứu Bulbapedia đi qua cầu nối.** Console người chơi cho thấy Bulbapedia chặn CORS (dù request đã kèm `origin=*`) → tính năng tư liệu canon chết hẳn. Giờ wikiLookup gọi thẳng trước, bị chặn thì tự chuyển sang `/api-bridge` (cùng cầu nối đang dùng cho API chính) và ghi nhớ để lần sau đi thẳng đường chạy được.
+
+**Kiểm tra:** 4 test wiki-bridge, 5 regression test, 0 lỗi no-undef toàn repo, build production OK.
+
+## Cập nhật (đợt 63) — Render thẻ preset, bỏ gò bó độ dài/kịch bản, Pokémon hành xử theo tính cách
+
+**1. Thẻ `<span style>` của preset không còn lộ ra chính văn.** App vốn render chính văn dạng text thuần nên thẻ định dạng của preset (VD `<span style="color:#6188A7; font-style:italic">` cho độc thoại nội tâm) hiện nguyên xi. Thêm `inlineFormat.jsx`: tự parse và render một tập nhỏ thẻ inline (`span` có style, `i/em`, `b/strong`, `u`, `br`) thành định dạng thật. **KHÔNG dùng `dangerouslySetInnerHTML`** (nội dung do model sinh, có thể bị prompt-injection) — chỉ nhận `color` hợp lệ dạng hex/tên màu và vài giá trị font an toàn, giá trị lạ bị bỏ; thẻ ngoài danh sách thì gỡ thẻ nhưng GIỮ chữ. Ký ức vector + tóm tắt dùng bản `stripInlineTags` để lưu text thuần.
+
+**2. Không ép số chữ khi đang dùng preset.** Directive mở đầu hardcode "400-700 từ" đè lên luật độ dài của preset (người chơi báo "số chữ không đúng với preset yêu cầu"). Giờ khi có preset thì chỉ dẫn "TUÂN THEO đúng yêu cầu của preset".
+
+**3. Nới luật Pokémon khởi đầu.** Luật cũ CẤM TUYỆT ĐỐI phát Pokémon ở đoạn mở đầu → khi cảnh mở màn chính là đi nhận Pokémon, AI kẹt cứng: đuổi người chơi lên đường mà chưa giới thiệu/trao con nào. Giờ: mặc định vẫn để dành làm cột mốc, NHƯNG nếu tình huống mở đầu xoay quanh việc nhận Pokémon thì phải diễn TRỌN VẸN — giới thiệu từng Pokémon khởi đầu, cho người chơi quan sát/tương tác/lựa chọn.
+
+**4. Trả lại QUYỀN TỰ DO SÁNG TẠO cho AI** (nhắc ở mở đầu + mỗi lượt): input người chơi là HÀNH ĐỘNG của nhân vật, không phải kịch bản giới hạn; AI chủ động dựng thêm NPC đang bận việc riêng, Pokémon xung quanh làm gì theo bản tính, âm thanh/mùi/thời tiết, sự cố nhỏ chen ngang — thế giới TIẾP DIỄN dù người chơi làm gì.
+
+**5. Pokémon hành động theo TÍNH CÁCH.** Thêm `NATURE_BEHAVIOR` (25 nature → nét hành vi: Naughty nghịch ngợm hay chọc phá, Timid nhút nhát giật mình, Adamant bướng bỉnh ghét bị ngăn cản...) và `buildPartyBehaviorNote` bơm đội hình + tính cách vào prompt MỖI LƯỢT, kèm yêu cầu "cho chúng hành động đúng cá tính chứ không phải con nào cũng ngoan như nhau" — nature giờ ảnh hưởng cả hành vi lẫn chỉ số.
+
+**Kiểm tra:** 15 test render/an-toàn-style/nature, 6 regression test, 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 64) — AUDIT xung đột: chỉ số lệch sau khi xoá tin, tranh chấp lượt, cảnh báo hết bộ nhớ, nhãn Ẩn/Không mua
+
+**1. BUG chỉ số lệch sau khi xoá tin nhắn (nghiêm trọng).** `shopMsgIndex`, `turnInfoIndex`, `editingIndex`, `activeBattleMsgIndex` đều lưu INDEX vào mảng messages. Xoá một tin ở giữa → mọi index sau đó lệch 1 → modal/ô sửa trỏ NHẦM sang tin khác: đang sửa tin số 5 mà xoá tin số 2 thì lưu đè lên tin số 6; mua hàng thì đánh dấu `shopUsed` sai tin; bấm Ẩn trận thì ghi snapshot đối thủ vào tin khác. Fix: thêm `closeIndexBoundUi()` đóng sạch mọi UI trỏ theo index mỗi khi xoá tin (kể cả xoá lượt gần nhất từ menu ô nhập và xoá toàn bộ lịch sử).
+
+**2. Tranh chấp lượt truyện.** `handleShopFinish` không chặn khi đang tải → kết thúc mua sắm giữa lúc AI đang viết sẽ chạy 2 `callAI` song song, tranh nhau ghi messages. Đã thêm guard `if (loading) return`.
+
+**3. Closure cũ đè mất cập nhật chạy nền.** Shop/battle dựng mảng messages mới từ closure → mất meta biến do API phụ ghi trong lúc modal mở. Chuyển sang functional update cho STATE. (Lưu ý kỹ thuật đã ghi trong code: React chạy hàm cập nhật ở pha render nên KHÔNG được lấy kết quả ra dùng ngay — payload gửi AI dựng riêng từ closure, meta không đi vào prompt nên không ảnh hưởng.)
+
+**4. Nhãn "Ẩn" gây hiểu nhầm (yêu cầu người chơi).** Cả hai modal đều đã có 2 đường thoát nhưng nhãn không nói rõ hệ quả. Nay: shop có **"✕ Ẩn (chưa quyết)"** — cất bảng đi, truyện ĐỨNG YÊN, mở lại bất cứ lúc nào — và **"Không mua & đi tiếp"** — chốt không mua, truyện viết tiếp; kèm dòng giải thích ngay dưới 2 nút. Battle đổi thành **"✕ Ẩn (trận vẫn tiếp diễn)"** kèm tooltip nói rõ máu/trạng thái đối thủ được giữ.
+
+**5. Hết bộ nhớ trình duyệt không còn im lặng.** Truyện dài + ảnh đại diện base64 có thể vượt quota localStorage; trước đây lỗi ghi bị nuốt → người chơi tưởng đã lưu, F5 là mất cả buổi. Nay `storageFull` được đưa ra ngoài và hiện banner đỏ trên ô nhập, kèm hướng dẫn xoá bớt.
+
+**Ghi nhận thêm:** bấm Ẩn giữa trận vẫn reset bậc chỉ số (stat stages) — đã biết từ đợt trước, chấp nhận trong bản beta, ghi lại ở đây để không quên.
+
+**Kiểm tra:** 6 test logic mark-used/note, 6 regression test, 0 lỗi no-undef, build OK. (Trong lúc sửa còn bắt được 1 lỗi cú pháp JSX do đặt comment sai chỗ — build đã chặn.)
+
+## Cập nhật (đợt 65) — HỆ KINH NGHIỆM (EXP) + FIX "đánh con nào cũng ra Charmander"
+
+**1. FIX: đối thủ luôn là Pokémon của chính người chơi.** `detectMentionedSpecies` quét tên loài trong chính văn rồi **sắp xếp theo ĐỘ DÀI TÊN**. Câu "Charmander của tôi lao vào cắn Rattata hoang dã" → "Charmander" (10 ký tự) thắng "Rattata" (7) → đối thủ hoang dã biến thành bản sao Pokémon của người chơi, lượt nào cũng vậy (đúng báo cáo "nhấp pokeball con nào cũng chỉ hiện Charmander"). Sửa: (a) loại trừ tên trong đội hình + con đang ra trận; (b) chọn theo **vị trí xuất hiện CUỐI** thay vì độ dài tên (tên nhắc sau thường là đối thủ vừa xuất hiện), vẫn ưu tiên tên dài hơn khi trùng vị trí để "Rat" không ăn mất "Raticate".
+
+**2. THÊM HỆ EXP / LÊN CẤP (thiếu hoàn toàn từ trước).** Trước đây thắng trận chỉ cộng EV, `level` đứng yên vĩnh viễn — Pokémon không bao giờ lớn. Nay:
+- Nhóm tăng trưởng **Medium Fast** như game gốc: tổng EXP để đạt cấp n là n³ (`expForLevel`, `levelFromExp`).
+- EXP nhận khi hạ đối thủ theo công thức gốc **b×L/7**, base-yield suy từ BST (loài mạnh cho nhiều EXP hơn), thưởng **×1.5** với Pokémon của trainer.
+- `applyExpGain` tự lên cấp (cap 100), **tính lại toàn bộ chỉ số** theo IV/EV/nature và cộng thêm phần maxHp tăng vào máu hiện tại.
+- Pokémon mới sinh/bắt được gán `exp` đúng mốc đầu cấp — mon cũ (save trước đợt 65) không có trường này vẫn chạy, tự coi như đang ở mốc đầu cấp, **không tụt cấp**.
+- Thắng trận: cộng cả EV lẫn EXP cho con đang ra trận, đồng bộ về đội hình.
+- **AI được báo để kể**: note gửi model ghi rõ số EXP nhận được, và nếu lên cấp thì yêu cầu kể "khoảnh khắc trưởng thành" thành cảnh thay vì bảng số.
+- **Thanh EXP** trong modal chi tiết Pokémon: hiện tiến độ `current/need → Lv.kế tiếp`, hoặc "Đạt cấp tối đa".
+
+**Kiểm tra:** 11 test EXP (mốc n³, công thức b×L/7, lên nhiều cấp một lúc, cap 100, mon cũ không tụt cấp, thanh tiến độ), 5 test nhận diện đối thủ (gồm đúng ca người chơi báo), 6 regression test, 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 66) — FIX truyện tự kể trước trận đấu, kể ngược ai bỏ chạy, và EXP không chạy
+
+**1. GỐC RỄ: AI viết tiếp truyện SAU điểm `[[BATTLE]]`.** Người chơi báo "chiến đấu bị đặt ở giữa chat, tớ chưa bấm đánh mà bên dưới đã ghi đánh xong rồi; đánh xong prompt lại ra một đoạn sau chiến đấu nữa". Model được dặn "chèn marker rồi dừng" nhưng thực tế chèn giữa bài rồi kể luôn cả trận — và **kết quả nó bịa thường NGƯỢC với kết quả thật** (tester bỏ chạy, truyện kể là đối phương bỏ chạy). Không thể tin model tuân thủ → app **tự cắt**: `truncateAfterInteractiveMarker` bỏ toàn bộ phần sau `[[BATTLE]]`, vì phần đó chưa được phép xảy ra. Cắt SAU khi đã bóc tag trạng thái nên `[[MONEY]]`/`[[FACT]]` cuối tin vẫn áp đủ; bản chau chuốt văn phong cũng bị cắt lại.
+
+**2. Siết chỉ dẫn cho model** (`BATTLE_INSTRUCTION` viết lại 3 mục): (a) dừng bút hẳn sau marker, "TUYỆT ĐỐI KHÔNG viết thêm bất kỳ chữ nào", nêu rõ lý do là sẽ mâu thuẫn kết quả thật; (b) đọc kỹ **ai** bỏ chạy — "NGƯỜI CHƠI ĐÃ CHẠY THOÁT" là nhân vật chính chạy, không được đảo ngược; (c) mua sắm: tả tới trước quầy rồi dừng, KHÔNG tự quyết người chơi mua gì, và nếu lời kể có chi tiền thì BẮT BUỘC kèm `[[MONEY -x]]` (fix "tự mua đồ xong tiền vẫn thế").
+
+**3. FIX EXP không chạy.** Lỗi do chính đợt 65: thông tin lên cấp được gán **bên trong hàm cập nhật state**, mà React chạy hàm đó ở pha render — đọc ra ngay sau đó luôn rỗng nên phần báo lên cấp không bao giờ tới AI. Nay tính EXP/level **trước** rồi mới áp. Kèm 2 sửa nhỏ quan trọng: đồng bộ đội hình khớp theo **TÊN** thay vì tên+level (sau khi lên cấp thì level đã khác, khớp cả level sẽ trượt → EXP chỉ vào `playerMon` còn ô đội hình đứng yên, đúng triệu chứng "ống EXP không chạy"); và **bắt được Pokémon ('caught') cũng nhận EXP** như game gốc.
+
+**4. EXP giờ NHÌN THẤY ĐƯỢC.** Nhãn kết quả trận hiện thẳng `Thắng · +120 EXP · Lv.7!` thay vì chỉ "Thắng" — người chơi kiểm chứng được ngay thay vì phải đoán.
+
+**Kiểm tra:** 10 test mới (cắt đúng chỗ, giữ marker, EXP tính đồng bộ, 4 test nội dung chỉ dẫn), 5 regression test, 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 67) — EXP từ luyện tập & thời gian, nhạc bám theo ngữ cảnh chính văn
+
+**1. Luyện tập / time skip giờ CÓ tăng cấp.** Người chơi báo "phải thiết lập việc huấn luyện cũng tăng EXP", "thử time skip không tăng lv". Đúng — trước đây EXP chỉ đến từ BattleModal nên roleplay thuần không làm Pokémon lớn. Nay:
+- Tag mới **`[[TRAIN cường độ]]`** (1-3) cho AI khai cảnh luyện tập có chủ đích; hướng dẫn ghi rõ chỉ khai khi thật sự có cảnh tập, không khai cho đi đường/đánh trận thường.
+- `expFromTraining` ≈ 8% quãng đường lên cấp mỗi buổi (nhân cường độ), `expFromDays` ≈ 2% mỗi ngày trôi.
+- **Cân bằng có chủ đích:** EXP thời gian thấp hơn nhiều so với đánh trận, và số ngày bị chặn ở 30 mỗi lần — "ngủ 999 ngày" không thể max cấp (có test riêng cho ca lách luật này).
+- Áp cho **toàn đội** (cả đội cùng tập/cùng đi đường), hiện trong viewer 🧬 để kiểm chứng.
+
+**2. Nhạc theo NGỮ CẢNH trong chính văn.** Trước đây nhạc chỉ đổi theo vị trí bản đồ và lúc mở bảng trận. Nay app quét chính văn lượt mới nhất để đoán cảnh: Trung tâm Pokémon, cắm trại/nghỉ ngơi/cho Pokémon ăn, đấu Gym, đấu Champion (riêng Cynthia có bài riêng), trainer cứng, không gian huyền ảo. **Chọn theo cảnh được nhắc MUỘN NHẤT** chứ không theo thứ tự luật — "sau trận gym hôm qua, cậu bước vào Trung tâm Pokémon" phát nhạc Trung tâm, không phải nhạc gym (có test). Không nhận ra cảnh nào thì lùi về nhạc theo **buổi** (đêm/tối → `night.mp3`), rồi mới tới nhạc theo vị trí. Trận đấu thật cũng nhận chính văn để trận Gym/Champion dùng đúng nhạc thay vì nhạc hoang dã.
+
+**3. Đã nhập 20 file nhạc người dùng gửi**, đổi tên sang key chuẩn (bảng đối chiếu đầy đủ ghi trong `public/music/README.txt`). Thêm 8 key mới: `pokecenter`, `rest`, `night`, `battle-gym`, `battle-trainer`, `battle-trainer-hard`, `battle-champion`, `battle-champion-cynthia`.
+
+**Kiểm tra:** 8 test EXP luyện tập/thời gian (gồm ca chống lách "ngủ 999 ngày"), 8 test dò cảnh nhạc, 7 regression test, 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 68) — Túi đồ + Poké Ball + đổi Pokémon TRONG TRẬN, và giải thích lỗi 524
+
+Người chơi báo 4 lỗi trong trận đấu. Ba lỗi đầu thực chất là **tính năng chưa bao giờ được cài đặt** — menu BAG ghi "sẽ được nối ở đợt sau", menu POKÉMON ghi "đang phát triển":
+
+**1. Dùng vật phẩm trong trận (BAG).** Bấm thẳng vào item để dùng: Potion/Super/Hyper/Full Restore/Nước khoáng hồi HP; Antidote/Paralyze Heal/Awakening/Burn Heal chữa trạng thái; Full Restore chữa cả hai. Vật phẩm không dùng được trong trận bị làm mờ kèm giải thích. Dùng đồ **tốn 1 lượt** — đối phương được đánh trả, đúng luật game gốc.
+
+**2. Poké Ball — bắt Pokémon trong trận.** Tỉ lệ bắt theo công thức mô phỏng game gốc: máu càng thấp càng dễ, đối thủ đang ngủ/đóng băng +20% (trạng thái khác +10%), Great Ball +12 / Ultra Ball +25, huyền thoại bị trừ nặng (bậc cao −45). Luôn kẹp trong 3-95% để không bao giờ chắc chắn 100% hay vô vọng. Bắt được thì Pokémon **vào thẳng đội hình** (đầy 6 thì báo gửi về nhà), kết thúc trận với outcome `caught` — vốn đã được nối sẵn vào EXP ở đợt 66.
+
+**3. Đổi Pokémon (POKÉMON).** Danh sách đội hình thật: con đang ra trận được đánh dấu, con đã gục bị khoá, hiện HP từng con. Đổi tốn 1 lượt, trạng thái con rút về được lưu lại vào đội hình, và bậc chỉ số (buff/debuff) reset đúng luật game gốc.
+
+**4. "Biến không cập nhật trong trận"** — chính là hệ quả của (1): trước đây không có đường nào tiêu thụ vật phẩm nên túi đồ đứng yên. Nay dùng đồ trừ đúng số lượng, hết thì biến mất khỏi túi; bắt Pokémon cập nhật đội hình ngay.
+
+**5. Lỗi 524.** Đây là Cloudflare cắt kết nối khi chờ máy chủ AI quá 100 giây — không phải lỗi key hay endpoint. Hai sửa đổi: (a) **nhớ "cần cầu nối" qua các phiên** (localStorage) — trước đây mỗi lần mở lại trang, lượt gọi đầu tiên luôn thử đường trực tiếp, thất bại rồi mới rơi sang cầu nối, và lượt đó chưa bật truyền dữ liệu dần nên hay dính 524; nay phiên sau bật ngay từ lượt đầu; (b) thông báo lỗi 524/504 giải thích đúng nguyên nhân kèm cách xử lý (giảm Max tokens, đổi model nhanh hơn, bấm Thử lại).
+
+**Kiểm tra:** 7 test tỉ lệ bắt & tiêu thụ vật phẩm, 1 test thông báo 524, 1 test ghi nhớ cầu nối, 7 regression test, 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 69) — 5 bug người chơi báo + save game + túi đồ phân ngăn
+
+**BUG 1 — Thiên phú/tính cách "chỉ có mô tả, không áp vào biến".** Đúng: `buildCharacterTraitsNote` chỉ được dùng ở **lượt mở đầu** (IntroScreen), các lượt sau AI hoàn toàn không biết → tính cách/thiên phú bay mất sau vài tin. Nay lưu `playerTraits` vào context (persist), **chèn vào MỌI lượt**, và hiện thành mục "Tính cách & Thiên phú" trên HUD như một chỉ số nhân vật thật.
+
+**BUG 2 — "đội có 3 Pokémon mà 1 con chết là thua luôn".** `battleOver = playerMon.hp <= 0 || enemyMon.hp <= 0` → con đang ra trận gục là khoá hết menu, ép bấm Tiếp tục, tính THUA dù còn Pokémon khoẻ. Nay chỉ thua khi **toàn đội gục**; con ra trận gục mà còn dự bị thì tự mở bảng đội hình, chỉ cho đổi Pokémon (FIGHT/BAG bị khoá, có banner nhắc), và **đổi thay thế sau khi gục KHÔNG bị đánh trả** — đúng luật game gốc.
+
+**BUG 3 — "🧬 báo lên Lv.8 nhưng biến vẫn Lv.6".** Đồng bộ `playerMon` ↔ `party` khớp theo **TÊN**, nên hai cá thể cùng loài (hoặc tên thay đổi) là lệch nhau. Nay mỗi cá thể có **`uid`** cố định trọn đời (`isSameMon`/`syncMonInParty`), khớp theo uid, mon cũ chưa có uid tự lùi về khớp tên nên save cũ không vỡ. Áp cho cả EXP trận, EXP luyện tập và đổi Pokémon trong trận.
+
+**BUG 4 — "lỗi underfiend lúc + độ no".** Chính là chữ **undefined**: parser trả `{who, delta}` nhưng chỗ hiển thị đọc `h.target`. Nay hiện đúng "Độ no người chơi/Pokémon +N".
+
+**BUG 5 — "văn bản kể nhưng biến không theo"**: cùng gốc với bug 1 và 3 (AI không còn thấy tính cách; state lệch giữa HUD và trận).
+
+**YÊU CẦU A — ẩn Mega/Z/Dynamax/Terastal khi chưa có đồ.** Cụm nút gimmick trước đây luôn hiện rồi báo "chưa có trong túi", gây rối. Nay **ẩn hẳn** trừ khi trong túi có ít nhất một vật phẩm kích hoạt (hoặc bật chế độ Dev).
+
+**YÊU CẦU B — save game như Pokémon gốc.** `saveManager.js` + `SaveModal`: **3 ô save**, mỗi ô hiện tên, số Pokémon, cấp cao nhất, tiền, ngày trong truyện, số lượt, thời điểm lưu. Có **Xuất ra file / Nạp từ file** `.json` để cất ván chơi ra ngoài trình duyệt. Cách chụp state: quét toàn bộ khoá `trainer-arena:*` thay vì liệt kê tay (thêm tính năng mới không lo bỏ sót), **loại trừ cấu hình API** — file save đem chia sẻ không bao giờ chứa API key (có test riêng). Tải save sẽ dọn sạch state ván hiện tại trước rồi mới ghi đè, và tự reload trang.
+
+**YÊU CẦU C — túi đồ phân ngăn.** `BagPanel.jsx` theo mô hình quạt gimmick: bấm BAG → hiện các **NGĂN** (◓ Poké Ball, ✚ Hồi phục, ✦ Chữa trạng thái, 🍖 Thức ăn Pokémon, 🍙 Đồ ăn người, 🩹 Y tế, 💠 Trang bị đặc biệt, 🎒 Linh tinh) → bấm ngăn mới hiện vật phẩm bên trong. Ngăn rỗng tự ẩn. Dùng chung được cho cả trong trận (dùng đồ) lẫn ngoài trận (xem).
+
+**Kiểm tra:** 14 test save/load (gồm ca API key không lọt vào save, dọn state cũ khi tải), 11 regression test (uid, phân ngăn, hunger, traits), 0 lỗi no-undef, build OK.
+
+## Cập nhật (đợt 70) — 4 bug tester báo trên Discord + thiên phú CƠ CHẾ
+
+**BUG 1/2/3 — "trước trận lên Lv6, tiếp tục diễn biến lại tụt về Lv5", "không nhận Exp", "đáng lẽ lên Lv7 nhưng không lên".** Ba báo cáo, **một nguyên nhân duy nhất**. Đợt 67 tính EXP luyện tập/ngày trôi bằng `grow(playerMon)` với `playerMon` **đọc từ closure** của lần render lúc `callAI` bắt đầu. Thứ tự chạy thật là: `handleBattleEnd()` gọi `setPlayerMon(Lv6)` → ngay sau đó `await callAI(...)` → biến `playerMon` trong closure **vẫn là bản Lv5 trước trận**. Đến khi AI trả lời có `[[TRAIN]]` hoặc `[[DATE +n]]`, dòng `setPlayerMon(grownActive)` **ghi đè bản Lv6 bằng bản Lv5-cũ-cộng-tí-EXP** → cấp tụt lại, EXP vừa thắng trận bay sạch, và lần sau muốn lên Lv7 thì lại xuất phát từ mốc cũ nên không bao giờ tới. API cập nhật biến (API phụ) còn ghi đè lần thứ hai vì callback chạy nền vẫn giữ đúng closure đó. Đây là **tái phạm quy tắc số 4** của dự án (không lấy/không đọc state quanh hàm cập nhật state của React).
+
+Sửa **hai lớp**:
+- *Lớp 1 — đúng chỗ gây lỗi:* bỏ hẳn việc đọc `playerMon` từ closure trong `applyParsedState`, chỉ dùng functional updater. `grow()` là hàm thuần (chỉ phụ thuộc exp/level của chính con mon) nên `playerMon` và bản trong đội hình cùng xuất phát từ một số liệu sẽ ra cùng kết quả — không cần đồng bộ chéo nữa, hết luôn nguy cơ lệch cấp HUD ↔ trận.
+- *Lớp 2 — chặn ở phía app (quy tắc số 5):* `guardMonRegression` / `guardPartyRegression` trong `pokemonSpecies.js`, nối vào `setPlayerMon` và `setParty` ở `GameContext`. Level/EXP của **một cá thể** (khớp theo `uid`) là bất biến chỉ-tăng: bất kỳ luồng nào — API phụ chạy nền, dev tool, save cũ, hay code viết sau này — ghi đè bằng bản chụp cũ hơn đều bị giữ lại mốc cao hơn kèm `console.warn`. Đổi Pokémon ra trận (uid khác) và mon save cũ chưa có uid vẫn hoạt động bình thường.
+
+**BUG viewer — "Nhận Pokemon: undefined lv.7 (API phụ)".** `parseStoryStateTags` trả về `{species, level}` nhưng `describeParsedChanges` đọc `pk.name`. Đúng **cùng một loại lỗi** với vụ "Độ no undefined" ở đợt 69 — sửa xong nên rà lại toàn bộ chỗ đọc field của parser.
+
+**BUG 4 — "chủ yếu kĩ năng và thiên phú xài không được" + "cái này là không chỉnh sửa được hà Red".** Hai vấn đề tách bạch, sửa cả hai:
+- *Không sửa được:* thiên phú chỉ chọn được **đúng một lần** ở màn tạo nhân vật, vào truyện rồi là chốt cứng kể cả khi bấm nhầm. Nay có `TraitsModal` mở thẳng từ nút **Sửa** ở khung "Tính cách & Thiên phú" trên HUD, đổi lúc nào cũng được, lưu ngay.
+- *Xài không được:* `SUPERPOWERS` cũ chỉ là một đoạn chữ nhét vào prompt — AI kể cho vui, không có gì chạm vào biến game (đúng như mục 5 phần "việc còn tồn"). Nay có lớp **thiên phú CƠ CHẾ** (`playerPerks.js`) song song với siêu năng lực kể chuyện, chọn độc lập, áp thẳng vào số liệu.
+
+**Kỹ năng tester yêu cầu — "Pokémon mình bắt hay sở hữu (chỉ cần trong đội hình) sẽ Max IV/EV ngay khi sở hữu".** Perk `maxIvEv` ("Huyết Thống Hoàn Mỹ"): IV 31 toàn bộ + EV kịch trần 252/252/6 dồn theo 3 chỉ số base cao nhất của loài (đúng luật game gốc: ≤252 mỗi chỉ số, ≤510 tổng — không phá công thức, chỉ là bản build tối ưu mà người chơi hardcore vẫn tự nuôi được). Nối vào **cả 4 đường** một con Pokémon có thể về tay người chơi: tag `[[POKEMON]]` trong truyện, bắt bằng bóng trong trận, dụ theo (`join`), và Safari. Bật giữa chừng thì **nâng luôn cả đội đang có** (không thì bật lên chẳng thấy gì đổi, lại báo "xài không được"); tắt perk **không thu hồi** chỉ số đã nâng. Kèm 2 perk nữa: **Thiên Phú Rèn Luyện** (EXP luyện tập/ngày trôi ×2) và **Bàn Tay Thuần Phục** (tỉ lệ bắt +15%, vẫn kẹp 3-95%). Cả 3 perk đều được bơm mô tả vào prompt mỗi lượt để AI kể khớp với số liệu.
+
+**BUG PHỤ tự tìm thấy — chuỗi `)}` lạc hiện ra màn hình trong menu FIGHT.** `BattleModal.jsx` có một `)}` thừa không khớp với `{cond && (` nào (sót lại từ lần sửa cụm nút gimmick). esbuild **không báo lỗi** mà coi nó là văn bản JSX, nên chuỗi `")}"` đi thẳng vào bundle và hiện lên giao diện. Tệ hơn: espree (parser của eslint) **không parse nổi file** vì lỗi này, nên `npm run lint` **âm thầm bỏ qua toàn bộ `BattleModal.jsx`** — tức là lưới an toàn `no-undef` của quy tắc số 1 đang thủng đúng ở file logic game lớn nhất (1275 dòng), suốt nhiều đợt. Gỡ `)}` xong: giao diện sạch, và lint đã thật sự kiểm tra file này.
+
+**Kiểm tra:** 53 test (`node test-dot70.mjs`) gồm công thức EXP nền, chốt chặn tụt cấp (cả ca đổi Pokémon và save cũ chưa có uid), phân bổ EV 252/252/6, 3 perk, perk vào prompt, và tương thích ngược save cũ — 53 đạt / 0 hỏng. `npm run lint` không còn lỗi no-undef nào (3 lỗi còn lại là comment tắt rule `react-hooks/exhaustive-deps` của plugin chưa cài — lỗi cấu hình sẵn có, không phải lỗi code). `npm run build` OK.

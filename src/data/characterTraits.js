@@ -3,6 +3,8 @@
 // gì, AI hay mặc định vẽ nhân vật chính thành "lạnh lùng, thực dụng, tính
 // toán" — nên cho chọn nét tính cách rõ ràng để AI khắc hoạ đúng.
 
+import { buildPerksNote } from './playerPerks.js'
+
 export const PERSONALITY_TRAITS = [
   { key: 'warm', label: 'Ấm áp, tốt bụng', note: 'ấm áp, tử tế, hay quan tâm người khác' },
   { key: 'cheerful', label: 'Vui vẻ, lạc quan', note: 'vui vẻ, lạc quan, tràn năng lượng tích cực' },
@@ -33,8 +35,10 @@ export const SUPERPOWERS = [
   { key: 'custom', label: 'Tự mô tả…', note: null }, // người chơi tự viết
 ]
 
-/** Note tính cách + siêu năng lực chèn vào prompt (null nếu không chọn gì). */
-export function buildCharacterTraitsNote({ personality = [], superpower = 'none', customPower = '' }) {
+/** Note tính cách + siêu năng lực chèn vào prompt (null nếu không chọn gì).
+ * Đợt 70: gộp thêm THIÊN PHÚ CƠ CHẾ (playerPerks.js) — trước đây perk chỉ
+ * chạy trong code, AI không hề biết nên kể mâu thuẫn với số liệu trên HUD. */
+export function buildCharacterTraitsNote({ personality = [], superpower = 'none', customPower = '', perks = [] }) {
   const parts = []
   const traits = personality.map((k) => PERSONALITY_TRAITS.find((t) => t.key === k)?.note).filter(Boolean)
   if (traits.length) {
@@ -50,5 +54,7 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
       parts.push(`SIÊU NĂNG LỰC ĐẶC BIỆT: ${p.note}. Thể hiện CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại, năng lực có giới hạn và cái giá của nó.`)
     }
   }
+  const perksNote = buildPerksNote(perks)
+  if (perksNote) parts.push(perksNote)
   return parts.length ? parts.join('\n') : null
 }

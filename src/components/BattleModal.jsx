@@ -6,6 +6,7 @@ import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
 import { buildWildMon, isSameMon, syncMonInParty } from '../data/pokemonSpecies.js'
 import { getBossTier } from '../data/bossTiers.js'
+import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
 import { TYPE_COLORS } from '../data/pokemonTypes.js'
 import { applyEnvToDamage } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
@@ -341,7 +342,7 @@ function hasGimmickItem(inventory, kind) {
 }
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits } = useGame()
   const [log, setLog] = useState([`Một ${enemyMon.name} hoang dã xuất hiện!`])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
@@ -763,7 +764,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         setFinished(true)
       } else if (result === 'join') {
         if (party.length < 6) {
-          setParty([...party, { ...enemyMon }])
+          // Đợt 70: Pokémon dụ theo cũng là "sở hữu" → áp thiên phú cơ chế.
+          setParty([...party, applyPerksToMon({ ...enemyMon }, playerTraits?.perks)])
           pushLog(`${enemyMon.name} quyết định ĐI THEO BẠN! Đã vào đội hình.`)
         } else {
           pushLog(`${enemyMon.name} muốn đi theo bạn, nhưng đội hình đã đầy 6 — nó lưu luyến rời đi.`)
@@ -854,13 +856,18 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const statusBonus = enemyMon.status ? (enemyMon.status === 'slp' || enemyMon.status === 'frz' ? 20 : 10) : 0
       const tier = getBossTier(enemyMon.name)
       const legendPenalty = tier?.key === 'high' ? 45 : tier ? 25 : 0
+      // Đợt 70: thiên phú "Bàn Tay Thuần Phục" cộng thẳng 15% (vẫn kẹp 3-95%).
+      const perkBonus = catchRateBonus(playerTraits?.perks)
       const chance = Math.max(3, Math.min(95,
-        Math.round(45 * (1 - hpRatio) + 12 + statusBonus + (BALL_BONUS[id] ?? 0) - legendPenalty),
+        Math.round(45 * (1 - hpRatio) + 12 + statusBonus + (BALL_BONUS[id] ?? 0) - legendPenalty + perkBonus),
       ))
       const roll = Math.random() * 100
       pushLog(`Bạn ném ${item.name}! (khả năng ~${chance}%)`)
       if (roll < chance) {
-        const caught = { ...enemyMon, hp: enemyMon.maxHp, status: null, sleepTurns: undefined }
+        const caught = applyPerksToMon(
+          { ...enemyMon, hp: enemyMon.maxHp, status: null, sleepTurns: undefined },
+          playerTraits?.perks,
+        )
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), caught])
           pushLog(`Tuyệt vời! ${enemyMon.name} đã được bắt và vào đội hình!`)
@@ -1085,7 +1092,6 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                 <span style={{ fontSize: 11, color: '#e05252' }}>DMAX còn {dynaTurnsLeft} lượt</span>
               )}
             </div>
-            )}
             {/* Popup chọn Mega X/Y cho loài có 2 forme */}
             {megaPickOpen && (
               <div className="panel" style={{ position: 'absolute', top: 40, left: 0, zIndex: 5, padding: 8, display: 'flex', gap: 6 }}>

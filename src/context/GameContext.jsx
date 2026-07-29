@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
-import { POKEMON_SPECIES } from '../data/pokemonSpecies.js'
+import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression } from '../data/pokemonSpecies.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 
@@ -151,7 +151,12 @@ export function GameProvider({ children }) {
   })
   const setPlayerMon = useCallback((next) => {
     setPlayerMonState((cur) => {
-      const resolved = typeof next === 'function' ? next(cur) : next
+      const raw = typeof next === 'function' ? next(cur) : next
+      // Đợt 70: chốt chặn TỤT CẤP. Xem guardMonRegression trong
+      // pokemonSpecies.js — bất kỳ luồng nào ghi đè con đang ra trận bằng một
+      // bản chụp CŨ HƠN (API phụ chạy nền, callback giữ closure cũ...) đều bị
+      // giữ lại mốc level/exp cao hơn thay vì để người chơi mất công sức.
+      const resolved = guardMonRegression(cur, raw)
       try { localStorage.setItem('trainer-arena:player-mon', JSON.stringify(resolved ?? null)) } catch { /* ignore */ }
       return resolved
     })
@@ -436,7 +441,11 @@ export function GameProvider({ children }) {
   // setter persist đều phải an toàn với cả 2 dạng gọi).
   const setParty = useCallback((next) => {
     setPartyState((cur) => {
-      const resolved = (typeof next === 'function' ? next(cur) : next).slice(0, 6)
+      const raw = (typeof next === 'function' ? next(cur) : next).slice(0, 6)
+      // Đợt 70: cùng chốt chặn tụt cấp như setPlayerMon, áp cho từng cá thể
+      // trong đội (khớp theo uid). Người chơi báo HUD tụt về Lv5 — đội hình
+      // cũng nằm trên đường ghi đè đó.
+      const resolved = guardPartyRegression(cur, raw)
       try { localStorage.setItem('trainer-arena:party', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })

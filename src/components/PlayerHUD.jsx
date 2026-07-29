@@ -4,7 +4,9 @@ import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
+import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
+import { MECHANIC_PERKS } from '../data/playerPerks.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -63,6 +65,9 @@ export default function PlayerHUD({ mobile = false }) {
   const [infoMon, setInfoMon] = useState(null)
   // Đợt 54: bấm khung avatar để đổi ảnh ngay giữa truyện.
   const [avatarOpen, setAvatarOpen] = useState(false)
+  // Đợt 70: mở bảng sửa tính cách/thiên phú GIỮA TRUYỆN (tester báo
+  // "cái này là không chỉnh sửa được hà Red").
+  const [traitsOpen, setTraitsOpen] = useState(false)
 
   return (
     <aside
@@ -142,9 +147,17 @@ export default function PlayerHUD({ mobile = false }) {
       {/* Độ no (đợt 36): tự trừ theo ngày trôi + AI tag khi ăn uống */}
       {/* Tính cách + Thiên phú (đợt 69) — người chơi báo "thiên phú không
           áp vào biến"; giờ hiện thẳng trên HUD như một chỉ số nhân vật. */}
-      {(playerTraits?.personality?.length > 0 || (playerTraits?.superpower && playerTraits.superpower !== 'none')) && (
-        <>
-          <SectionTitle>Tính cách &amp; Thiên phú</SectionTitle>
+      <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <SectionTitle>Tính cách &amp; Thiên phú</SectionTitle>
+            <button
+              onClick={() => setTraitsOpen(true)}
+              title="Sửa tính cách / thiên phú"
+              style={{ background: 'transparent', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text-dim)', fontSize: 10, padding: '1px 7px', cursor: 'pointer', marginTop: 12 }}
+            >
+              Sửa
+            </button>
+          </div>
           <div style={{ fontSize: 11, lineHeight: 1.7, marginBottom: 10 }}>
             {playerTraits?.personality?.length > 0 && (
               <div style={{ color: 'var(--text-mid)' }}>
@@ -161,9 +174,23 @@ export default function PlayerHUD({ mobile = false }) {
                   : (SUPERPOWERS.find((sp) => sp.key === playerTraits.superpower)?.label ?? playerTraits.superpower)}
               </div>
             )}
+            {/* Đợt 70: thiên phú CƠ CHẾ hiện riêng màu bạc hà để phân biệt với
+                siêu năng lực chỉ ảnh hưởng lời kể. */}
+            {(playerTraits?.perks ?? []).map((k) => {
+              const p = MECHANIC_PERKS.find((mp) => mp.key === k)
+              return p ? (
+                <div key={k} style={{ color: 'var(--mint)', marginTop: 3 }} title={p.desc}>
+                  ⚙ {p.label} — {p.short}
+                </div>
+              ) : null
+            })}
+            {!(playerTraits?.personality?.length > 0)
+              && (!playerTraits?.superpower || playerTraits.superpower === 'none')
+              && (playerTraits?.perks ?? []).length === 0 && (
+              <div style={{ color: 'var(--text-dim)' }}>Chưa chọn — bấm “Sửa” để thiết lập.</div>
+            )}
           </div>
         </>
-      )}
 
       <SectionTitle>Độ no</SectionTitle>
       {/* Đợt 48 (yêu cầu beta): thanh Pokémon chuyển vào modal chi tiết —
@@ -286,6 +313,8 @@ export default function PlayerHUD({ mobile = false }) {
           </div>
         </div>
       )}
+
+      {traitsOpen && <TraitsModal onClose={() => setTraitsOpen(false)} />}
 
       {infoMon && <PokemonInfoModal mon={infoMon} hungerMon={playerMon && infoMon.name === playerMon.name ? hunger.mon : null} onClose={() => setInfoMon(null)} />}
     </aside>

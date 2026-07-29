@@ -8,8 +8,9 @@ import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
+import { applyPerksToMon, trainingExpMultiplier } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty, isSameMon } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel } from '../data/levelLogic.js'
 import ShopModal from './ShopModal.jsx'
@@ -260,7 +261,10 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
     const label = h.who === 'mon' ? 'Pokémon' : 'người chơi'
     out.push(`🍙 Độ no ${label} ${h.delta > 0 ? '+' : ''}${h.delta}${tag}`)
   }
-  for (const pk of parsed.pokemons ?? []) out.push(`🔴 Nhận Pokémon: ${pk.name} Lv.${pk.level}${tag}`)
+  // FIX đợt 70: parseStoryStateTags trả về {species, level} nhưng chỗ này đọc
+  // pk.name → viewer hiện "🔴 Nhận Pokemon: undefined Lv.7" (tester chụp màn
+  // hình đúng dòng này ở Bug 3). Cùng loại lỗi với vụ "Độ no undefined" đợt 69.
+  for (const pk of parsed.pokemons ?? []) out.push(`🔴 Nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
@@ -483,7 +487,9 @@ export default function RoleplayChat() {
           continue
         }
         const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-        const newMon = buildMonSmart(entry, saneLv, movesDb)
+        // Đợt 70: thiên phú cơ chế áp NGAY lúc cá thể vào tay người chơi
+        // (yêu cầu của tester: "chỉ cần trong đội hình là max IV/EV").
+        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits?.perks)
         setPlayerMon((cur) => cur ?? newMon)
         setParty((cur) => (cur.length < 6 && !cur.some((m2) => m2.name === newMon.name) ? [...cur, newMon] : cur))
       }
@@ -495,18 +501,36 @@ export default function RoleplayChat() {
       const trainLv = parsed.training ?? 0
       const daysPassed = parsed.dateAdvance ?? 0
       if (trainLv > 0 || daysPassed > 0) {
+        // Đợt 70: thiên phú "Thiên Phú Rèn Luyện" nhân đôi EXP luyện tập/ngày trôi.
+        const expMul = trainingExpMultiplier(playerTraits?.perks)
         const grow = (mon) => {
           if (!mon) return mon
-          const amount =
-            (trainLv > 0 ? expFromTraining(mon, trainLv) : 0) +
-            (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)
+          const amount = Math.round(
+            ((trainLv > 0 ? expFromTraining(mon, trainLv) : 0) +
+              (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)) * expMul,
+          )
           return amount > 0 ? applyExpGain(mon, amount).mon : mon
         }
-        // Tính TRƯỚC cho con đang ra trận rồi đồng bộ, để playerMon và bản
-        // trong đội hình không bao giờ lệch nhau (đợt 69).
-        const grownActive = playerMon ? grow(playerMon) : null
-        if (grownActive) setPlayerMon(grownActive)
-        setParty((cur) => (cur ?? []).map((pm) => (isSameMon(pm, playerMon) ? grownActive ?? pm : grow(pm))))
+        // ===== BUG ĐỢT 70 (tester báo 3 triệu chứng, CÙNG MỘT nguyên nhân) =====
+        //   • "trước trận đấu lên Lv6, sau khi tiếp tục diễn biến thì tụt về Lv5"
+        //   • "không nhận Exp"
+        //   • "đáng lẽ lên Lv7 nhưng lại không lên"
+        // NGUYÊN NHÂN THẬT: đợt 69 tính `grow(playerMon)` với `playerMon` đọc
+        // từ CLOSURE của lần render lúc callAI bắt đầu chạy. Nhưng thứ tự thực
+        // tế là: handleBattleEnd() gọi setPlayerMon(Lv6) → NGAY sau đó await
+        // callAI(...) → biến `playerMon` trong closure VẪN LÀ BẢN Lv5 CŨ. Đến
+        // khi AI trả lời có [[TRAIN]] hoặc [[DATE +n]], dòng
+        // `setPlayerMon(grownActive)` ghi ĐÈ bản Lv6 bằng bản Lv5-cũ-cộng-tí-EXP
+        // → cấp tụt lại, EXP vừa thắng trận bay sạch. API phụ chạy nền còn tệ
+        // hơn: nó gọi applyParsedState MUỘN HƠN NỮA nhưng vẫn dùng đúng closure
+        // cũ đó, nên ghi đè thêm một lần thứ hai.
+        // CÁCH SỬA: KHÔNG đọc playerMon/party từ closure nữa — chỉ dùng
+        // functional updater, để React đưa vào bản MỚI NHẤT. `grow()` là hàm
+        // thuần (chỉ phụ thuộc exp/level của chính con mon) nên playerMon và
+        // bản trong đội hình cùng xuất phát từ một số liệu sẽ cho cùng kết quả,
+        // không cần đồng bộ chéo — hết luôn nguy cơ lệch cấp HUD ↔ trận.
+        setPlayerMon((cur) => (cur ? grow(cur) : cur))
+        setParty((cur) => (cur ?? []).map((pm) => grow(pm)))
       }
 
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {

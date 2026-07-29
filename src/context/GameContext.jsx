@@ -4,6 +4,7 @@ import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression } from '../da
 import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
+import { normalizeMapLocation } from '../data/mapPins.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -552,19 +553,23 @@ export function GameProvider({ children }) {
   const [playerLocation, setPlayerLocationState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:player-location')
-      return saved ? JSON.parse(saved) : null
+      return saved ? normalizeMapLocation(JSON.parse(saved)) : null
     } catch {
       return null
     }
   })
-  const setPlayerLocation = useCallback((loc) => {
-    setPlayerLocationState(loc)
-    try {
-      if (loc) localStorage.setItem('trainer-arena:player-location', JSON.stringify(loc))
-      else localStorage.removeItem('trainer-arena:player-location')
-    } catch {
-      /* ignore */
-    }
+  const setPlayerLocation = useCallback((next) => {
+    setPlayerLocationState((cur) => {
+      const raw = typeof next === 'function' ? next(cur) : next
+      const loc = normalizeMapLocation(raw)
+      try {
+        if (loc) localStorage.setItem('trainer-arena:player-location', JSON.stringify(loc))
+        else localStorage.removeItem('trainer-arena:player-location')
+      } catch {
+        /* ignore */
+      }
+      return loc
+    })
   }, [])
 
   // --- Pokedex đầy đủ (mọi Gen + Mega + Gigantamax), tự tải từ Showdown lúc

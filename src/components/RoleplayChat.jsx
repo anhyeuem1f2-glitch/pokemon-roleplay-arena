@@ -14,15 +14,16 @@ import {
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget, resolveOwnedSpeciesTarget } from '../utils/ownedMonTarget.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
-import { detectTrainerBattle, detectPokecenter } from '../data/storyScenes.js'
+import { detectTrainerBattle, detectDoubleBattle, detectPokecenter } from '../data/storyScenes.js'
 import { resolveItemByName } from '../data/shopItems.js'
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
 import BattleModal from './BattleModal.jsx'
+import DoubleBattleModal from './DoubleBattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
 import { renderInlineFormatting, stripInlineTags } from '../utils/inlineFormat.jsx'
 import SafariModal from './SafariModal.jsx'
@@ -34,6 +35,7 @@ import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote } from '../uti
 import { maybeUpdateSummary, buildSummaryNote, trimSummaryCoverage, clearSummary } from '../utils/storySummary.js'
 import { maybeMakeNudge, getIdentity } from '../data/storyDirector.js'
 import { getRegion, getArea } from '../data/regions.js'
+import { normalizeMapLocation } from '../data/mapPins.js'
 import { getWeather } from '../data/weather.js'
 import { envFromWeather } from '../data/battleEnvironments.js'
 import { buildFestivalLine } from '../data/festivals.js'
@@ -318,7 +320,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
   if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
   if (parsed.datePart) out.push(`🕐 Chuyển buổi: ${parsed.datePart}${tag}`)
-  if (movedTo) out.push(`🗺 Di chuyển tới: ${movedTo.areaKey} (${movedTo.regionKey})${tag}`)
+  if (movedTo) out.push(`🗺 Di chuyển tới: ${movedTo.areaKey} (${movedTo.regionKey})${Number.isFinite(movedTo.x) && Number.isFinite(movedTo.y) ? ` · X${movedTo.x} Y${movedTo.y}` : ''}${tag}`)
   return out
 }
 
@@ -783,6 +785,22 @@ export default function RoleplayChat() {
       const summaryNote = buildSummaryNote()
       if (summaryNote) history = [{ role: 'user', content: summaryNote }, ...history]
 
+      // TOẠ ĐỘ BẢN ĐỒ (đợt 75): gửi vị trí thật cho model mỗi lượt.
+      // x/y là phần trăm trên ảnh vùng, không phải km; areaKey vẫn là mốc
+      // gameplay để hệ level/nhạc/Safari tương thích với save cũ.
+      const currentMapLocation = normalizeMapLocation(playerLocation)
+      if (currentMapLocation?.regionKey) {
+        const regionInfo = getRegion(currentMapLocation.regionKey)
+        const areaInfo = getArea(currentMapLocation.regionKey, currentMapLocation.areaKey)
+        const coordText = Number.isFinite(currentMapLocation.x) && Number.isFinite(currentMapLocation.y)
+          ? `; toạ độ bản đồ X=${currentMapLocation.x}, Y=${currentMapLocation.y} (thang 0-100)`
+          : ''
+        history = [...history, {
+          role: 'user',
+          content: `[Hệ thống — VỊ TRÍ HIỆN TẠI: ${areaInfo?.name ?? currentMapLocation.areaKey ?? 'chưa rõ'}, vùng ${regionInfo?.name ?? currentMapLocation.regionKey}${coordText}. Không tự coi nhân vật đã sang nơi khác nếu chính văn chưa có di chuyển. Khi thực sự đổi vị trí, dùng [[MOVE Tên nơi | x=N | y=N]] nếu biết toạ độ; không nhắc tới ghi chú này.]`,
+        }]
+      }
+
       // --- ĐẠO DIỄN TÌNH HUỐNG (đợt 31) ---
       // Thi thoảng (theo nhịp cooldown + xác suất) chèn 1 hạt giống tình
       // huống làm GỢI Ý một-lần ở cuối history — KHÔNG lưu vào messages nên
@@ -853,11 +871,33 @@ export default function RoleplayChat() {
       const mainApplyReport = applyParsedState(stateParsed, turnNow)
       // Vị trí tính TRƯỚC khi lưu tin (đợt 48) để đưa vào meta viewer.
       let movedTo = null
-      if ((stateParsed.moves ?? []).length) {
+      if ((stateParsed.moveDirectives ?? []).length) {
+        const directive = stateParsed.moveDirectives[stateParsed.moveDirectives.length - 1]
+        const named = detectMentionedArea(directive.place, playerLocation)
+        const base = named ?? (playerLocation?.regionKey ? {
+          regionKey: playerLocation.regionKey, areaKey: playerLocation.areaKey,
+        } : null)
+        if (base && (named || directive.x !== null || directive.y !== null)) {
+          movedTo = normalizeMapLocation({
+            ...base,
+            x: directive.x ?? (named ? undefined : playerLocation?.x),
+            y: directive.y ?? (named ? undefined : playerLocation?.y),
+            source: 'story-move',
+          })
+        }
+      } else if ((stateParsed.moves ?? []).length) {
         movedTo = detectMentionedArea(stateParsed.moves[stateParsed.moves.length - 1], playerLocation)
       }
       if (!movedTo) movedTo = detectLocationFromMetadata(reply, playerLocation)
       if (!movedTo) movedTo = detectMentionedArea(stateParsed.cleaned, playerLocation)
+      if (movedTo) {
+        // AI thường nhắc lại tên khu hiện tại trong văn. Nếu vẫn cùng area,
+        // giữ x/y chi tiết đang có thay vì kéo pin về tâm khu mỗi lượt.
+        if (movedTo.regionKey === playerLocation?.regionKey && movedTo.areaKey === playerLocation?.areaKey) {
+          movedTo = { ...movedTo, x: playerLocation?.x, y: playerLocation?.y }
+        }
+        movedTo = normalizeMapLocation(movedTo)
+      }
       // CHAU CHUỐT VĂN PHONG (đợt 50): nếu cấu hình API phụ (slot Combat
       // Anime cũ), model phụ đánh bóng câu chữ theo tông truyện — chạy SAU
       // khi đã bóc tag (tag không bị model phụ nuốt), lỗi thì giữ nguyên văn.
@@ -1131,99 +1171,106 @@ export default function RoleplayChat() {
     await callAI([...markUsed(messages), note])
   }
 
-  async function handleBattleEnd(outcome) {
+  async function handleBattleEnd(outcome, details = null) {
     setBattleOpen(false)
-    // Jingle kết quả (đợt 28): thắng/dụ được/hoà giải/bắt được → victory,
-    // thua → defeat, chạy thoát / đối phương bỏ chạy → không jingle, nhạc
-    // khu vực tự quay lại (battleOpen=false → MusicController pop override).
+    expNoteRef.current = null
+    const doubleMode = details?.mode === 'double'
+    const battleEnemies = doubleMode
+      ? (details.enemies ?? []).filter(Boolean)
+      : (enemyMon ? [enemyMon] : [])
+
     if (['win', 'join', 'calm', 'caught'].includes(outcome)) {
       musicManager.playJingle(VICTORY_TRACK_KEYS)
-      // EV thật khi HẠ đối thủ (đợt 48): cộng vào chỉ số base cao nhất của
-      // loài bị hạ, cap 252/chỉ số & 510 tổng, tính lại stats ngay.
-      // EXP + LÊN CẤP (đợt 65, sửa lại ở đợt 66). Cho cả 'win' lẫn 'caught'
-      // — trong game gốc bắt được Pokémon cũng nhận kinh nghiệm.
-      const activeMon = latestPlayerMonRef.current ?? playerMon
-      if (['win', 'caught'].includes(outcome) && enemyMon && activeMon) {
-        // LỖI ĐỢT 65 (người chơi báo "có ống EXP nhưng EXP không chạy"):
-        // thông tin lên cấp được gán BÊN TRONG hàm cập nhật state, mà React
-        // chạy hàm đó ở pha render — đọc ra ngay sau đó luôn rỗng, nên phần
-        // báo lên cấp không bao giờ tới AI. Nay TÍNH TRƯỚC, rồi mới áp.
-        //
-        // ĐỢT 73: hệ số EXP SAU TRẬN và chia EXP cho cả đội lấy từ thiên phú
-        // TỰ MÔ TẢ. Trước đây chỉ perk luyện tập ×2 tồn tại, nên câu "EXP sau
-        // trận ×3" trong ảnh tester hoàn toàn không chạm vào battle engine.
-        const baseGain = expGainFrom(enemyMon, { isTrainerMon: Boolean(enemyMon.isTrainerMon) })
+      if (['win', 'caught'].includes(outcome) && battleEnemies.length) {
         const expMul = battleExpMultiplier(playerTraits)
+        const baseGain = battleEnemies.reduce(
+          (sum, mon) => sum + expGainFrom(mon, { isTrainerMon: Boolean(mon.isTrainerMon) }),
+          0,
+        )
         const gain = Math.max(1, Math.round(baseGain * expMul))
         const shareExp = sharesBattleExpWithParty(playerTraits)
-        const evApplied = applyEvGain(activeMon, enemyMon)
-        const res = applyExpGain(evApplied, gain)
-        setPlayerMon(res.mon)
-        setParty((cur) => (cur ?? []).map((pm) => {
-          if (isSameMon(pm, res.mon)) return res.mon
-          return shareExp ? applyExpGain(pm, gain).mon : pm
-        }))
+        const sourceParty = (details?.team?.length ? details.team : latestPartyRef.current) ?? []
+        const activeMon = latestPlayerMonRef.current ?? playerMon
+        const participants = new Set(
+          doubleMode
+            ? (details.participantUids ?? [])
+            : [activeMon?.uid ?? `${activeMon?.name ?? ''}-${activeMon?.level ?? ''}`],
+        )
+        const keyOf = (mon) => mon?.uid ?? `${mon?.name ?? ''}-${mon?.level ?? ''}`
+        // BattleModal cập nhật con đang ra trận và party qua hai setter riêng.
+        // Luôn ưu tiên bản activeMon mới nhất khi cùng uid để không lấy lại HP/
+        // trạng thái cũ từ party rồi ghi đè lúc cộng EXP.
+        let roster = sourceParty.map((mon) => activeMon && isSameMon(mon, activeMon) ? { ...activeMon } : { ...mon })
+        if (activeMon && !roster.some((mon) => isSameMon(mon, activeMon))) roster.unshift({ ...activeMon })
+        const levelUps = []
+        const updated = roster.map((mon) => {
+          const participates = participants.has(keyOf(mon)) || (!doubleMode && activeMon && isSameMon(mon, activeMon))
+          if (!participates && !shareExp) return mon
+          let next = mon
+          if (participates) {
+            for (const foe of battleEnemies) next = applyEvGain(next, foe)
+          }
+          const result = applyExpGain(next, gain)
+          if (result.levelsGained > 0) {
+            levelUps.push({ name: result.mon.name, newLevel: result.newLevel, levels: result.levelsGained })
+          }
+          return result.mon
+        })
+        setParty(updated)
+        const lead = updated.find((mon) => keyOf(mon) === details?.leadUid)
+          ?? updated.find((mon) => activeMon && isSameMon(mon, activeMon))
+          ?? updated.find((mon) => mon.hp > 0)
+        if (lead) setPlayerMon(lead)
         expNoteRef.current = {
-          gain,
-          baseGain,
-          multiplier: expMul,
-          shared: shareExp,
-          enemyName: enemyMon.name,
-          levelUp: res.levelsGained > 0
-            ? { name: res.mon.name, newLevel: res.newLevel, levels: res.levelsGained }
-            : null,
+          gain, baseGain, multiplier: expMul, shared: shareExp,
+          enemyName: battleEnemies.map((mon) => mon.name).join(' + '),
+          levelUps,
+          doubleMode,
         }
       }
     } else if (outcome === 'lose') {
       musicManager.playJingle(DEFEAT_TRACK_KEYS)
     }
-    // QUAN TRỌNG: đánh dấu battleUsed và thêm note kết quả trong CÙNG 1 mảng.
-    // Bug cũ: gọi setMessages 2 lần — lần 2 dùng mảng build từ closure CŨ
-    // (chưa có cờ battleUsed) nên ghi đè mất cờ → pokeball vẫn bấm lại được
-    // sau khi trận đã kết thúc (kết hợp resetBattle hồi máu = đánh lại vô hạn).
+
     const idx = activeBattleMsgIndex
     if (idx !== null) setActiveBattleMsgIndex(null)
     const note = {
       role: 'user',
       hidden: true,
-      // Đợt 66: ghi EXP/lên cấp thẳng lên nhãn kết quả — người chơi nhìn
-      // thấy ngay "Thắng · +120 EXP · Lv.7!" thay vì phải đoán xem hệ EXP
-      // có chạy hay không.
       resultLabel: (() => {
         const base = OUTCOME_LABEL[outcome] ?? outcome
         const info = expNoteRef.current
-        if (!info) return base
+        if (!info) return doubleMode ? `${base} · Đấu đôi 2v2` : base
         const mul = info.multiplier > 1 ? ` (×${info.multiplier})` : ''
         const shared = info.shared ? ' · cả đội nhận EXP' : ''
-        const lv = info.levelUp ? ` · Lv.${info.levelUp.newLevel}!` : ''
-        return `${base} · +${info.gain} EXP${mul}${shared}${lv}`
+        const lv = info.levelUps?.length
+          ? ` · ${info.levelUps.map((entry) => `${entry.name} Lv.${entry.newLevel}!`).join(', ')}`
+          : ''
+        return `${base}${info.doubleMode ? ' · 2v2' : ''} · +${info.gain} EXP${mul}${shared}${lv}`
       })(),
-      content: `[Hệ thống: trận đấu Pokémon vừa kết thúc, kết quả là ${
+      content: `[Hệ thống: ${doubleMode ? 'trận đấu đôi Pokémon 2v2' : 'trận đấu Pokémon'} vừa kết thúc, kết quả là ${
         OUTCOME_TEXT[outcome] ?? outcome
       }.]${(() => {
-        // Đợt 65: báo EXP/lên cấp cho AI kể thành cảnh (không phải bảng số).
         const info = expNoteRef.current
         expNoteRef.current = null
         if (!info) return ''
-        const lv = info.levelUp
-        const multiplier = info.multiplier > 1 ? ` (đã áp thiên phú ×${info.multiplier} từ mức gốc ${info.baseGain})` : ''
-        const shared = info.shared ? ' Toàn bộ Pokémon trong đội cũng nhận cùng lượng EXP dù không trực tiếp ra trận.' : ''
-        const base = ` Pokémon của người chơi nhận được ${info.gain} điểm kinh nghiệm${multiplier} sau khi hạ ${info.enemyName}.${shared}`
-        return lv
-          ? `${base} ĐẶC BIỆT: ${lv.name} đã LÊN CẤP ${lv.levels > 1 ? `${lv.levels} bậc, ` : ''}đạt Lv.${lv.newLevel} — hãy kể khoảnh khắc trưởng thành này một cách đáng nhớ (ánh sáng, dáng vẻ tự tin hơn, phản ứng của người chơi).`
-          : base
-      })()} Hãy tiếp tục kể câu chuyện dựa trên kết quả này, không nhắc lại diễn biến trận đấu chi tiết.`,
+        const multiplier = info.multiplier > 1
+          ? ` (đã áp thiên phú ×${info.multiplier} từ mức gốc ${info.baseGain})`
+          : ''
+        const shared = info.shared ? ' Toàn bộ Pokémon trong đội cũng nhận cùng lượng EXP.' : ''
+        const base = ` Pokémon tham chiến nhận được ${info.gain} điểm kinh nghiệm${multiplier} sau khi hạ ${info.enemyName}.${shared}`
+        if (!info.levelUps?.length) return base
+        const levels = info.levelUps.map((entry) => `${entry.name} đạt Lv.${entry.newLevel}`).join('; ')
+        return `${base} ĐẶC BIỆT: ${levels} — hãy kể khoảnh khắc trưởng thành này tự nhiên trong chính văn.`
+      })()} Hãy tiếp tục kể câu chuyện dựa trên kết quả thật này, không bịa lại diễn biến chi tiết của trận.`,
     }
-    // Functional update (đợt 64) — cùng lý do và cùng lưu ý với
-    // handleShopFinish: state dựng từ bản mới nhất, payload AI dựng riêng.
-    const markUsed = (arr) =>
-      idx !== null
-        ? arr.map((mm, i) => (i === idx ? { ...mm, battleUsed: true, enemySnapshot: undefined } : mm))
-        : arr
+    const markUsed = (arr) => idx !== null
+      ? arr.map((message, i) => i === idx ? {
+          ...message, battleUsed: true, enemySnapshot: undefined, enemySnapshots: undefined,
+        } : message)
+      : arr
     setMessages((cur) => [...markUsed(cur), note])
     const nextMessages = [...markUsed(messages), note]
-    // API phụ 1 (chạy thoát) / API phụ 2 (thua) — nếu đã cấu hình, ưu tiên dùng
-    // thay vì API chính, đúng theo kiến trúc nhiều API đã bàn.
     const override = outcome === 'escaped' ? outcomeApiConfig.escaped : outcome === 'lose' ? outcomeApiConfig.lose : null
     await callAI(nextMessages, '', override)
   }
@@ -1316,86 +1363,80 @@ export default function RoleplayChat() {
                 content={m.content}
                 used={Boolean(m.battleUsed)}
                 onOpenBattle={() => {
-                  // Tay trắng (đợt 32): chưa có Pokémon thì chưa thể vào trận.
                   if (!playerMon) {
-                    window.alert('Bạn chưa có Pokémon nào — hãy để câu chuyện dẫn tới việc nhận Pokémon đầu tiên đã (né trận này bằng lời nói/bỏ chạy trong truyện).')
+                    window.alert('Bạn chưa có Pokémon nào — hãy để câu chuyện dẫn tới việc nhận Pokémon đầu tiên đã.')
                     return
                   }
-                  // ===== ĐỢT 71 — HỆ QUẢ CỦA VIỆC BỎ TỰ HỒI MÁU =====
-                  // Trước đây mọi Pokémon đều đầy máu khi bắt đầu trận nên
-                  // không cần kiểm tra gì. Nay máu được giữ nguyên sau trận,
-                  // nên có 2 tình huống mới phải chặn/xử lý ngay tại đây:
-                  //   (a) CẢ ĐỘI đã gục → mở trận là `battleOver` bật ngay,
-                  //       người chơi thua trắng mà không kịp bấm gì.
-                  //   (b) Con đang ra trận đã gục nhưng còn con khoẻ → phải
-                  //       tự đẩy con khoẻ ra thay, không bắt người chơi mở
-                  //       bảng đội hình trong trạng thái đã thua.
                   const roster = (party ?? []).length ? party : [playerMon]
                   const healthy = roster.filter((pm) => pm && (pm.hp ?? 0) > 0)
                   if (healthy.length === 0) {
-                    window.alert('Toàn đội Pokémon của bạn đã gục — không thể vào trận. Hãy tới TRUNG TÂM POKÉMON để chữa trị (hoặc dùng vật phẩm hồi phục trong túi đồ).')
+                    window.alert('Toàn đội Pokémon của bạn đã gục — không thể vào trận. Hãy tới TRUNG TÂM POKÉMON để chữa trị.')
                     return
                   }
-                  if ((playerMon.hp ?? 0) <= 0) {
-                    setPlayerMon(healthy[0])
+
+                  // Đợt 75: ghép cả INPUT ngay trước đó với chính văn. Nhờ vậy
+                  // yêu cầu "xin Chủ Gym đấu đôi" vẫn được nhận ra ngay cả khi
+                  // model chỉ trả lời ngắn "được" trước marker [[BATTLE]].
+                  const previousUserText = messages[i - 1]?.role === 'user' ? messages[i - 1].content : ''
+                  const battleSource = `${previousUserText}
+${m.content}`
+                  const battleCtx = detectTrainerBattle(battleSource)
+                  const doubleCtx = detectDoubleBattle(battleSource, battleCtx)
+                  if (doubleCtx.isDouble && healthy.length < 2) {
+                    window.alert('Đấu đôi 2v2 cần ít nhất 2 Pokémon còn khả năng chiến đấu trong đội.')
+                    return
                   }
+                  if ((playerMon.hp ?? 0) <= 0) setPlayerMon(healthy[0])
                   setActiveBattleMsgIndex(i)
-                  // Chỉ chọn đối thủ 1 LẦN cho quả pokeball này — mở lại (sau
-                  // khi bấm "Ẩn") phải là ĐÚNG con cũ, tiếp tục đúng HP hiện
-                  // tại, không random lại (tránh trick ẩn đi rồi mở lại để né
-                  // đối thủ khó / thoát lúc sắp thua).
-                  // Snapshot lưu TRÊN TỪNG message (enemySnapshot) chứ không
-                  // chỉ dựa vào enemyMon toàn cục — nếu có 2 quả pokeball, mở
-                  // quả B sẽ ghi đè enemyMon của quả A; quay lại A phải khôi
-                  // phục đúng con của A (kèm HP/trạng thái tại thời điểm ẩn).
+
                   if (!m.battleStarted) {
-                    // Đợt 65: loại trừ Pokémon CỦA NGƯỜI CHƠI khỏi kết quả dò
-                    // — nếu không, câu "Charmander của tôi lao vào Rattata"
-                    // sẽ cho ra đối thủ… Charmander (bug người chơi báo).
-                    const ownNames = [
-                      ...(party ?? []).map((pm) => pm?.name),
-                      playerMon?.name,
-                    ].filter(Boolean)
-                    const mentioned = detectMentionedSpecies(m.content, pokedexSpecies, {
-                      excludeNames: ownNames,
-                    })
-                    const speciesEntry =
-                      mentioned || pokedexSpecies[Math.floor(Math.random() * pokedexSpecies.length)]
-                    // ĐỢT 71 — TRẬN NÀY VỚI AI? Trước đây app luôn dựng đối
-                    // thủ như Pokémon HOANG DÃ, nên trận với huấn luyện viên
-                    // vẫn ném bóng bắt được, vẫn chạy trốn được, và level lấy
-                    // theo "khí hậu sức mạnh" của khu chứ không theo thân
-                    // phận trainer. Nay dò từ chính văn.
-                    const battleCtx = detectTrainerBattle(m.content)
-                    // Level: trainer thì theo THÂN PHẬN (trainerMonLevel đã có
-                    // từ đợt 40 nhưng chưa từng được gọi ở luồng chơi chính);
-                    // hoang dã thì theo hoàn cảnh khu vực như cũ.
-                    // Đợt 72: level KHÔNG còn bám theo đội người chơi (chủ
-                    // dự án bác bỏ cơ chế đó ở đợt 71). Thế giới có sức mạnh
-                    // riêng; chủ gym thì khoá cứng Lv15, ai đòi đội hình
-                    // thật thì gánh Lv70-80.
-                    const level = battleCtx.isTrainer
-                      ? trainerBattleLevel({
-                          tier: battleCtx.tier,
-                          location: playerLocation,
-                          realTeam: battleCtx.realTeam,
-                        })
-                      : wildLevel({ location: playerLocation, entry: speciesEntry }).level
-                    const mon = buildMonSmart(
-                      speciesEntry, level, movesDb, playerMon?.types, battleCtx.isTrainer,
-                    )
-                    if (battleCtx.isTrainer) {
-                      mon.trainerLabel = battleCtx.realTeam
-                        ? `${battleCtx.label} (ĐỘI HÌNH THẬT)`
-                        : battleCtx.label
-                      mon.realTeam = battleCtx.realTeam
+                    const ownNames = [...(party ?? []).map((pm) => pm?.name), playerMon?.name].filter(Boolean)
+                    const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
+                    const mentioned = detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
+                    const speciesEntry = mentioned || pokedexSpecies[Math.floor(Math.random() * pokedexSpecies.length)]
+                    const levelFor = (entry, offset = 0) => {
+                      const base = battleCtx.isTrainer
+                        ? trainerBattleLevel({ tier: battleCtx.tier, location: playerLocation, realTeam: battleCtx.realTeam })
+                        : wildLevel({ location: playerLocation, entry }).level
+                      return Math.max(1, Math.min(100, base + offset))
                     }
-                    setEnemyMon(mon)
-                    setMessages((msgs) =>
-                      msgs.map((mm, idx) =>
-                        idx === i ? { ...mm, battleStarted: true, enemySnapshot: mon } : mm,
-                      ),
-                    )
+                    const decorateTrainer = (mon) => {
+                      if (!battleCtx.isTrainer) return mon
+                      mon.trainerLabel = battleCtx.realTeam ? `${battleCtx.label} (ĐỘI HÌNH THẬT)` : battleCtx.label
+                      mon.realTeam = battleCtx.realTeam
+                      return mon
+                    }
+
+                    if (doubleCtx.isDouble) {
+                      // Lấy hai loài được nhắc MUỘN NHẤT. Thiếu một loài thì
+                      // sinh thêm đối thủ khác, nhưng không dùng Pokémon phe mình.
+                      const picked = mentionedList.slice(-2)
+                      if (!picked.length) picked.push(speciesEntry)
+                      while (picked.length < 2) {
+                        const pool = pokedexSpecies.filter((entry) =>
+                          !ownNames.some((name) => name?.toLowerCase() === entry.name.toLowerCase())
+                          && !picked.some((chosen) => chosen.name === entry.name))
+                        picked.push(pool[Math.floor(Math.random() * pool.length)] ?? speciesEntry)
+                      }
+                      const duo = picked.slice(0, 2).map((entry, index) => decorateTrainer(buildMonSmart(
+                        entry, levelFor(entry, index === 1 ? 1 : 0), movesDb, playerMon?.types, true,
+                      )))
+                      setEnemyMon(duo[0])
+                      setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
+                        ...mm, battleStarted: true, battleMode: 'double', doubleReason: doubleCtx.reason,
+                        enemySnapshot: duo[0], enemySnapshots: duo,
+                      } : mm))
+                    } else {
+                      const mon = decorateTrainer(buildMonSmart(
+                        speciesEntry, levelFor(speciesEntry), movesDb, playerMon?.types, battleCtx.isTrainer,
+                      ))
+                      setEnemyMon(mon)
+                      setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
+                        ...mm, battleStarted: true, battleMode: 'single', enemySnapshot: mon,
+                      } : mm))
+                    }
+                  } else if (m.battleMode === 'double' && m.enemySnapshots?.length) {
+                    setEnemyMon(m.enemySnapshots[0])
                   } else if (m.enemySnapshot) {
                     setEnemyMon(m.enemySnapshot)
                   }
@@ -1741,14 +1782,47 @@ export default function RoleplayChat() {
         />
       )}
 
-      {battleOpen && enemyMon && isSafariArea(playerLocation) && (
+      {battleOpen
+        && messages[activeBattleMsgIndex]?.battleMode !== 'double'
+        && enemyMon
+        && isSafariArea(playerLocation) && (
         <SafariModal
           onClose={() => setBattleOpen(false)}
           onSafariEnd={handleBattleEnd}
         />
       )}
 
-      {battleOpen && !isSafariArea(playerLocation) && (
+      {battleOpen && messages[activeBattleMsgIndex]?.battleMode === 'double' && (
+        <DoubleBattleModal
+          initialEnemies={messages[activeBattleMsgIndex]?.enemySnapshots
+            ?? [messages[activeBattleMsgIndex]?.enemySnapshot ?? enemyMon].filter(Boolean)}
+          environment={envFromWeather(getWeather(storyDate, playerLocation).label)}
+          onSnapshot={(snapshots) => {
+            const idx = activeBattleMsgIndex
+            if (idx === null) return
+            setMessages((msgs) => msgs.map((mm, i) => i === idx ? {
+              ...mm, enemySnapshots: snapshots, enemySnapshot: snapshots[0],
+            } : mm))
+            if (snapshots[0]) setEnemyMon(snapshots[0])
+          }}
+          onClose={(snapshots) => {
+            // Đấu đôi cũng phải giữ HP/trạng thái của CẢ HAI đối thủ khi ẩn.
+            const idx = activeBattleMsgIndex
+            if (idx !== null) {
+              setMessages((msgs) => msgs.map((mm, i) => i === idx ? {
+                ...mm, enemySnapshots: snapshots, enemySnapshot: snapshots[0],
+              } : mm))
+              if (snapshots[0]) setEnemyMon(snapshots[0])
+            }
+            setBattleOpen(false)
+          }}
+          onBattleEnd={handleBattleEnd}
+        />
+      )}
+
+      {battleOpen
+        && messages[activeBattleMsgIndex]?.battleMode !== 'double'
+        && !isSafariArea(playerLocation) && (
         <BattleModal
           // Đợt 71: Pokémon của huấn luyện viên khác thì KHÔNG bắt được,
           // KHÔNG chạy trốn được, KHÔNG dụ đi theo được.

@@ -43,7 +43,7 @@ export function stageMult(stage) {
   return stage >= 0 ? (2 + stage) / 2 : 2 / (2 - stage)
 }
 
-function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO) {
+export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO) {
   if (move.power <= 0) return 0
   const eff = getEffectivenessMulti(move.type, defender.types)
   // STAB có xét TERASTAL (đợt 30, đúng cơ chế Gen 9): tera trùng hệ GỐC →

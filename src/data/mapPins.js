@@ -66,3 +66,54 @@ export const MAP_PINS = {
 export function getMapPin(regionKey, areaKey) {
   return MAP_PINS[regionKey]?.[areaKey] ?? null
 }
+
+// ============ TOẠ ĐỘ NGƯỜI CHƠI (đợt 75) ============
+// `playerLocation` từ save cũ chỉ có regionKey/areaKey. Từ đợt này lưu thêm
+// x/y theo phần trăm ảnh (0..100) để pin không bị buộc cứng vào đúng tâm khu
+// đại diện. Nếu save/tag chưa có x/y thì tự rơi về MAP_PINS để tương thích.
+export function clampMapCoord(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  return Math.max(0, Math.min(100, Math.round(n * 10) / 10))
+}
+
+export function getLocationCoords(location) {
+  if (!location) return null
+  const x = clampMapCoord(location.x)
+  const y = clampMapCoord(location.y)
+  if (x !== null && y !== null) return [x, y]
+  return getMapPin(location.regionKey, location.areaKey)
+}
+
+export function findNearestMapArea(regionKey, x, y) {
+  const nx = clampMapCoord(x)
+  const ny = clampMapCoord(y)
+  const pins = MAP_PINS[regionKey]
+  if (!pins || nx === null || ny === null) return null
+  let best = null
+  for (const [areaKey, pin] of Object.entries(pins)) {
+    const dx = pin[0] - nx
+    const dy = pin[1] - ny
+    const distance = Math.sqrt(dx * dx + dy * dy)
+    if (!best || distance < best.distance) best = { areaKey, distance }
+  }
+  return best
+}
+
+/** Chuẩn hoá location trước khi persist; giữ nguyên field tương lai. */
+export function normalizeMapLocation(location) {
+  if (!location?.regionKey) return location ?? null
+  const explicitX = clampMapCoord(location.x)
+  const explicitY = clampMapCoord(location.y)
+  let areaKey = location.areaKey ?? null
+  if (!areaKey && explicitX !== null && explicitY !== null) {
+    areaKey = findNearestMapArea(location.regionKey, explicitX, explicitY)?.areaKey ?? null
+  }
+  const fallback = areaKey ? getMapPin(location.regionKey, areaKey) : null
+  return {
+    ...location,
+    areaKey,
+    x: explicitX ?? fallback?.[0] ?? null,
+    y: explicitY ?? fallback?.[1] ?? null,
+  }
+}

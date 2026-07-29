@@ -62,6 +62,10 @@ const TRAINER_RULES = [
     ],
   },
   {
+    tier: 'ace', label: 'Battle Club',
+    words: ['battle club', 'câu lạc bộ chiến đấu', 'câu lạc bộ đấu pokémon', 'câu lạc bộ đấu pokemon', 'sàn đấu câu lạc bộ'],
+  },
+  {
     tier: 'ace', label: 'Ace Trainer',
     words: ['ace trainer', 'cao thủ', 'kỳ thủ', 'tuyển thủ'],
   },
@@ -170,4 +174,37 @@ export function detectPokecenter(text) {
   if (at === -1) return { inside: false, name: '' }
   if (lastHit(hay, LEFT_WORDS) > at) return { inside: false, name: '' }
   return { inside: true, name: 'Trung tâm Pokémon' }
+}
+
+
+// ---------- ĐẤU ĐÔI THỬ NGHIỆM (đợt 75) ----------
+const BATTLE_CLUB_WORDS = [
+  'battle club', 'câu lạc bộ chiến đấu', 'câu lạc bộ đấu pokémon',
+  'câu lạc bộ đấu pokemon', 'sàn đấu câu lạc bộ',
+]
+const DOUBLE_BATTLE_WORDS = [
+  'đấu đôi', 'đánh đôi', 'trận đôi', '2v2', '2 vs 2', 'hai đấu hai',
+  'double battle', 'hai pokémon cùng lúc', 'hai pokemon cùng lúc',
+]
+const REQUEST_WORDS = [
+  'xin', 'đề nghị', 'yêu cầu', 'muốn', 'cho tôi', 'cho tớ', 'cho mình',
+  'có thể', 'đồng ý', 'chấp nhận', 'gật đầu', 'nhận lời',
+]
+
+/**
+ * Chỉ bật 2v2 trong hai trường hợp beta đã duyệt:
+ * 1) Battle Club; 2) người chơi chủ động xin Chủ Gym và cảnh hiện tại xác nhận
+ * đấu đôi. `sourceText` nên ghép input người chơi + chính văn AI để app không
+ * phụ thuộc model có nhắc lại nguyên câu yêu cầu hay không.
+ */
+export function detectDoubleBattle(sourceText, battleCtx = null) {
+  if (!sourceText) return { isDouble: false, reason: null }
+  const hay = sourceText.slice(-2400).toLowerCase()
+  const hasDouble = lastHit(hay, DOUBLE_BATTLE_WORDS) !== -1
+  const atClub = lastHit(hay, BATTLE_CLUB_WORDS) !== -1
+  if (atClub && battleCtx?.isTrainer) return { isDouble: true, reason: 'battle-club' }
+  const isGym = battleCtx?.tier === 'gym'
+  const hasRequest = lastHit(hay, REQUEST_WORDS) !== -1
+  if (isGym && hasDouble && hasRequest) return { isDouble: true, reason: 'gym-request' }
+  return { isDouble: false, reason: null }
 }

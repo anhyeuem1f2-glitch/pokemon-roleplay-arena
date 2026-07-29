@@ -19,6 +19,7 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 [[ITEM Tên vật phẩm | số lượng]] — nhận/mất vật phẩm; số âm là mất. Nếu Kẹo Hiếm hữu hạn được dùng thì đi cùng [[LEVEL]], còn Kẹo Hiếm vô hạn thì không trừ.
 [[HUNGER người+25]] / [[HUNGER pokemon+30]] — ăn uống (cộng) hoặc đói lả/lao lực rõ (trừ).
 [[DATE +1]] — số ngày đã trôi; [[DATE buổi=tối]] — chuyển buổi trong ngày.
+[[MOVE Tên khu vực]] hoặc [[MOVE Tên khu vực | x=42 | y=58]] — nhân vật thực sự đổi vị trí; x/y là phần trăm bản đồ, chỉ thêm khi chính văn xác định đủ rõ.
 [[NPC Tên | tuổi=.. | nghề=.. | đội=.. | ghi chú=..]] — NPC có tên xuất hiện lần đầu / lộ thông tin mới.
 [[FACT Từ khoá | nội dung ngắn]] — sự kiện/lời hứa/mốc quan trọng cần nhớ.
 

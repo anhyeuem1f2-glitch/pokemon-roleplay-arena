@@ -536,6 +536,44 @@ export function detectMentionedSpecies(text, speciesList, options = {}) {
   return best?.entry ?? null
 }
 
+
+/** Trả về nhiều loài được nhắc, theo thứ tự xuất hiện từ sớm tới muộn. */
+export function detectMentionedSpeciesList(text, speciesList, options = {}) {
+  if (!text || !speciesList?.length) return []
+  const lower = text.toLowerCase()
+  const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
+  const hits = []
+  for (const entry of speciesList) {
+    const name = entry.name.toLowerCase()
+    let at = lower.indexOf(name)
+    while (at !== -1) {
+      hits.push({ entry, at, end: at + name.length, len: name.length })
+      at = lower.indexOf(name, at + Math.max(1, name.length))
+    }
+  }
+
+  // Tên Pokémon có thể nằm trong tên khác (Mew trong Mewtwo, Mime trong
+  // Mr. Mime). Chọn span dài nhất ở cùng vị trí rồi bỏ mọi hit chồng lấn.
+  // Làm bước này TRƯỚC exclude để Pokémon phe mình bị loại không vô tình
+  // để lại một tên ngắn giả ở bên trong tên của chính nó.
+  hits.sort((a, b) => a.at - b.at || b.len - a.len)
+  const nonOverlapping = []
+  for (const hit of hits) {
+    if (nonOverlapping.some((kept) => hit.at < kept.end && hit.end > kept.at)) continue
+    nonOverlapping.push(hit)
+  }
+
+  const out = []
+  const seen = new Set()
+  for (const hit of nonOverlapping) {
+    const key = hit.entry.name.toLowerCase()
+    if (exclude.has(key) || seen.has(key)) continue
+    seen.add(key)
+    out.push(hit.entry)
+  }
+  return out
+}
+
 /**
  * Chọn ngẫu nhiên 1 loài và sinh Pokémon hoang dã Lv.8-15.
  * @param {Array<{name,species,types}>} [list] danh sách loài để chọn — mặc

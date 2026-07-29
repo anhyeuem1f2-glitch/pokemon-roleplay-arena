@@ -7,6 +7,7 @@ import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { buildMonSmart } from '../data/pokemonSpecies.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea, detectLocationFromMetadata } from '../data/regions.js'
+import { normalizeMapLocation } from '../data/mapPins.js'
 import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
 import { clearMemory } from '../utils/storyMemory.js'
 import { clearNotebook } from '../utils/storyNotebook.js'
@@ -155,11 +156,21 @@ export default function SimulationTester({ onEnterGame }) {
       // truyện nhắc thoáng qua "Mt. Moon" là bị dịch chuyển sai khỏi khu đã
       // chọn. Chỉ tag [[MOVE]] tường minh hoặc dòng [Metadata|..] mới đè.
       let movedTo = null
-      if ((parsed.moves ?? []).length) {
+      if ((parsed.moveDirectives ?? []).length) {
+        const directive = parsed.moveDirectives[parsed.moveDirectives.length - 1]
+        const named = detectMentionedArea(directive.place, { regionKey, areaKey })
+        const base = named ?? { regionKey, areaKey }
+        movedTo = normalizeMapLocation({
+          ...base,
+          x: directive.x ?? (named ? undefined : null),
+          y: directive.y ?? (named ? undefined : null),
+          source: 'simulation-move',
+        })
+      } else if ((parsed.moves ?? []).length) {
         movedTo = detectMentionedArea(parsed.moves[parsed.moves.length - 1], { regionKey, areaKey })
       }
       if (!movedTo) movedTo = detectLocationFromMetadata(reply, { regionKey, areaKey })
-      if (movedTo) setPlayerLocation(movedTo)
+      if (movedTo) setPlayerLocation(normalizeMapLocation(movedTo))
 
       // NHẢY VÀO MÀN CHƠI THẬT — từ đây chơi tiếp y hệt bình thường.
       setGameStarted(true)

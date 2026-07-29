@@ -497,6 +497,66 @@ export function buildMonSmart(speciesEntry, level, movesDb = null, opponentTypes
   return buildBossMon(speciesEntry, cappedLevel, tier, movesDb, opponentTypes)
 }
 
+function evolutionId(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+/** Hai entry có quan hệ tiến hoá TRỰC TIẾP hay không. */
+export function isDirectEvolution(fromEntry, toEntry) {
+  if (!fromEntry || !toEntry) return false
+  const fromIds = new Set([fromEntry.name, fromEntry.species].map(evolutionId).filter(Boolean))
+  const toIds = new Set([toEntry.name, toEntry.species].map(evolutionId).filter(Boolean))
+  const targetPrevo = evolutionId(toEntry.prevo)
+  if (targetPrevo && fromIds.has(targetPrevo)) return true
+  for (const evo of fromEntry.evos ?? []) {
+    if (toIds.has(evolutionId(evo))) return true
+  }
+  return false
+}
+
+/**
+ * Tiến hoá CÙNG MỘT CÁ THỂ (đợt 76).
+ * Giữ uid/IV/EV/nature/EXP/trạng thái và lượng HP đã mất; chỉ thay dữ liệu
+ * loài, sprite, hệ và base stats; bộ chiêu hiện tại được giữ nguyên.
+ * Trước đây model dùng [[POKEMON Fletchinder]] khiến app sinh thêm Fletchinder nhưng Fletchling cũ vẫn còn.
+ */
+export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
+  if (!mon || !targetEntry) return mon
+  const level = Math.max(1, Math.min(MAX_LEVEL, Number(mon.level) || 1))
+  const generated = buildMonSmart(
+    targetEntry,
+    level,
+    movesDb,
+    null,
+    Boolean(mon.isTrainerMon),
+  )
+  const wasFainted = (mon.hp ?? 1) <= 0
+  const seed = {
+    ...mon,
+    name: targetEntry.name,
+    species: targetEntry.species,
+    spriteId: targetEntry.spriteId ?? targetEntry.species,
+    types: [...(targetEntry.types ?? generated.types ?? mon.types ?? [])],
+    baseStats: targetEntry.baseStats ?? generated.baseStats ?? mon.baseStats ?? null,
+    // Tiến hoá không được tự xoá bộ chiêu người chơi đang dùng. Chỉ lấy
+    // moveset sinh tự động nếu save cũ thật sự chưa có chiêu nào.
+    moves: mon.moves?.length ? mon.moves : generated.moves,
+    level,
+    exp: Math.max(Number(mon.exp) || expForLevel(level), expForLevel(level)),
+    // recomputeMonStats cần maxHp/hp CŨ để cộng đúng phần máu tối đa tăng lên.
+    maxHp: mon.maxHp,
+    hp: mon.hp,
+    evolvedFrom: mon.species ?? mon.name,
+  }
+  const evolved = seed.baseStats ? recomputeMonStats(seed) : {
+    ...seed,
+    stats: generated.stats ?? mon.stats,
+    maxHp: generated.maxHp ?? mon.maxHp,
+    hp: Math.min(generated.maxHp ?? mon.maxHp ?? 1, mon.hp ?? generated.maxHp ?? 1),
+  }
+  return wasFainted ? { ...evolved, hp: 0 } : evolved
+}
+
 
 /**
  * Dò xem đoạn text (thường là nội dung tin nhắn AI ngay trước marker

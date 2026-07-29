@@ -14,10 +14,11 @@ import {
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget, resolveOwnedSpeciesTarget } from '../utils/ownedMonTarget.js'
-import { buildMonSmart, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective } from '../data/pokemonSpecies.js'
+import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
+import { buildMonSmart, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
-import { detectTrainerBattle, detectDoubleBattle, detectPokecenter } from '../data/storyScenes.js'
+import { detectTrainerBattle, detectDoubleBattle, detectPokecenter, detectInteractiveShop } from '../data/storyScenes.js'
 import { resolveItemByName } from '../data/shopItems.js'
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
@@ -263,6 +264,8 @@ function filterSupplementalDuplicates(extra, applied) {
   const levelKeys = new Set((applied?.levels ?? []).map((lv) =>
     `${normalizeMonTarget(lv.target)}|${lv.mode}|${lv.value}`,
   ))
+  const evolutionKey = (ev) => `${normalizeMonTarget(ev.from)}|${normalizeMonTarget(ev.to)}`
+  const evolutionKeys = new Set((applied?.evolutions ?? []).map(evolutionKey))
   const itemKey = (it) => {
     const known = resolveItemByName(it.name)
     return `${known?.id ?? normalizeMonTarget(it.name)}|${it.qty}`
@@ -273,9 +276,11 @@ function filterSupplementalDuplicates(extra, applied) {
     levels: (extra?.levels ?? []).filter((lv) =>
       !levelKeys.has(`${normalizeMonTarget(lv.target)}|${lv.mode}|${lv.value}`),
     ),
+    evolutions: (extra?.evolutions ?? []).filter((ev) => !evolutionKeys.has(evolutionKey(ev))),
     items: (extra?.items ?? []).filter((it) => !itemKeys.has(itemKey(it))),
   }
 }
+
 
 // ===== Mô tả thay đổi biến của 1 lượt (đợt 48 — học card PNTT) =====
 // Dịch stateParsed thành các dòng người đọc hiểu ngay, lưu vào message.meta
@@ -302,6 +307,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
   } else {
     // Fallback cho tin cũ/test cũ chưa có báo cáo áp biến.
     for (const pk of parsed.pokemons ?? []) out.push(`🔴 Yêu cầu nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
+    for (const ev of parsed.evolutions ?? []) out.push(`✨ Yêu cầu tiến hoá: ${ev.from} → ${ev.to}${tag}`)
     for (const lv of parsed.levels ?? []) {
       const value = lv.mode === 'delta' ? `${lv.value > 0 ? '+' : ''}${lv.value}` : `Lv.${lv.value}`
       out.push(`⬆ Yêu cầu đổi cấp ${lv.target}: ${value}${tag}`)
@@ -539,7 +545,7 @@ export default function RoleplayChat() {
   // dưới từ trước; hàm này lo POKEMON / LEVEL / ITEM / DATE / TRAIN /
   // HUNGER / NPC / FACT. LEVEL là đường chính thức cho Kẹo Hiếm/năng lực;
   // POKEMON trùng loài chỉ còn là nhánh tương thích model cũ.
-  function applyParsedState(parsed, turnNow) {
+  function applyParsedState(parsed, turnNow, storyText = '') {
     const report = { lines: [] }
     let previewActive = latestPlayerMonRef.current
     let previewParty = [...(latestPartyRef.current ?? [])]
@@ -550,25 +556,102 @@ export default function RoleplayChat() {
     }
 
     try {
+      const findSpeciesEntry = (value) => findEvolutionSpeciesEntry(pokedexSpecies, value)
+      const evolvedTargets = new Set()
+
+      const evolveOne = (targetMon, targetEntry, source = 'tag') => {
+        const fromName = targetMon.name
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        // Dựng đúng MỘT snapshot rồi dùng chung cho playerMon + party. Nếu
+        // gọi evolveOwnedMon hai lần, save rất cũ chưa có moves có thể roll
+        // hai moveset khác nhau và lại làm hai bản của cùng uid lệch nhau.
+        const evolvedSnapshot = evolveOwnedMon(targetMon, targetEntry, movesDb)
+        const transform = () => evolvedSnapshot
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? transform() : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? transform() : mon)))
+        replacePreviewMon(identity, transform)
+        evolvedTargets.add(normalizeMonTarget(targetEntry.name))
+        report.lines.push(`✅ Tiến hoá: ${fromName} → ${targetEntry.name} · Lv.${targetMon.level ?? 1}${source === 'inferred' ? ' (app xác nhận từ chính văn)' : ''}`)
+      }
+
+      // LEVEL chạy TRƯỚC EVOLVE. Một lượt tiến hoá do lên cấp thường có cả
+      // [[LEVEL Fletchling | +1]] và [[EVOLVE Fletchling | Fletchinder]];
+      // nếu đổi tên trước thì tag LEVEL tên cũ sẽ mất target.
+      for (const directive of parsed.levels ?? []) {
+        let targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        // Model đôi khi gọi luôn TÊN SAU TIẾN HOÁ trong LEVEL dù cá thể trong
+        // state vẫn đang mang tên cũ ở thời điểm áp. Nếu cùng lượt có EVOLVE
+        // A→B, chuyển target B về đúng cá thể A rồi mới nâng cấp.
+        if (!targetMon) {
+          const linkedEvolution = (parsed.evolutions ?? []).find((ev) =>
+            normalizeMonTarget(ev.to) === normalizeMonTarget(directive.target),
+          )
+          if (linkedEvolution) {
+            targetMon = resolveOwnedMonTarget(linkedEvolution.from, previewActive, previewParty)
+          }
+        }
+        if (!targetMon) {
+          report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          continue
+        }
+        const before = targetMon.level ?? 1
+        const previewAfter = applyLevelDirective(targetMon, directive)
+        const after = previewAfter?.level ?? before
+        if (after <= before) {
+          report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn này không làm thay đổi biến`)
+          continue
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const apply = (mon) => applyLevelDirective(mon, directive)
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        replacePreviewMon(identity, apply)
+        report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
+      }
+
+      for (const evolution of parsed.evolutions ?? []) {
+        const targetMon = resolveOwnedMonTarget(evolution.from, previewActive, previewParty)
+        if (!targetMon) {
+          report.lines.push(`⚠ Không tiến hoá “${evolution.from}”: không tìm thấy cá thể tương ứng trong đội`)
+          continue
+        }
+        const fromEntry = findSpeciesEntry(targetMon.species ?? targetMon.name)
+        const targetEntry = findSpeciesEntry(evolution.to)
+        if (!targetEntry) {
+          report.lines.push(`⚠ Không tiến hoá ${targetMon.name}: không tìm thấy loài “${evolution.to}” trong Pokédex`)
+          continue
+        }
+        const relationKnown = Boolean(targetEntry.prevo || (fromEntry?.evos ?? []).length)
+        if (relationKnown && !isDirectEvolution(fromEntry, targetEntry)) {
+          report.lines.push(`⚠ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: không phải nhánh tiến hoá trực tiếp`)
+          continue
+        }
+        if (normalizeMonTarget(targetMon.species ?? targetMon.name) === normalizeMonTarget(targetEntry.species ?? targetEntry.name)) {
+          report.lines.push(`ℹ ${targetMon.name} đã ở đúng dạng ${targetEntry.name} — không đổi biến`)
+          continue
+        }
+        evolveOne(targetMon, targetEntry, evolution.inferred ? 'inferred' : 'tag')
+      }
+
       for (const pk of parsed.pokemons ?? []) {
-        const wanted = normalizeMonTarget(pk.species)
-        const entry = pokedexSpecies.find((e) =>
-          [e.name, e.species].map(normalizeMonTarget).includes(wanted),
-        )
+        const entry = findSpeciesEntry(pk.species)
         if (!entry) {
           console.warn('[pokemon-tag] Không tìm thấy loài trong pokedex:', pk.species)
           report.lines.push(`⚠ Không áp Pokémon “${pk.species}”: không tìm thấy loài trong Pokédex`)
           continue
         }
 
-        // Tương thích model cũ: POKEMON trùng cá thể đang có = yêu cầu nâng
-        // cấp, nhưng DNA chỉ ghi thành công khi app thật sự tìm được target.
+        // Tương thích model cũ 1: POKEMON trùng loài đang có = yêu cầu nâng
+        // cấp. Nếu vừa EVOLVE sang đúng loài này trong cùng lượt thì bỏ tag
+        // POKEMON dư, không tạo thêm dòng DNA gây hiểu nhầm.
         const existing = resolveOwnedSpeciesTarget(pk.species, previewActive, previewParty)
         if (existing) {
           const before = existing.level ?? 1
           const after = Math.max(before, Math.min(100, Number(pk.level) || before))
           if (after <= before) {
-            report.lines.push(`ℹ ${existing.name} đang Lv.${before} — tag Lv.${pk.level} không làm thay đổi biến`)
+            if (!evolvedTargets.has(normalizeMonTarget(entry.name))) {
+              report.lines.push(`ℹ ${existing.name} đang Lv.${before} — tag Lv.${pk.level} không làm thay đổi biến`)
+            }
             continue
           }
           const identity = { uid: existing.uid, name: existing.name }
@@ -577,6 +660,35 @@ export default function RoleplayChat() {
           setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
           replacePreviewMon(identity, raise)
           report.lines.push(`✅ ${existing.name}: Lv.${before} → Lv.${after}`)
+          continue
+        }
+
+        // Tương thích model cũ 2: model kể Fletchling tiến hoá nhưng vẫn dùng
+        // [[POKEMON Fletchinder | Lv19]]. Nếu Pokédex xác nhận quan hệ trực
+        // tiếp VÀ chính văn khẳng định tiến hoá đã xảy ra, thay đúng cá thể
+        // cũ thay vì thêm “con chim cấp 2” thứ hai.
+        const owned = []
+        for (const mon of [previewActive, ...previewParty]) {
+          if (mon && !owned.some((x) => isSameMon(x, mon))) owned.push(mon)
+        }
+        const prevo = owned.find((mon) => {
+          const fromEntry = findSpeciesEntry(mon.species ?? mon.name)
+          return isDirectEvolution(fromEntry, entry) && storyClaimsEvolution(storyText, mon.name, entry.name)
+        })
+        if (prevo) {
+          const beforeLevel = prevo.level ?? 1
+          const requestedLevel = Math.max(beforeLevel, Math.min(100, Number(pk.level) || beforeLevel))
+          let current = prevo
+          if (requestedLevel > beforeLevel) {
+            const identity = { uid: prevo.uid, name: prevo.name }
+            const raise = (mon) => raiseMonToLevel(mon, requestedLevel)
+            setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
+            setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
+            replacePreviewMon(identity, raise)
+            current = raise(prevo)
+            report.lines.push(`✅ ${prevo.name}: Lv.${beforeLevel} → Lv.${requestedLevel}`)
+          }
+          evolveOne(current, entry, 'inferred')
           continue
         }
 
@@ -599,34 +711,13 @@ export default function RoleplayChat() {
         }
       }
 
-      for (const directive of parsed.levels ?? []) {
-        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
-        if (!targetMon) {
-          report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
-          continue
-        }
-        const before = targetMon.level ?? 1
-        const previewAfter = applyLevelDirective(targetMon, directive)
-        const after = previewAfter?.level ?? before
-        if (after <= before) {
-          report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn này không làm thay đổi biến`)
-          continue
-        }
-        const identity = { uid: targetMon.uid, name: targetMon.name }
-        const apply = (mon) => applyLevelDirective(mon, directive)
-        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
-        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
-        replacePreviewMon(identity, apply)
-        report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
-      }
-
       // Cập nhật ref lạc quan để API phụ chạy ngay sau đó nhìn thấy đúng bản
       // vừa áp, không dùng lại snapshot cũ rồi báo DNA lệch lần nữa.
       latestPlayerMonRef.current = previewActive
       latestPartyRef.current = previewParty
     } catch (e2) {
-      console.warn('[state] POKEMON/LEVEL lỗi:', e2.message)
-      report.lines.push(`⚠ Lỗi khi áp Pokémon/cấp: ${e2.message}`)
+      console.warn('[state] POKEMON/LEVEL/EVOLVE lỗi:', e2.message)
+      report.lines.push(`⚠ Lỗi khi áp Pokémon/cấp/tiến hoá: ${e2.message}`)
     }
 
     try {
@@ -859,7 +950,29 @@ export default function RoleplayChat() {
       // do AI khai báo ở cuối tin — áp vào state thật (tiền, hảo cảm, thương
       // tích trên HUD cập nhật ngay), gỡ tag khỏi văn bản hiển thị. Tag
       // [[SHOP Tên]] gắn shopName lên message để hiện nút mở giỏ hàng.
-      const stateParsed = parseStoryStateTags(cleaned)
+      let stateParsed = parseStoryStateTags(cleaned)
+      // Đợt 76: model có thể kể rõ “Froakie tiến hoá thành Frogadier” nhưng
+      // quên EVOLVE hoặc vẫn dùng nhầm POKEMON. App chỉ tự bổ sung khi
+      // Pokédex xác nhận quan hệ tiến hoá trực tiếp và câu văn khẳng định sự
+      // kiện đã xảy ra.
+      stateParsed = inferEvolutionDirectives(
+        stateParsed,
+        stateParsed.cleaned,
+        pokedexSpecies,
+        latestPlayerMonRef.current,
+        latestPartyRef.current,
+      )
+
+      // SHOP là nút tương tác, nên tag sai không được phép tạo UI. Chỉ giữ
+      // cửa hàng mà chính văn chứng minh nhân vật đã bước vào bên trong.
+      const rejectedShops = []
+      const validShops = (stateParsed.shops ?? []).filter((shop) => {
+        const check = detectInteractiveShop(stateParsed.cleaned, shop.name)
+        if (!check.inside) rejectedShops.push(shop)
+        return check.inside
+      })
+      stateParsed = { ...stateParsed, shops: validShops }
+
       applyStoryState(stateParsed, {
         playerProfile, setPlayerProfile,
         relationships, setRelationships,
@@ -868,7 +981,10 @@ export default function RoleplayChat() {
       // Đợt 74: áp POKEMON/LEVEL/ITEM trước khi dựng DNA và lấy báo cáo
       // thực tế. DNA không còn chỉ lặp lại tag rồi tuyên bố nhầm là đã áp.
       const turnNow = nextMessages.length
-      const mainApplyReport = applyParsedState(stateParsed, turnNow)
+      const mainApplyReport = applyParsedState(stateParsed, turnNow, stateParsed.cleaned)
+      for (const shop of rejectedShops) {
+        mainApplyReport.lines.push(`⚠ Bỏ qua cửa hàng “${shop.name}”: chính văn chưa cho nhân vật bước vào bên trong`)
+      }
       // Vị trí tính TRƯỚC khi lưu tin (đợt 48) để đưa vào meta viewer.
       let movedTo = null
       if ((stateParsed.moveDirectives ?? []).length) {
@@ -936,7 +1052,7 @@ export default function RoleplayChat() {
           content: displayText,
           meta: turnMeta,
           ...(stateParsed.shops.length > 0
-            ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name }
+            ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name, shopValidated: true }
             : {}),
           // ĐỢT 71 — TRUNG TÂM POKÉMON. Ưu tiên tag [[POKECENTER]] AI khai;
           // model quên khai thì DÒ TỪ CHÍNH VĂN (quy tắc số 5: không tin
@@ -973,7 +1089,7 @@ export default function RoleplayChat() {
           userText: [...nextMessages].reverse().find((m2) => m2.role === 'user' && !m2.hidden)?.content ?? '',
           appliedTags: {
             money: stateParsed.money, rel: stateParsed.rel, pokemons: stateParsed.pokemons,
-            levels: stateParsed.levels, items: stateParsed.items,
+            levels: stateParsed.levels, evolutions: stateParsed.evolutions, items: stateParsed.items,
             hunger: stateParsed.hunger, dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
             npcs: (stateParsed.npcs ?? []).map((n) => n.name), facts: (stateParsed.facts ?? []).map((f) => f.key),
           },
@@ -982,7 +1098,7 @@ export default function RoleplayChat() {
           .then((extraTagsText) => {
             if (!extraTagsText) return
             const extra = filterSupplementalDuplicates(parseStoryStateTags(extraTagsText), stateParsed)
-            const extraApplyReport = applyParsedState(extra, turnNow)
+            const extraApplyReport = applyParsedState(extra, turnNow, stateParsed.cleaned)
             // Tiền/quan hệ bổ sung từ API phụ: áp qua applyStoryState như luồng chính.
             if (extra.money || extra.rel.length || extra.body.length) {
               applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
@@ -1460,7 +1576,7 @@ ${m.content}`
                   </button>
                 </div>
               )}
-              {m.shopName && (
+              {m.shopName && (m.shopValidated || detectInteractiveShop(m.content, m.shopName).inside) && (
                 <div>
                   <button
                     onClick={() => setShopMsgIndex(i)}

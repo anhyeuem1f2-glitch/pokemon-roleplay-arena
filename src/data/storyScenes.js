@@ -177,6 +177,63 @@ export function detectPokecenter(text) {
 }
 
 
+// ---------- 3. CỬA HÀNG TƯƠNG TÁC (đợt 76) ----------
+// Model từng gắn [[SHOP Trung tâm Mua sắm Lumiose]] chỉ vì nhân vật đi tới
+// Lumiose rồi gặp Pokémon hoang trên đường. Nút shop vì thế xuất hiện dù
+// chính văn không hề bước vào cửa hàng. Tag chỉ được tin khi VĂN BẢN tự nó
+// chứng minh nhân vật đã ở bên trong và lượt kể đang dừng để mua sắm.
+function normalizeSceneText(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+}
+
+const SHOP_NOUNS = [
+  'cua hang', 'pokemart', 'poke mart', 'shop', 'sieu thi', 'trung tam mua sam',
+  'bach hoa', 'tiem tap hoa', 'tiem quan ao', 'tiem do', 'quay ban hang',
+]
+const SHOP_INSIDE_CUES = [
+  'buoc vao', 'di vao', 'tien vao', 're vao', 'ghe vao', 'mo cua buoc vao',
+  'dat chan vao', 'ben trong', 'dung truoc quay', 'truoc quay thanh toan',
+  'nhin cac ke hang', 'dao quanh cac ke', 'chu quan', 'nhan vien ban hang',
+]
+const SHOP_REJECT_CUES = [
+  'khong vao', 'chua vao', 'di ngang qua', 'luot qua', 'bo qua cua hang',
+  'roi khoi cua hang', 'buoc ra khoi', 'ra khoi cua hang', 'roi sieu thi',
+]
+
+/**
+ * Kiểm tra tag SHOP có thật sự khớp cảnh hiện tại không.
+ * @returns {{inside:boolean, reason:string}}
+ */
+export function detectInteractiveShop(text, shopName = '') {
+  if (!text) return { inside: false, reason: 'empty-story' }
+  const hay = normalizeSceneText(text.slice(-TAIL_LEN))
+  const normalizedName = normalizeSceneText(shopName)
+  const shopAt = Math.max(
+    normalizedName ? hay.lastIndexOf(normalizedName) : -1,
+    lastHit(hay, SHOP_NOUNS),
+  )
+  if (shopAt < 0) return { inside: false, reason: 'shop-not-mentioned' }
+
+  const rejectAt = lastHit(hay, SHOP_REJECT_CUES)
+  const insideAt = lastHit(hay, SHOP_INSIDE_CUES)
+  if (rejectAt > insideAt && rejectAt >= shopAt - 180) {
+    return { inside: false, reason: 'story-says-not-inside' }
+  }
+  if (insideAt < 0) return { inside: false, reason: 'no-entry-action' }
+
+  // Câu chỉ dẫn vào cửa hàng và danh từ cửa hàng phải cùng một cảnh gần nhau;
+  // tránh mở shop vì đoạn đầu hồi tưởng “đã bước vào shop hôm qua” nhưng cuối
+  // lượt hiện đang đánh Pokémon hoang ngoài đường.
+  if (Math.abs(insideAt - shopAt) > 320) return { inside: false, reason: 'entry-too-far' }
+  return { inside: true, reason: 'confirmed-inside' }
+}
+
+
 // ---------- ĐẤU ĐÔI THỬ NGHIỆM (đợt 75) ----------
 const BATTLE_CLUB_WORDS = [
   'battle club', 'câu lạc bộ chiến đấu', 'câu lạc bộ đấu pokémon',

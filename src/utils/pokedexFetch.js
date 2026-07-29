@@ -9,7 +9,7 @@
 // cho 1 số loài nhất định, và những loài đó ĐÃ nằm sẵn trong dữ liệu tải về.
 
 const POKEDEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
-const CACHE_KEY = 'trainer-arena:pokedex-cache-v6'
+const CACHE_KEY = 'trainer-arena:pokedex-cache-v7'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 function toID(text) {
@@ -52,6 +52,13 @@ function normalizeEntry(species, key) {
     // hasEvo (còn tiến hoá được), BST (tổng base stats) làm proxy độ mạnh.
     hasPrevo: Boolean(species.prevo),
     hasEvo: Array.isArray(species.evos) && species.evos.length > 0,
+    // Đợt 76: giữ TÊN mắt xích tiến hoá thật thay vì chỉ boolean. Luồng
+    // roleplay cần biết Fletchling → Fletchinder là THAY CÙNG CÁ THỂ, không
+    // phải nhận thêm một con mới. Bump cache v7 để cache cũ thiếu 2 field
+    // này không tiếp tục gây phân thân Pokémon.
+    prevo: species.prevo ?? null,
+    evos: Array.isArray(species.evos) ? [...species.evos] : [],
+    evoLevel: Number.isFinite(species.evoLevel) ? species.evoLevel : null,
     bst: species.baseStats ? Object.values(species.baseStats).reduce((a, b) => a + b, 0) : null,
   }
 }

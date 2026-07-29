@@ -10,8 +10,9 @@
 //   [[REL Misty=-15 | cãi nhau ở gym]]   — kèm ghi chú mới (tuỳ chọn)
 //   [[BODY leftArm=+25]]      — bộ phận bị thương thêm (+) hoặc hồi phục (-)
 //       bộ phận hợp lệ: head, torso, leftArm, rightArm, leftLeg, rightLeg
-//   [[SHOP Tiệm PokéMart Cerulean]]      — người chơi ĐANG đứng trong 1 cửa
-//       hàng và có thể mua sắm → app hiện nút mở giao diện giỏ hàng.
+//   [[SHOP Tiệm PokéMart Cerulean]]      — người chơi ĐÃ bước vào bên trong
+//       cửa hàng và có thể mua sắm → app hiện nút mở giao diện giỏ hàng.
+//   [[EVOLVE Froakie | Frogadier]]       — cùng cá thể tiến hoá, không sinh con mới.
 
 export const BODY_PART_KEYS = ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
 
@@ -19,8 +20,9 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Tiền thay đổi (được thưởng, mua bán lẻ, bị cướp...): [[MONEY +500]] hoặc [[MONEY -200]].
 - Hảo cảm NPC thay đổi (giúp đỡ, cãi vã, tặng quà...): [[REL Tên NPC=+10]] (từ -100 tới +100, mỗi lần đổi 1-15 điểm là hợp lý; có thể kèm ghi chú: [[REL Misty=+8 | cùng nhau tuần tra bờ hồ]]). Chỉ dùng cho NPC có tên, xuất hiện thật trong truyện.
 - Nhân vật chính BỊ THƯƠNG hoặc HỒI PHỤC phần thân thể nào (thế giới này Pokémon tấn công con người là chuyện bình thường): [[BODY leftArm=+25]] (dương = thương thêm, âm = hồi phục; bộ phận: head, torso, leftArm, rightArm, leftLeg, rightLeg; 0 lành lặn, 100 là mất/hỏng hẳn — vết cào nhẹ +5~10, trúng đòn nặng +20~40, gãy/bỏng nặng +50+). Mô tả vết thương trong lời kể phải khớp với tag.
-- Câu chuyện dẫn tới việc MUA SẮM tại một cửa hàng: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật (30-300 món tuỳ quy mô, có thương hiệu Silph Co./Devon Corp./hãng nhỏ) — đừng tự liệt kê hàng trong chính văn, chỉ tả không khí cửa hàng. Cửa hàng nhỏ ven đường = quy mô nhỏ, siêu thị thành phố = lớn.
-- Người chơi THẬT SỰ có được một Pokémon mới trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
+- CHỈ khi nhân vật đã THỰC SỰ BƯỚC VÀO BÊN TRONG cửa hàng, đang đứng trước quầy/kệ và lượt kể dừng để người chơi chọn mua: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật. Đi tới một thành phố, đi ngang/nhìn thấy cửa hàng, nhắc tên trung tâm mua sắm, hoặc chỉ nói “sẵn tiện mua sau” thì TUYỆT ĐỐI KHÔNG dùng SHOP. Chính văn phải nói rõ nhân vật đã vào trong; đừng tự liệt kê hàng, chỉ tả không khí rồi dừng.
+- Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. KHÔNG dùng POKEMON cho tiến hoá. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
+- Pokémon đang sở hữu TIẾN HOÁ thành loài khác: [[EVOLVE Tên hiện tại | Tên sau tiến hoá]]. Đây là CÙNG MỘT CÁ THỂ: app giữ uid/IV/EV/nature/EXP và thay hình ảnh/chỉ số loài; tuyệt đối không dùng [[POKEMON loài mới]] vì sẽ tạo bản sao. Nếu tiến hoá xảy ra đúng lúc lên cấp, khai cả [[LEVEL tên cũ | +1]] rồi [[EVOLVE tên cũ | tên mới]].
 - Nhân vật NHẬN ĐƯỢC hoặc MẤT ĐI vật phẩm (được tặng, nhặt được, dùng hết, bị lấy mất): [[ITEM Tên vật phẩm | số lượng]] — số lượng âm là mất đi, bỏ trống là 1. VD: [[ITEM Potion | 2]], [[ITEM Kẹo Hiếm]], [[ITEM Poké Ball | -1]]. CHỈ dùng khi truyện THỰC SỰ trao/lấy đồ; đừng tự phát đồ cho người chơi vô cớ. Nếu NĂNG LỰC ĐẶC BIỆT của người chơi (mục SIÊU NĂNG LỰC ĐẶC BIỆT ở trên) nói rằng họ có sẵn hay tạo ra được một loại vật phẩm nào đó, thì hãy DÙNG TAG NÀY để biến điều đó thành thật trong túi đồ, thay vì chỉ kể suông rồi để số liệu đứng yên.
 - Pokémon TĂNG CẤP TRỰC TIẾP vì Kẹo Hiếm hoặc một năng lực đặc biệt (không phải EXP trận/luyện tập): [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]]. Dùng +N khi tăng N cấp, dùng LvN khi truyện chốt cấp đích. Nếu dùng Kẹo Hiếm hữu hạn thì khai thêm [[ITEM Kẹo Hiếm | -1]]; nếu năng lực ghi Kẹo Hiếm vô hạn thì KHÔNG trừ. TUYỆT ĐỐI không dùng [[POKEMON]] để báo một Pokémon cũ lên cấp, và không dùng [[LEVEL]] sau trận thường hay [[TRAIN]] vì app đã tự tính EXP.
 - Nhân vật BƯỚC VÀO TRUNG TÂM POKÉMON (Pokémon Center — nơi y tá Joy chữa trị): [[POKECENTER Tên trung tâm]] — hệ thống sẽ hiện 2 nút cho người chơi tự bấm: CHỮA TRỊ và MÁY PC. Vì vậy trong lời kể ĐỪNG tự ý viết rằng Pokémon đã được chữa xong hay đã đổi đội hình — chỉ tả cảnh bước vào, y tá chào hỏi, rồi DỪNG LẠI để người chơi chọn. Khi nhân vật rời đi thì kể rõ là đã rời khỏi trung tâm.\n- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]]; nếu biết vị trí cụ thể trên bản đồ thì thêm toạ độ phần trăm [[MOVE Tên khu vực | x=42 | y=58]] (x: trái→phải 0-100, y: trên→dưới 0-100). VD [[MOVE Cerulean City | x=66 | y=24]]. Chỉ tag khi THỰC SỰ đổi chỗ; không bịa x/y khi văn bản không đủ rõ.
@@ -38,6 +40,8 @@ Không bịa thay đổi không có trong diễn biến. Không dùng tag nào k
 // vẫn an toàn, không đụng chính văn thường.
 const MONEY_RE = /\[\[\s*MONEY\s*([+-]?\d+)\s*\]\]/gi
 const POKEMON_RE = /\[\[\s*POKEMON\s+([^\]|]+?)\s*\|\s*Lv\.?\s*(\d+)\s*\]\]/gi
+// Đợt 76: tiến hoá phải thay đúng cá thể, không được sinh thêm Pokémon cấp 2.
+const EVOLVE_RE = /\[\[\s*(?:EVOLVE|EVOLUTION|TIẾN\s*(?:H[ÓO]A|HO[ÁA])|TIEN\s*HOA)\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 // Đợt 73: thay đổi cấp của Pokémon ĐANG SỞ HỮU. Trước đây model buộc phải
 // lạm dụng [[POKEMON Froakie | Lv11]], app hiểu là nhận con mới rồi bỏ qua vì
 // trùng loài — lời kể lên cấp nhưng biến đứng yên.
@@ -70,7 +74,7 @@ const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
  * Regex không neo dòng: model thực tế thường nhét tag giữa câu.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
   const rel = []
   const body = []
@@ -79,6 +83,7 @@ export function parseStoryStateTags(text) {
   const facts = []
   const pokemons = []
   const levels = []
+  const evolutions = []
   const hunger = []
   const moves = []
   const moveDirectives = []
@@ -139,6 +144,11 @@ export function parseStoryStateTags(text) {
   for (const m of text.matchAll(POKEMON_RE)) {
     pokemons.push({ species: m[1].trim(), level: Math.max(1, Math.min(100, parseInt(m[2], 10))) })
   }
+  for (const m of text.matchAll(EVOLVE_RE)) {
+    const from = m[1].trim()
+    const to = m[2].trim()
+    if (from && to) evolutions.push({ from, to })
+  }
   for (const m of text.matchAll(LEVEL_RE)) {
     const raw = m[2].trim()
     const value = parseInt(raw, 10)
@@ -195,6 +205,7 @@ export function parseStoryStateTags(text) {
     .replace(NPC_RE, '')
     .replace(FACT_RE, '')
     .replace(POKEMON_RE, '')
+    .replace(EVOLVE_RE, '')
     .replace(LEVEL_RE, '')
     .replace(DATE_ADV_RE, '')
     .replace(TRAIN_RE, '')
@@ -210,7 +221,7 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, rel, body, shops, npcs, facts, pokemons, levels, hunger, moves, moveDirectives, items, dateAdvance,
+  return { money, rel, body, shops, npcs, facts, pokemons, levels, evolutions, hunger, moves, moveDirectives, items, dateAdvance,
     training, datePart, pokecenter, cleaned }
 }
 

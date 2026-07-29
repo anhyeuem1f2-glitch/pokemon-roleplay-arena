@@ -118,3 +118,35 @@ THỨ TỰ ƯU TIÊN KHI PHÁT:
   2. Nhạc theo CẢNH trong chính văn (Trung tâm, cắm trại, gym...)
   3. Nhạc theo BUỔI (đêm/tối → night.mp3)
   4. Nhạc theo vị trí bản đồ (area-* → region-* → exploration)
+
+
+=====================================================================
+ CẬP NHẬT ĐỢT 71 — 2 BÀI MỚI + NHẠC TRUNG TÂM POKÉMON
+=====================================================================
+
+TÊN FILE GIỮ NGUYÊN NHƯ BẠN ĐẶT (không cần đổi tên):
+
+  title and adventure.mp3   Màn hình mở đầu (title screen).
+                            Đứng TRƯỚC title.mp3 trong danh sách ưu tiên,
+                            nên có file này là nó thắng; xoá đi thì tự lùi
+                            về title.mp3 → exploration.mp3 như cũ.
+
+  low hp.mp3                Pokémon đang ra trận tụt dưới 20% máu.
+                            CHỈ phát trong trận, đè lên nhạc trận đang
+                            chạy; máu hồi lên trên 20% hoặc hết trận là
+                            tự tắt, quay lại đúng bài nhạc trận cũ.
+
+  pokemon center.mp3        Chấp nhận song song với pokecenter.mp3 — bảng
+                            Trung tâm Pokémon thử pokecenter.mp3 trước,
+                            không có thì dùng "pokemon center.mp3", rồi
+                            rest.mp3, rồi area-town.mp3.
+
+LƯU Ý KỸ THUẬT: từ đợt 71 đường dẫn nhạc được MÃ HOÁ (encodeURIComponent)
+nên tên file có DẤU CÁCH ("title and adventure.mp3") hoặc TIẾNG VIỆT CÓ DẤU
+("huyền ảo.mp3") đều tải được. Trước đây dấu cách trong URL có thể bị máy
+chủ trả 404 và nhạc câm mà không báo lỗi gì.
+
+NHẠC TRUNG TÂM POKÉMON phát trong 2 trường hợp:
+  1. Chính văn nhắc tới Trung tâm Pokémon (cơ chế nhạc theo cảnh, đợt 67).
+  2. Người chơi MỞ bảng Trung tâm Pokémon bằng nút ✚ Chữa trị / 💻 Máy PC
+     — nhạc được đè trong suốt lúc bảng mở, đóng bảng thì trả lại như cũ.

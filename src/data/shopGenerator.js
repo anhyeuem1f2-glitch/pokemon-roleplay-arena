@@ -148,7 +148,9 @@ function countForSize(sizeStr, rng) {
  */
 export function generateShopItems(shop) {
   const type = detectShopType(shop?.type)
-  if (type === 'trainer') return SHOP_ITEMS
+  // Đợt 72: lọc bỏ món có cờ `noShop` (Kẹo Hiếm) — nó nằm trong SHOP_ITEMS
+  // chỉ để túi đồ tra được tên/mô tả, TUYỆT ĐỐI không được bày bán ở đâu.
+  if (type === 'trainer') return SHOP_ITEMS.filter((it) => !it.noShop)
 
   const rng = mulberry32(hashStr(shop?.name ?? 'shop'))
   const target = countForSize(shop?.size, rng)

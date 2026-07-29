@@ -146,6 +146,13 @@ export default function TraitsModal({ onClose }) {
             onChange={(e) => setDraft((d) => ({ ...d, customPower: e.target.value }))}
           />
         )}
+        {draft.superpower === 'custom' && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.7 }}>
+            Đây là chỗ duy nhất bạn tự đặt luật cho nhân vật của mình. AI sẽ tôn trọng đúng những gì
+            bạn viết và dùng tag để biến nó thành số liệu thật khi cần (nhận vật phẩm, tiền, Pokémon…).
+            Viết càng cụ thể thì càng chạy đúng.
+          </div>
+        )}
 
         <div style={{ fontSize: 12, color: 'var(--text-mid)', margin: '18px 0 6px', textTransform: 'uppercase', letterSpacing: 0.6 }}>
           Thiên phú cơ chế <span style={{ color: 'var(--mint)', textTransform: 'none' }}>(áp THẲNG vào số liệu game)</span>

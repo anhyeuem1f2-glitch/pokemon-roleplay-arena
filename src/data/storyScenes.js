@@ -94,13 +94,34 @@ const WILD_WORDS = [
   'lang thang trong rừng', 'sống hoang',
 ]
 
+// ---------- EASTER EGG: ĐỘI HÌNH THẬT CỦA CHỦ GYM (đợt 72) ----------
+// Đội gym bình thường chỉ là BÀI KIỂM TRA CHO NGƯỜI MỚI — level khoá cứng.
+// Nhưng chủ gym là người BẢO VỆ THÀNH PHỐ: ai chủ động đòi họ rút đội hình
+// thật ra thì phải gánh đúng cái mình đòi (Lv70-80). Đây là phần thưởng cho
+// người chơi tò mò, không phải bẫy — chính văn luôn phải có câu người chơi
+// CHỦ ĐỘNG yêu cầu thì mới kích hoạt.
+const REAL_TEAM_WORDS = [
+  'đội hình thật', 'đội hình thật sự', 'đội hình chính thức', 'đội hình thi đấu',
+  'đội hình liên đoàn', 'đội hình bảo vệ thành phố', 'đội hình mạnh nhất',
+  'đội thật của', 'thực lực thật', 'thực lực thật sự', 'sức mạnh thật sự',
+  'toàn lực', 'dùng hết sức', 'đừng giữ sức', 'không giữ sức', 'đừng nhường',
+  'đánh nghiêm túc', 'nghiêm túc đi', 'ra hết đi', 'rút hết ra',
+  'đấu thật', 'trận đấu thật sự',
+]
+
+/** Người chơi có ĐANG ĐÒI đối thủ rút đội hình thật không? */
+export function detectRealTeamChallenge(text) {
+  if (!text) return false
+  return lastHit(text.slice(-TAIL_LEN).toLowerCase(), REAL_TEAM_WORDS) !== -1
+}
+
 /**
  * Trận sắp mở là với TRAINER hay POKÉMON HOANG DÃ?
  * @param {string} text chính văn của tin nhắn chứa [[BATTLE]]
- * @returns {{isTrainer: boolean, tier: string|null, label: string|null}}
+ * @returns {{isTrainer: boolean, tier: string|null, label: string|null, realTeam: boolean}}
  */
 export function detectTrainerBattle(text) {
-  const none = { isTrainer: false, tier: null, label: null }
+  const none = { isTrainer: false, tier: null, label: null, realTeam: false }
   if (!text) return none
   const hay = text.slice(-TAIL_LEN).toLowerCase()
 
@@ -118,7 +139,10 @@ export function detectTrainerBattle(text) {
   // Có nhắc Pokémon hoang dã MUỘN HƠN cả trainer → cảnh hiện tại là hoang dã.
   if (lastHit(hay, WILD_WORDS) > best.at) return none
 
-  return { isTrainer: true, tier: best.rule.tier, label: best.rule.label }
+  return {
+    isTrainer: true, tier: best.rule.tier, label: best.rule.label,
+    realTeam: detectRealTeamChallenge(text),
+  }
 }
 
 // ---------- 2. TRUNG TÂM POKÉMON ----------

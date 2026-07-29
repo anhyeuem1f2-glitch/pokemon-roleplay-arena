@@ -8,12 +8,15 @@ import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
-import { applyPerksToMon, trainingExpMultiplier } from '../data/playerPerks.js'
+import {
+  applyPerksToMon, trainingExpMultiplier,
+} from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty, isSameMon } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectPokecenter } from '../data/storyScenes.js'
+import { resolveItemByName } from '../data/shopItems.js'
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
@@ -270,6 +273,14 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
+  for (const it of parsed.items ?? []) {
+    const known = resolveItemByName(it.name)
+    // Báo rõ khi AI gọi tên món không có trong danh mục — không thì người
+    // chơi thấy truyện kể được tặng đồ mà túi trống, lại tưởng mất đồ.
+    out.push(known
+      ? `🎒 ${it.qty > 0 ? 'Nhận' : 'Mất'} vật phẩm: ${known.name} x${Math.abs(it.qty)}${tag}`
+      : `🎒 (bỏ qua — không có món "${it.name}" trong danh mục)${tag}`)
+  }
   if (parsed.pokecenter) out.push(`✚ Trung tâm Pokémon: ${parsed.pokecenter.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
   if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
@@ -503,6 +514,32 @@ export default function RoleplayChat() {
       // EXP TỪ LUYỆN TẬP / THỜI GIAN (đợt 67) — người chơi báo "huấn luyện
       // và time skip không tăng cấp". Áp cho TOÀN ĐỘI (cả đội cùng tập/cùng
       // đi đường), mức thấp hơn nhiều so với đánh trận để không phá cân bằng.
+      // ===== ĐỢT 72 — AI TRAO/LẤY VẬT PHẨM =====
+      // Đây là mắt xích khiến "thiên phú tùy chỉnh không có tác dụng": người
+      // chơi tự viết năng lực của mình, AI đọc và kể theo, nhưng không có
+      // đường nào để lời kể đó chạm vào túi đồ. Nay có.
+      // Dùng functional updater (quy tắc số 4): tag ITEM có thể tới từ API
+      // phụ chạy nền, closure lúc đó đã cũ.
+      const itemChanges = (parsed.items ?? [])
+        .map((raw) => ({ entry: resolveItemByName(raw.name), qty: raw.qty, raw }))
+        .filter((x) => x.entry)
+      if (itemChanges.length > 0) {
+        setInventory((cur) => {
+          let next = [...(cur ?? [])]
+          for (const { entry, qty } of itemChanges) {
+            const at = next.findIndex((it) => it.id === entry.id)
+            if (at === -1) {
+              if (qty > 0) next.push({ id: entry.id, name: entry.name, qty })
+            } else {
+              const left = (next[at].qty ?? 0) + qty
+              if (left > 0) next[at] = { ...next[at], qty: left }
+              else next.splice(at, 1)
+            }
+          }
+          return next
+        })
+      }
+
       const trainLv = parsed.training ?? 0
       const daysPassed = parsed.dateAdvance ?? 0
       if (trainLv > 0 || daysPassed > 0) {
@@ -1178,20 +1215,26 @@ export default function RoleplayChat() {
                     // Level: trainer thì theo THÂN PHẬN (trainerMonLevel đã có
                     // từ đợt 40 nhưng chưa từng được gọi ở luồng chơi chính);
                     // hoang dã thì theo hoàn cảnh khu vực như cũ.
-                    const bestLv = Math.max(
-                      playerMon?.level ?? 0,
-                      ...(party ?? []).map((pm) => pm?.level ?? 0),
-                    )
+                    // Đợt 72: level KHÔNG còn bám theo đội người chơi (chủ
+                    // dự án bác bỏ cơ chế đó ở đợt 71). Thế giới có sức mạnh
+                    // riêng; chủ gym thì khoá cứng Lv15, ai đòi đội hình
+                    // thật thì gánh Lv70-80.
                     const level = battleCtx.isTrainer
                       ? trainerBattleLevel({
-                          tier: battleCtx.tier, entry: speciesEntry,
-                          location: playerLocation, playerBestLevel: bestLv,
+                          tier: battleCtx.tier,
+                          location: playerLocation,
+                          realTeam: battleCtx.realTeam,
                         })
                       : wildLevel({ location: playerLocation, entry: speciesEntry }).level
                     const mon = buildMonSmart(
                       speciesEntry, level, movesDb, playerMon?.types, battleCtx.isTrainer,
                     )
-                    if (battleCtx.isTrainer) mon.trainerLabel = battleCtx.label
+                    if (battleCtx.isTrainer) {
+                      mon.trainerLabel = battleCtx.realTeam
+                        ? `${battleCtx.label} (ĐỘI HÌNH THẬT)`
+                        : battleCtx.label
+                      mon.realTeam = battleCtx.realTeam
+                    }
                     setEnemyMon(mon)
                     setMessages((msgs) =>
                       msgs.map((mm, idx) =>

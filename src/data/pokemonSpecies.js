@@ -731,6 +731,20 @@ export function syncMonInParty(party, mon) {
 }
 
 
+/**
+ * Nâng đúng 1 cấp cho Pokémon (Kẹo Hiếm — đợt 72).
+ * Đặt exp về ĐÚNG mốc đầu cấp mới, giống game gốc: ăn kẹo là mất phần EXP
+ * dư đang tích luỹ, chứ không phải cộng thêm vào chỗ đang có.
+ * Máu tăng theo maxHp mới (không hồi máu đã mất, đúng luật gốc).
+ */
+export function levelUpMon(mon) {
+  if (!mon) return mon
+  const next = Math.min(MAX_LEVEL, (mon.level ?? 1) + 1)
+  if (next === mon.level) return mon
+  return recomputeMonStats({ ...mon, level: next, exp: expForLevel(next) })
+}
+
+
 // ============ CHỐT AN TOÀN CHỐNG TỤT CẤP (đợt 70) ============
 // Tester báo 3 lần liền cùng một triệu chứng: "trước trận lên Lv6, tiếp tục
 // diễn biến lại tụt về Lv5", "không nhận Exp", "đáng lẽ lên Lv7 mà không

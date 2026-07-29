@@ -543,6 +543,30 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     setLog((l) => [...l, line])
   }
 
+  // ===== ĐỢT 72 — "1 POKÉMON CHẾT LÀ THUA DÙ CÒN 2 CON" (tester báo lại) =====
+  // Đợt 69 tưởng đã sửa, nhưng chỉ sửa CỜ SUY RA `battleOver`. Bốn chỗ trong
+  // file này vẫn gọi thẳng `setFinished(true)` ngay khi con ra trận gục, mà
+  // `finished` mới là thứ ĐIỀU KHIỂN GIAO DIỆN: nó khoá `handleSwitchMon`
+  // (`if (busy || finished) return`), chặn bảng đội hình tự mở
+  // (`mustSwitch && !finished`), và bật thẳng màn "Tiếp tục câu chuyện" —
+  // nơi kết quả được tính là THUA. Đúng bài học "2 nút Dev" trong file bàn
+  // giao: sửa xong phải grep HẾT các điểm vào, đừng sửa mỗi chỗ dễ thấy.
+  //
+  // Nay mọi chỗ con ra trận gục đều đi qua đúng hàm này.
+  /** @returns {boolean} true nếu TOÀN ĐỘI đã gục (thua thật). */
+  function reportActiveFainted(monName) {
+    const backups = (party ?? []).filter(
+      (pm) => pm && !isSameMon(pm, playerMon) && (pm.hp ?? 0) > 0,
+    )
+    if (backups.length === 0) {
+      pushLog(`${monName} đã gục ngã! Toàn đội đã gục — bạn thua...`)
+      setFinished(true)
+      return true
+    }
+    pushLog(`${monName} đã gục ngã! Còn ${backups.length} Pokémon khoẻ — hãy chọn con ra trận thay thế.`)
+    return false
+  }
+
   // Random xem chiêu có gây trạng thái phụ không (dựa theo % thật của move.secondary).
   // Có xét miễn nhiễm theo hệ đúng game gốc: hệ Lửa không bị bỏng, hệ Điện
   // không bị tê liệt (quy tắc Gen 6+).
@@ -695,8 +719,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     }
 
     if (playerHpNow <= 0) {
-      pushLog(`${playerMon.name} đã gục ngã! Bạn thua...`)
-      setFinished(true)
+      reportActiveFainted(playerMon.name)
       setBusy(false)
       return
     }
@@ -722,8 +745,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       pushLog(`${enemyMon.name} đã gục ngã vì vết bỏng! Bạn thắng!`)
       setFinished(true)
     } else if (playerHpNow <= 0) {
-      pushLog(`${playerMon.name} đã gục ngã vì vết bỏng! Bạn thua...`)
-      setFinished(true)
+      pushLog(`${playerMon.name} không trụ nổi vết bỏng!`)
+      reportActiveFainted(playerMon.name)
     }
 
     // Hết hạn Dynamax: chỉ trở về nếu trận còn tiếp diễn (gục/thắng thì
@@ -826,10 +849,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           const hpAfter = Math.max(0, playerMon.hp - dmg)
           setPlayerMon((m) => ({ ...m, hp: hpAfter }))
           pushLog(`${enemyMon.name} không đợi bạn nói xong — dùng ${enemyMove.name}! Gây ${dmg} sát thương.`)
-          if (hpAfter <= 0) {
-            pushLog(`${playerMon.name} đã gục ngã! Bạn thua...`)
-            setFinished(true)
-          }
+          if (hpAfter <= 0) reportActiveFainted(playerMon.name)
         }
       }
     } catch (err) {
@@ -853,10 +873,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const hpAfter = Math.max(0, targetMon.hp - dmg)
     setTarget((m) => ({ ...m, hp: hpAfter }))
     pushLog(`${enemyMon.name} dùng ${enemyMove.name}! Gây ${dmg} sát thương.`)
-    if (hpAfter <= 0) {
-      pushLog(`${targetMon.name} đã gục ngã! Bạn thua...`)
-      setFinished(true)
-    }
+    if (hpAfter <= 0) reportActiveFainted(targetMon.name)
     return hpAfter
   }
 
@@ -966,8 +983,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   /** Đổi sang Pokémon khác trong đội. Tốn 1 lượt, TRỪ khi con cũ vừa gục
    * (đổi thay thế sau khi gục là miễn phí — đúng luật game gốc). */
   function handleSwitchMon(target) {
-    if (busy || finished) return
-    if (battleOver) return
+    // Đợt 72: KHÔNG chặn theo `finished` một cách mù quáng nữa. `finished`
+    // giờ chỉ bật khi trận thực sự xong (toàn đội gục / thắng / chạy / bắt
+    // được), nên chặn ở đây là đủ và không còn khoá nhầm lúc chỉ có con ra
+    // trận gục mà đội vẫn còn người.
+    if (busy || finished || battleOver) return
     if (!target || isSameMon(target, playerMon)) return
     if ((target.hp ?? 0) <= 0) {
       pushLog(`${target.name} đã gục ngã, không thể ra trận.`)

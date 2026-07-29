@@ -47,7 +47,17 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
     )
   }
   if (superpower === 'custom' && customPower.trim()) {
-    parts.push(`SIÊU NĂNG LỰC ĐẶC BIỆT: ${customPower.trim()}. Thể hiện năng lực này một cách CÓ CHỪNG MỰC, hợp lý theo mạch truyện — không biến nhân vật thành bất khả chiến bại.`)
+    // Đợt 72: người chơi TỰ VIẾT năng lực thì phải nói rõ cho AI biết nó
+    // được quyền dùng TAG để biến lời kể thành số liệu thật — không thì
+    // đúng như tester báo: "mô tả cho ăn kẹo lên Lv11 nhưng biến không cập
+    // nhật". Đây cũng là chỗ DUY NHẤT người chơi tự đặt luật cho mình.
+    parts.push(
+      `SIÊU NĂNG LỰC ĐẶC BIỆT (người chơi TỰ ĐẶT RA — hãy tôn trọng đúng như họ viết): ${customPower.trim()}. `
+      + 'Thể hiện năng lực này CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại. '
+      + 'QUAN TRỌNG: nếu năng lực này dẫn tới thay đổi có thể ĐO ĐƯỢC (nhận vật phẩm, đổi tiền, nhận Pokémon, '
+      + 'thời gian trôi...), hãy dùng ĐÚNG TAG tương ứng ở phần giao thức để nó thành thật trong dữ liệu game, '
+      + 'thay vì chỉ kể suông rồi để số liệu đứng yên.',
+    )
   } else if (superpower && superpower !== 'none') {
     const p = SUPERPOWERS.find((s) => s.key === superpower)
     if (p?.note) {

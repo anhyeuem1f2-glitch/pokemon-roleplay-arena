@@ -7,6 +7,7 @@ import AvatarPicker from './AvatarPicker.jsx'
 import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { MECHANIC_PERKS } from '../data/playerPerks.js'
+import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -393,6 +394,24 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
     setFeedback(`Đã dùng ${item.name} cho ${mon.name} → HP ${newHp}/${mon.maxHp}.`)
   }
 
+  // ===== KẸO HIẾM (đợt 72) =====
+  // Tester báo: cho ăn Rare Candy trong lời kể thì AI mô tả "lên Lv11" nhưng
+  // BIẾN KHÔNG ĐỔI — vì trước đợt này Kẹo Hiếm không hề tồn tại như một vật
+  // phẩm, chỉ là chữ trong truyện. Nay nó là món thật, bấm là level đổi thật.
+  function feedRareCandy(item, monIndex) {
+    const mon = party[monIndex]
+    if (!mon) return
+    if ((mon.level ?? 1) >= 100) {
+      setFeedback(`${mon.name} đã đạt cấp tối đa (Lv.100).`)
+      return
+    }
+    const leveled = levelUpMon(mon)
+    setParty(party.map((m, i) => (i === monIndex ? leveled : m)))
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon(leveled)
+    consume(item.id)
+    setFeedback(`${mon.name} ăn ${item.name} → Lv.${mon.level} ⭢ Lv.${leveled.level}! (HP ${leveled.hp}/${leveled.maxHp})`)
+  }
+
   function healBodyPart(item, partKey) {
     const amount = HUMAN_HEAL[item.id] ?? 10
     const next = { ...bodyStatus, [partKey]: Math.max(0, (bodyStatus[partKey] ?? 0) - amount) }
@@ -457,6 +476,19 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                 {isOpen && (
                   <div style={{ padding: '0 8px 8px', fontSize: 10.5 }}>
                     <div style={{ color: 'var(--text-dim)', marginBottom: 6 }}>{info?.desc}</div>
+                    {it.id === 'rarecandy' && (
+                      <div>
+                        <div style={{ marginBottom: 4 }}>Cho Pokémon ăn (+1 cấp):</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {party.map((mon, i) => (
+                            <button key={i} className="btn" style={{ fontSize: 10, padding: '2px 8px', borderColor: 'var(--amber)', color: 'var(--amber)' }} onClick={() => feedRareCandy(info, i)}>
+                              {mon.name} (Lv.{mon.level})
+                            </button>
+                          ))}
+                          {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}
+                        </div>
+                      </div>
+                    )}
                     {canHealMon && (
                       <div>
                         <div style={{ marginBottom: 4 }}>Dùng cho:</div>
@@ -482,7 +514,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         </div>
                       </div>
                     )}
-                    {!canHealMon && !canHealHuman && (
+                    {!canHealMon && !canHealHuman && it.id !== 'rarecandy' && (
                       <div style={{ color: 'var(--text-dim)' }}>Dùng trong trận/truyện — sẽ được nối ở đợt sau.</div>
                     )}
                   </div>

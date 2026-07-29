@@ -26,6 +26,18 @@ export const SHOP_ITEMS = [
   { id: 'escaperope', name: 'Escape Rope', price: 600, category: 'misc', desc: 'Thoát nhanh khỏi hang động.' },
   { id: 'repel', name: 'Repel', price: 400, category: 'misc', desc: 'Xua Pokémon hoang dã yếu trong 1 thời gian.' },
   { id: 'freshwater', name: 'Nước khoáng', price: 200, category: 'misc', desc: 'Đồ uống — hồi 30 HP cho Pokémon, hoặc cho người uống.' },
+  // --- ĐỢT 72: KHÔNG BÁN Ở ĐÂU CẢ ---
+  // Chủ dự án: "thêm rare candy vào, nhưng đừng cho nó bán trong shop — cậu
+  // nào thích chơi cheat thì tự mà cheat ra nhờ thiên phú chứ chơi bình
+  // thường là chẳng bao giờ có đâu. Người ta chỉ có thể cheat trong tùy
+  // chỉnh thôi."
+  // Cờ `noShop` khiến generateShopItems bỏ qua món này ở MỌI cửa hàng. Đường
+  // DUY NHẤT để có nó là AI trao qua tag [[ITEM]] — mà AI chỉ trao khi mạch
+  // truyện (hoặc năng lực người chơi TỰ VIẾT ở màn tạo nhân vật) dẫn tới.
+  // Người chơi bình thường không viết gì thì cả đời không thấy viên nào.
+  // Vẫn phải nằm trong SHOP_ITEMS vì đây là danh mục TRA CỨU dùng chung (túi
+  // đồ đọc tên/mô tả/phân mục từ đây) — bỏ ra ngoài thì túi hiện "không rõ".
+  { id: 'rarecandy', name: 'Kẹo Hiếm', price: 0, category: 'special', noShop: true, desc: 'Nâng 1 Pokémon lên 1 cấp ngay lập tức. Không bán ở bất kỳ đâu.' },
 ]
 
 
@@ -61,4 +73,62 @@ export const SHOP_CATEGORY_LABELS = {
   status: 'Chữa trạng thái',
   human: 'Đồ cho người',
   misc: 'Tiện ích',
+  special: 'Đặc biệt',
+}
+
+
+// ============ TRA CỨU VẬT PHẨM THEO TÊN (đợt 72) ============
+// AI trao đồ bằng TÊN tiếng Việt/tiếng Anh trong tag [[ITEM ...]], phải khớp
+// về đúng id trong danh mục. Khớp lỏng: bỏ dấu, bỏ khoảng trắng thừa, không
+// phân biệt hoa thường; kèm bảng tên gọi khác vì model dùng lẫn lộn Anh-Việt.
+const ITEM_ALIASES = {
+  rarecandy: ['rare candy', 'keo hiem', 'keo qui', 'keo hiem co', 'candy hiem'],
+  pokeball: ['poke ball', 'bong poke', 'bong pokemon'],
+  greatball: ['great ball', 'bong lon'],
+  ultraball: ['ultra ball', 'sieu bong'],
+  potion: ['thuoc hoi mau', 'binh thuoc'],
+  revive: ['hoi sinh', 'thuoc hoi sinh'],
+  fullrestore: ['full restore', 'hoi phuc toan phan'],
+  escaperope: ['escape rope', 'day thoat hiem'],
+}
+
+/** Bỏ dấu tiếng Việt + chuẩn hoá để so khớp lỏng. */
+function normalizeName(str) {
+  return String(str ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+/**
+ * Tìm vật phẩm trong danh mục theo tên tự do AI viết ra.
+ * @returns {object|null} entry của SHOP_ITEMS, hoặc null nếu không khớp.
+ */
+export function resolveItemByName(rawName) {
+  const q = normalizeName(rawName)
+  if (!q) return null
+  // 1. Khớp chính xác theo tên hiển thị hoặc id.
+  for (const it of SHOP_ITEMS) {
+    if (normalizeName(it.name) === q || normalizeName(it.id) === q) return it
+  }
+  // 2. Khớp qua bảng tên gọi khác.
+  for (const [id, names] of Object.entries(ITEM_ALIASES)) {
+    if (names.some((n) => normalizeName(n) === q)) {
+      const found = SHOP_ITEMS.find((it) => it.id === id)
+      if (found) return found
+    }
+  }
+  // 3. Khớp chứa — ưu tiên tên DÀI NHẤT để "Super Potion" không rơi vào
+  // "Potion" (đúng bài học "đánh con nào cũng ra Charmander" ở đợt trước:
+  // hàm dò tên sắp xếp sai thứ tự thì luôn trúng món ngắn nhất).
+  const candidates = SHOP_ITEMS
+    .filter((it) => {
+      const n = normalizeName(it.name)
+      return n.length > 2 && (q.includes(n) || n.includes(q))
+    })
+    .sort((a, b) => normalizeName(b.name).length - normalizeName(a.name).length)
+  return candidates[0] ?? null
 }

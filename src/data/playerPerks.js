@@ -117,6 +117,7 @@ export function catchRateBonus(perks) {
   return hasPerk(perks, 'tamer') ? 15 : 0
 }
 
+
 /** Note mô tả các perk đang bật, chèn vào prompt mỗi lượt (null nếu không có). */
 export function buildPerksNote(perks) {
   const notes = (perks ?? []).map((k) => getPerk(k)?.note).filter(Boolean)

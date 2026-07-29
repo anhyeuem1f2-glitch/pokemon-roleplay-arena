@@ -172,44 +172,43 @@ export function receivedMonLevel({ entry, requestedLevel, location, rng = Math.r
 }
 
 
-// ============ LEVEL TRẬN VỚI TRAINER TRONG TRUYỆN (đợt 71) ============
-// `trainerMonLevel` ở trên là công thức "canon" theo thân phận + tuổi + kinh
-// nghiệm, viết từ đợt 40 nhưng CHƯA TỪNG được luồng chơi chính gọi tới — mọi
-// trận đều dựng đối thủ bằng `wildLevel`. Khi đợt 71 nối dây trainer, tôi đo
-// thử: ở Pallet Town (dải nền 2-5), một "huấn luyện viên khác" bình thường ra
-// Lv17 và chủ gym ra Lv42. Cộng với hai thay đổi cùng đợt — KHÔNG chạy trốn
-// được khỏi trận trainer, và KHÔNG tự hồi máu sau trận — thì đó là án tử cho
-// người chơi beta đang ở Lv5-7.
+// ============ LEVEL TRẬN VỚI TRAINER TRONG TRUYỆN (đợt 71, viết lại đợt 72) ============
+// ĐỢT 71 tôi cho level trainer bám theo đội người chơi để beta khỏi chết
+// ngay. CHỦ DỰ ÁN BÁC BỎ, và bác bỏ đúng: "không muốn kiểu ép lv người khác
+// xuống cho bằng người chơi — mình yếu thì tự mà mạnh lên chứ sao lại ép cả
+// thế giới yếu theo mình, yếu thì nên ở bìa rừng tân thủ thôi". Đó cũng
+// chính là tinh thần đã ghi trong levelLogic từ đợt 40 ("thế giới có logic
+// riêng, KHÔNG xoay quanh người chơi"). Nên đợt 72 gỡ sạch phần bám theo
+// người chơi: level trainer quay về đúng thân phận + khu vực.
 //
-// Nên trận trainer trong truyện dùng công thức MỀM này: lấy nền theo khu vực
-// (giữ nguyên cảm giác cũ) hoặc theo đội người chơi, tuỳ cái nào cao hơn, rồi
-// cộng một khoảng chênh theo THÂN PHẬN. Kết quả: thân phận vẫn có sức nặng
-// (chủ gym luôn là bức tường so với tân binh), độ khó tự giãn theo đà lớn lên
-// của người chơi, và không bao giờ nhảy vọt vô lý.
-//
-// Muốn độ khó CANON đúng như game gốc thì đổi `trainerBattleLevel` thành
-// `trainerMonLevel` ở RoleplayChat — công thức kia vẫn nguyên vẹn ở trên.
-export const TRAINER_TIER_EDGE = {
-  child: 0, youth: 1, rookie: 2, grunt: 3, veteran: 5, ace: 7,
-  admin: 8, gym: 9, boss: 12, elite: 13, champion: 16,
-}
+// RIÊNG CHỦ GYM thì KHOÁ CỨNG, không random, không theo khu vực:
+//   • Đội thử người mới  — Lv15 chằn chặn. Gym là bài kiểm tra đầu đời của
+//     mọi trainer nên phải là một cái thước ĐO ĐƯỢC: người chơi luôn biết
+//     chính xác mình cần mạnh tới đâu mới qua ải, không phụ thuộc may rủi.
+//   • Đội hình THẬT (easter egg) — Lv70-80. Chủ gym là người bảo vệ thành
+//     phố; ai chủ động đòi họ ra hết sức thì phải gánh đúng cái mình đòi.
+export const GYM_TEST_LEVEL = 15
+export const GYM_REAL_TEAM_MIN = 70
+export const GYM_REAL_TEAM_MAX = 80
 
 /**
  * Level 1 Pokémon của trainer trong trận phát sinh từ chính văn.
  * @param {object} params
- * @param {string} params.tier thân phận (khoá của TRAINER_TIER_EDGE)
- * @param {object} params.entry pokedex entry của loài
+ * @param {string} params.tier thân phận (khoá của TRAINER_TIERS)
  * @param {{regionKey,areaKey}|null} params.location
- * @param {number} params.playerBestLevel level cao nhất trong đội người chơi
+ * @param {boolean} params.realTeam người chơi có đòi đội hình thật không
  */
-export function trainerBattleLevel({ tier, entry, location, playerBestLevel = 0, rng = Math.random }) {
-  const areaBase = wildLevel({ location, entry, role: 'normal', rng }).level
-  const edge = TRAINER_TIER_EDGE[tier] ?? 2
-  // Sàn: không thấp hơn đội người chơi 1 cấp — trainer mà yếu hơn hẳn thì
-  // trận đấu vô nghĩa; trần mềm: không vượt quá đội người chơi + chênh lệch
-  // thân phận + 3, để một lần AI gọi nhầm "champion" không xoá sổ ván chơi.
-  const floor = playerBestLevel > 0 ? playerBestLevel - 1 : 0
-  const lv = Math.max(areaBase, floor) + edge
-  const ceiling = playerBestLevel > 0 ? playerBestLevel + edge + 3 : 100
-  return clampLv(Math.min(lv, ceiling))
+export function trainerBattleLevel({ tier, location, realTeam = false, rng = Math.random }) {
+  if (tier === 'gym') {
+    if (!realTeam) return GYM_TEST_LEVEL
+    const span = GYM_REAL_TEAM_MAX - GYM_REAL_TEAM_MIN
+    return clampLv(GYM_REAL_TEAM_MIN + Math.floor(rng() * (span + 1)))
+  }
+  // Mọi thân phận khác: đúng công thức canon của đợt 40 (thân phận + tuổi +
+  // kinh nghiệm + khí hậu sức mạnh của khu vực). Người chơi yếu thì tránh
+  // khu mạnh, chứ khu mạnh không hạ mình xuống theo người chơi.
+  const lv = trainerMonLevel({ tier, location, rng })
+  // Đòi đội hình thật với thân phận khác gym cũng được tôn trọng: cộng thêm
+  // một quãng đáng kể chứ không nhảy thẳng lên mốc gym.
+  return realTeam ? clampLv(Math.round(lv * 1.6) + 10) : lv
 }

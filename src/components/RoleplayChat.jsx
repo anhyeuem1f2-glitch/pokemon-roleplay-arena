@@ -9,10 +9,11 @@ import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
 import {
-  applyPerksToMon, trainingExpMultiplier,
+  applyPerksToMon, trainingExpMultiplier, battleExpMultiplier,
+  sharesBattleExpWithParty, syncTraitGrantedItems,
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, syncMonInParty, isSameMon } from '../data/pokemonSpecies.js'
+import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectPokecenter } from '../data/storyScenes.js'
@@ -249,6 +250,51 @@ function LorebookEditor({ lorebook, onChange }) {
 }
 
 
+// ===== KHỚP TÊN POKÉMON TRONG TAG LEVEL (đợt 73) =====
+function normalizeMonTarget(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function isActiveMonTarget(target) {
+  const t = normalizeMonTarget(target)
+  return ['pokemon dang ra tran', 'dang ra tran', 'active', 'pokemon active', 'pokemon hien tai', 'hien tai'].includes(t)
+}
+
+function monMatchesLevelTarget(mon, target, activeMon = null) {
+  if (!mon) return false
+  if (isActiveMonTarget(target)) return activeMon ? isSameMon(mon, activeMon) : true
+  const wanted = normalizeMonTarget(target)
+  return Boolean(wanted && normalizeMonTarget(mon.name) === wanted)
+}
+
+// API phụ chỉ được BỔ SUNG tag bị thiếu. Model vẫn có thể lặp lại tag chính
+// dù đã được gửi danh sách đã áp; với LEVEL +1 thì lặp một lần = tăng sai hai
+// cấp, ITEM cũng có thể cộng/trừ hai lần. Chặn exact duplicate ở phía app.
+function filterSupplementalDuplicates(extra, applied) {
+  const levelKeys = new Set((applied?.levels ?? []).map((lv) =>
+    `${normalizeMonTarget(lv.target)}|${lv.mode}|${lv.value}`,
+  ))
+  const itemKey = (it) => {
+    const known = resolveItemByName(it.name)
+    return `${known?.id ?? normalizeMonTarget(it.name)}|${it.qty}`
+  }
+  const itemKeys = new Set((applied?.items ?? []).map(itemKey))
+  return {
+    ...extra,
+    levels: (extra?.levels ?? []).filter((lv) =>
+      !levelKeys.has(`${normalizeMonTarget(lv.target)}|${lv.mode}|${lv.value}`),
+    ),
+    items: (extra?.items ?? []).filter((it) => !itemKeys.has(itemKey(it))),
+  }
+}
+
 // ===== Mô tả thay đổi biến của 1 lượt (đợt 48 — học card PNTT) =====
 // Dịch stateParsed thành các dòng người đọc hiểu ngay, lưu vào message.meta
 // để viewer "Biến cập nhật" hiển thị. Cắt raw/thinking để không phình
@@ -270,6 +316,10 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
   // pk.name → viewer hiện "🔴 Nhận Pokemon: undefined Lv.7" (tester chụp màn
   // hình đúng dòng này ở Bug 3). Cùng loại lỗi với vụ "Độ no undefined" đợt 69.
   for (const pk of parsed.pokemons ?? []) out.push(`🔴 Nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
+  for (const lv of parsed.levels ?? []) {
+    const value = lv.mode === 'delta' ? `${lv.value > 0 ? '+' : ''}${lv.value}` : `Lv.${lv.value}`
+    out.push(`⬆ Cấp Pokémon ${lv.target}: ${value}${tag}`)
+  }
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
@@ -353,6 +403,11 @@ export default function RoleplayChat() {
   const [inputMenu, setInputMenu] = useState(null) // {x, y}
   // Đợt 65: thông tin EXP/lên cấp của trận vừa xong, ghép vào note cho AI kể.
   const expNoteRef = useRef(null)
+  // Đợt 73: callback API phụ có thể chạy muộn; ref luôn trỏ tới cá thể đang
+  // ra trận mới nhất để [[LEVEL Pokémon đang ra trận | +1]] không áp nhầm bản
+  // closure cũ. Không lấy kết quả ra khỏi state updater.
+  const latestPlayerMonRef = useRef(playerMon)
+  useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
 
   // Dọn ký ức + tóm tắt cho các tin bị xoá (đợt 61). idxs = mảng index bị xoá.
   // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
@@ -492,8 +547,9 @@ export default function RoleplayChat() {
   // có configOverride) — API phụ vẫn dùng preset văn phong (text) đơn giản.
   // Áp mọi biến trạng thái từ 1 kết quả parseStoryStateTags (đợt 36).
   // KHÔNG áp money/rel/body/shop ở đây — các phần đó đã có luồng riêng phía
-  // dưới từ trước; hàm này lo các tag đợt 30-36: POKEMON / DATE / HUNGER /
-  // NPC / FACT.
+  // dưới từ trước; hàm này lo POKEMON / LEVEL / ITEM / DATE / TRAIN /
+  // HUNGER / NPC / FACT. LEVEL là đường chính thức cho Kẹo Hiếm/năng lực;
+  // POKEMON trùng loài chỉ còn là nhánh tương thích model cũ.
   function applyParsedState(parsed, turnNow) {
     try {
       for (const pk of parsed.pokemons ?? []) {
@@ -503,13 +559,42 @@ export default function RoleplayChat() {
           continue
         }
         const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-        // Đợt 70: thiên phú cơ chế áp NGAY lúc cá thể vào tay người chơi
-        // (yêu cầu của tester: "chỉ cần trong đội hình là max IV/EV").
-        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits?.perks)
-        setPlayerMon((cur) => cur ?? newMon)
-        setParty((cur) => (cur.length < 6 && !cur.some((m2) => m2.name === newMon.name) ? [...cur, newMon] : cur))
+        // Đợt 73 — tương thích ngược với model/API phụ cũ: trước khi có
+        // [[LEVEL]], chúng thường dùng [[POKEMON Froakie | Lv11]] để nói con
+        // Froakie ĐANG CÓ vừa lên cấp. Code cũ thấy trùng tên thì bỏ qua hoàn
+        // toàn, nên viewer báo Lv11 còn biến vẫn Lv5. Nay: trùng loài = chỉ
+        // NÂNG cá thể hiện có tới cấp tag (không hạ); chưa có mới dựng cá thể.
+        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits)
+        const sameSpecies = (mon) => normalizeMonTarget(mon?.name) === normalizeMonTarget(pk.species)
+        setPlayerMon((cur) => {
+          if (!cur) return newMon
+          return sameSpecies(cur) ? raiseMonToLevel(cur, pk.level) : cur
+        })
+        setParty((cur) => {
+          const next = [...(cur ?? [])]
+          const at = next.findIndex(sameSpecies)
+          if (at >= 0) {
+            next[at] = raiseMonToLevel(next[at], pk.level)
+            return next
+          }
+          return next.length < 6 ? [...next, newMon] : next
+        })
       }
-    } catch (e2) { console.warn('[state] POKEMON lỗi:', e2.message) }
+
+      // Tag chính thức đợt 73 cho tăng cấp trực tiếp (Kẹo Hiếm/năng lực).
+      // Mỗi setter tự đọc bản mới nhất; không dựng state từ closure cũ.
+      for (const directive of parsed.levels ?? []) {
+        const active = latestPlayerMonRef.current
+        setPlayerMon((cur) => (monMatchesLevelTarget(cur, directive.target, cur) ? applyLevelDirective(cur, directive) : cur))
+        setParty((cur) => {
+          const next = [...(cur ?? [])]
+          const at = next.findIndex((mon) => monMatchesLevelTarget(mon, directive.target, active))
+          if (at < 0) return next
+          next[at] = applyLevelDirective(next[at], directive)
+          return next
+        })
+      }
+    } catch (e2) { console.warn('[state] POKEMON/LEVEL lỗi:', e2.message) }
     try {
       // EXP TỪ LUYỆN TẬP / THỜI GIAN (đợt 67) — người chơi báo "huấn luyện
       // và time skip không tăng cấp". Áp cho TOÀN ĐỘI (cả đội cùng tập/cùng
@@ -531,12 +616,15 @@ export default function RoleplayChat() {
             if (at === -1) {
               if (qty > 0) next.push({ id: entry.id, name: entry.name, qty })
             } else {
+              // Năng lực "Kẹo Hiếm vô hạn": model/API phụ có lỡ khai
+              // [[ITEM Kẹo Hiếm | -1]] thì cũng không được làm mất vật phẩm.
+              if (next[at].infinite && qty < 0) continue
               const left = (next[at].qty ?? 0) + qty
               if (left > 0) next[at] = { ...next[at], qty: left }
               else next.splice(at, 1)
             }
           }
-          return next
+          return syncTraitGrantedItems(next, playerTraits)
         })
       }
 
@@ -544,7 +632,7 @@ export default function RoleplayChat() {
       const daysPassed = parsed.dateAdvance ?? 0
       if (trainLv > 0 || daysPassed > 0) {
         // Đợt 70: thiên phú "Thiên Phú Rèn Luyện" nhân đôi EXP luyện tập/ngày trôi.
-        const expMul = trainingExpMultiplier(playerTraits?.perks)
+        const expMul = trainingExpMultiplier(playerTraits)
         const grow = (mon) => {
           if (!mon) return mon
           const amount = Math.round(
@@ -798,6 +886,7 @@ export default function RoleplayChat() {
           userText: [...nextMessages].reverse().find((m2) => m2.role === 'user' && !m2.hidden)?.content ?? '',
           appliedTags: {
             money: stateParsed.money, rel: stateParsed.rel, pokemons: stateParsed.pokemons,
+            levels: stateParsed.levels, items: stateParsed.items,
             hunger: stateParsed.hunger, dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
             npcs: (stateParsed.npcs ?? []).map((n) => n.name), facts: (stateParsed.facts ?? []).map((f) => f.key),
           },
@@ -805,7 +894,7 @@ export default function RoleplayChat() {
         })
           .then((extraTagsText) => {
             if (!extraTagsText) return
-            const extra = parseStoryStateTags(extraTagsText)
+            const extra = filterSupplementalDuplicates(parseStoryStateTags(extraTagsText), stateParsed)
             applyParsedState(extra, turnNow)
             // Tiền/quan hệ bổ sung từ API phụ: áp qua applyStoryState như luồng chính.
             if (extra.money || extra.rel.length || extra.body.length) {
@@ -1002,21 +1091,32 @@ export default function RoleplayChat() {
       // loài bị hạ, cap 252/chỉ số & 510 tổng, tính lại stats ngay.
       // EXP + LÊN CẤP (đợt 65, sửa lại ở đợt 66). Cho cả 'win' lẫn 'caught'
       // — trong game gốc bắt được Pokémon cũng nhận kinh nghiệm.
-      if (['win', 'caught'].includes(outcome) && enemyMon && playerMon) {
+      const activeMon = latestPlayerMonRef.current ?? playerMon
+      if (['win', 'caught'].includes(outcome) && enemyMon && activeMon) {
         // LỖI ĐỢT 65 (người chơi báo "có ống EXP nhưng EXP không chạy"):
         // thông tin lên cấp được gán BÊN TRONG hàm cập nhật state, mà React
         // chạy hàm đó ở pha render — đọc ra ngay sau đó luôn rỗng, nên phần
         // báo lên cấp không bao giờ tới AI. Nay TÍNH TRƯỚC, rồi mới áp.
-        const gain = expGainFrom(enemyMon, { isTrainerMon: Boolean(enemyMon.isTrainerMon) })
-        const evApplied = applyEvGain(playerMon, enemyMon)
+        //
+        // ĐỢT 73: hệ số EXP SAU TRẬN và chia EXP cho cả đội lấy từ thiên phú
+        // TỰ MÔ TẢ. Trước đây chỉ perk luyện tập ×2 tồn tại, nên câu "EXP sau
+        // trận ×3" trong ảnh tester hoàn toàn không chạm vào battle engine.
+        const baseGain = expGainFrom(enemyMon, { isTrainerMon: Boolean(enemyMon.isTrainerMon) })
+        const expMul = battleExpMultiplier(playerTraits)
+        const gain = Math.max(1, Math.round(baseGain * expMul))
+        const shareExp = sharesBattleExpWithParty(playerTraits)
+        const evApplied = applyEvGain(activeMon, enemyMon)
         const res = applyExpGain(evApplied, gain)
         setPlayerMon(res.mon)
-        // Đồng bộ về đội hình: khớp theo TÊN (bỏ điều kiện trùng level —
-        // sau khi lên cấp thì level đã khác, khớp cả level sẽ trượt).
-        // Đợt 69: đồng bộ theo uid (khớp tên gây lệch cấp HUD ↔ trận).
-        setParty((cur) => syncMonInParty(cur, res.mon))
+        setParty((cur) => (cur ?? []).map((pm) => {
+          if (isSameMon(pm, res.mon)) return res.mon
+          return shareExp ? applyExpGain(pm, gain).mon : pm
+        }))
         expNoteRef.current = {
           gain,
+          baseGain,
+          multiplier: expMul,
+          shared: shareExp,
           enemyName: enemyMon.name,
           levelUp: res.levelsGained > 0
             ? { name: res.mon.name, newLevel: res.newLevel, levels: res.levelsGained }
@@ -1042,8 +1142,10 @@ export default function RoleplayChat() {
         const base = OUTCOME_LABEL[outcome] ?? outcome
         const info = expNoteRef.current
         if (!info) return base
+        const mul = info.multiplier > 1 ? ` (×${info.multiplier})` : ''
+        const shared = info.shared ? ' · cả đội nhận EXP' : ''
         const lv = info.levelUp ? ` · Lv.${info.levelUp.newLevel}!` : ''
-        return `${base} · +${info.gain} EXP${lv}`
+        return `${base} · +${info.gain} EXP${mul}${shared}${lv}`
       })(),
       content: `[Hệ thống: trận đấu Pokémon vừa kết thúc, kết quả là ${
         OUTCOME_TEXT[outcome] ?? outcome
@@ -1053,7 +1155,9 @@ export default function RoleplayChat() {
         expNoteRef.current = null
         if (!info) return ''
         const lv = info.levelUp
-        const base = ` Pokémon của người chơi nhận được ${info.gain} điểm kinh nghiệm sau khi hạ ${info.enemyName}.`
+        const multiplier = info.multiplier > 1 ? ` (đã áp thiên phú ×${info.multiplier} từ mức gốc ${info.baseGain})` : ''
+        const shared = info.shared ? ' Toàn bộ Pokémon trong đội cũng nhận cùng lượng EXP dù không trực tiếp ra trận.' : ''
+        const base = ` Pokémon của người chơi nhận được ${info.gain} điểm kinh nghiệm${multiplier} sau khi hạ ${info.enemyName}.${shared}`
         return lv
           ? `${base} ĐẶC BIỆT: ${lv.name} đã LÊN CẤP ${lv.levels > 1 ? `${lv.levels} bậc, ` : ''}đạt Lv.${lv.newLevel} — hãy kể khoảnh khắc trưởng thành này một cách đáng nhớ (ánh sáng, dáng vẻ tự tin hơn, phản ứng của người chơi).`
           : base

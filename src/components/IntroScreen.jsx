@@ -4,7 +4,7 @@ import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
-import { applyPerksToMon } from '../data/playerPerks.js'
+import { applyPerksToMon, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { PerkPicker } from './TraitsModal.jsx'
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
@@ -246,7 +246,9 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
 
     // LUÔN tay trắng (đợt 34): nhận Pokémon đầu tiên là cột mốc trong truyện.
     // Đợt 69: lưu tính cách/thiên phú để MỌI LƯỢT sau đều gửi cho AI.
-    setPlayerTraits({ personality, superpower, customPower, perks })
+    // Đợt 73: cùng object này được app phân tích thành cơ chế tùy chỉnh thật.
+    const traits = { personality, superpower, customPower, perks }
+    setPlayerTraits(traits)
     setPlayerMon(null)
     setParty([])
     // Đợt 71: hòm PC cũng phải sạch khi bắt đầu hành trình mới, không thì
@@ -255,7 +257,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
     // tích/độ no của run trước dính sang run mới (vì đều persist) — hành
     // trình MỚI phải sạch sẽ từ đầu.
-    setInventory([])
+    setInventory(syncTraitGrantedItems([], traits))
     setRelationships([])
     setBodyStatus({ head: 0, torso: 0, leftArm: 0, rightArm: 0, leftLeg: 0, rightLeg: 0 })
     setHunger({ player: 100, mon: 100 })
@@ -336,7 +338,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         if (entry) {
           const { buildMonSmart } = await import('../data/pokemonSpecies.js')
           // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
-          const mon = applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), perks)
+          const mon = applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), traits)
           setPlayerMon((cur) => cur ?? mon)
           setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
         }
@@ -656,6 +658,22 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                   onChange={(e) => setCustomPower(e.target.value)}
                 />
               )}
+              {superpower === 'custom' && customPower.trim() && (() => {
+                const detected = describeCustomMechanicEffects({ superpower, customPower, perks })
+                return (
+                  <div style={{ marginTop: 8, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 10.5, lineHeight: 1.7 }}>
+                    <div style={{ color: 'var(--mint)', fontWeight: 700, marginBottom: 3 }}>⚙ App nhận diện cơ chế:</div>
+                    {detected.length > 0 ? detected.map((label) => (
+                      <div key={label} style={{ color: 'var(--text-mid)' }}>• {label}</div>
+                    )) : (
+                      <div style={{ color: 'var(--text-dim)' }}>
+                        Chưa thấy hiệu ứng số liệu đủ rõ — đoạn này vẫn ảnh hưởng lời kể. Mẫu dễ nhận: “EXP sau trận ×3”,
+                        “Kẹo Hiếm vô hạn”, “cả đội dù không ra trận vẫn nhận EXP”, “Pokémon sở hữu Max IV/EV”.
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
                 Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến
                 nhân vật thành bất khả chiến bại.

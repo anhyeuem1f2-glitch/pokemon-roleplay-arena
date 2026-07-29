@@ -3,7 +3,7 @@
 // gì, AI hay mặc định vẽ nhân vật chính thành "lạnh lùng, thực dụng, tính
 // toán" — nên cho chọn nét tính cách rõ ràng để AI khắc hoạ đúng.
 
-import { buildPerksNote } from './playerPerks.js'
+import { buildPerksNote, buildCustomMechanicNote } from './playerPerks.js'
 
 export const PERSONALITY_TRAITS = [
   { key: 'warm', label: 'Ấm áp, tốt bụng', note: 'ấm áp, tử tế, hay quan tâm người khác' },
@@ -51,12 +51,14 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
     // được quyền dùng TAG để biến lời kể thành số liệu thật — không thì
     // đúng như tester báo: "mô tả cho ăn kẹo lên Lv11 nhưng biến không cập
     // nhật". Đây cũng là chỗ DUY NHẤT người chơi tự đặt luật cho mình.
+    const customMechanicNote = buildCustomMechanicNote({ personality, superpower, customPower, perks })
     parts.push(
       `SIÊU NĂNG LỰC ĐẶC BIỆT (người chơi TỰ ĐẶT RA — hãy tôn trọng đúng như họ viết): ${customPower.trim()}. `
       + 'Thể hiện năng lực này CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại. '
-      + 'QUAN TRỌNG: nếu năng lực này dẫn tới thay đổi có thể ĐO ĐƯỢC (nhận vật phẩm, đổi tiền, nhận Pokémon, '
-      + 'thời gian trôi...), hãy dùng ĐÚNG TAG tương ứng ở phần giao thức để nó thành thật trong dữ liệu game, '
-      + 'thay vì chỉ kể suông rồi để số liệu đứng yên.',
+      + 'QUAN TRỌNG: nếu năng lực này dẫn tới thay đổi có thể ĐO ĐƯỢC mà app chưa tự xử lý (nhận vật phẩm, đổi tiền, '
+      + 'nhận Pokémon, tăng cấp trực tiếp...), hãy dùng ĐÚNG TAG tương ứng ở phần giao thức để nó thành thật trong dữ liệu game, '
+      + 'thay vì chỉ kể suông rồi để số liệu đứng yên.'
+      + (customMechanicNote ? `\n${customMechanicNote}` : ''),
     )
   } else if (superpower && superpower !== 'none') {
     const p = SUPERPOWERS.find((s) => s.key === superpower)

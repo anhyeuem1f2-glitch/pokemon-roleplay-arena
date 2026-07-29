@@ -2257,3 +2257,24 @@ Nay có `[[ITEM Tên vật phẩm | số lượng]]` (số âm = mất đồ, b�
 Ba thiên phú cơ chế sẵn có (Max IV/EV, EXP luyện tập ×2, tỉ lệ bắt +15%) giữ nguyên; **không** thêm perk cheat dựng sẵn nào — chỗ duy nhất người chơi tự đặt luật cho mình là ô năng lực tự mô tả.
 
 **Kiểm tra:** 56 test mới (`node test-dot72.mjs`) gồm logic phân nhánh gục/thua, khoá cứng gym qua 50 lần gọi, đội hình thật qua 200 lần gọi, dò lời thách, Kẹo Hiếm không rò rỉ vào 4 loại shop, ăn kẹo lên cấp thật, tag `[[ITEM]]` + bộ dò tên, và xác nhận đã gỡ sạch perk cheat. Cộng 53 test đợt 70 và 48 test đợt 71 (đã cập nhật theo quyết định mới) đều xanh. `npm run lint` 0 lỗi no-undef, `npm run build` OK.
+
+## Cập nhật (đợt 73) — Pokémon báo lên cấp nhưng biến đứng yên, thiên phú tùy chỉnh chạy bằng cơ chế thật
+
+**BUG TESTER 1: bảng “Biến cập nhật” báo Froakie Lv8/Lv9/Lv11 nhưng HUD vẫn Lv5/Lv6.** Đây không còn là bug tụt cấp do React closure của đợt 70 mà là một đường khác: giao thức chỉ có `[[POKEMON Loài | LvN]]` cho **nhận Pokémon mới**, chưa có tag tăng cấp cho Pokémon đang sở hữu. Main model/API phụ vì thế dùng lại `[[POKEMON Froakie | Lv9]]`; viewer đọc đúng tag nên hiện Lv9, nhưng `RoleplayChat` thấy đội đã có Froakie cùng loài thì bỏ qua để tránh tạo trùng — số liệu thật không thay đổi. Nay thêm tag chính thức `[[LEVEL Tên Pokémon | +1]]` / `[[LEVEL Tên Pokémon | Lv11]]`, parser và API phụ đều hiểu. Đồng thời giữ tương thích ngược: nếu model cũ vẫn trả `[[POKEMON Froakie | Lv9]]` mà đội đã có Froakie, app coi đó là yêu cầu **nâng cá thể hiện có** tới Lv9, tuyệt đối không hạ cấp.
+
+**BUG TESTER 2: ô thiên phú tự mô tả ghi “Max IV/EV, EXP sau trận ×3, cả đội nhận EXP, Rare Candy vô hạn” nhưng chỉ có lời kể.** Nguyên nhân là phần tự mô tả trước đây chỉ được bơm vào prompt; battle engine, công thức EXP và túi đồ không hề đọc câu chữ đó. Đợt 73 thêm bộ phân tích cơ chế deterministic phía app, bỏ dấu và nhận cả cách viết Việt/Anh đời thường. Các luật tùy chỉnh hiện được hỗ trợ trực tiếp gồm:
+
+- Pokémon sở hữu **Max IV/EV**.
+- **EXP sau trận ×N**.
+- Pokémon dự bị/không ra trận vẫn nhận cùng EXP sau trận.
+- **EXP luyện tập/thời gian ×N**.
+- **Kẹo Hiếm vô hạn**.
+- Tỉ lệ bắt Pokémon **+N%**.
+
+App không giao số liệu cho AI tự đoán: battle engine tự nhân EXP và phát cho cả đội; Pokémon mới/cả đội hiện tại tự áp IV/EV; túi đồ tự sinh Kẹo Hiếm `x∞` và không trừ khi dùng. Hiệu ứng dựng sẵn và tự viết lấy hệ số lớn hơn thay vì nhân chồng vô ý (VD perk luyện tập ×2 cộng câu tự viết ×3 thành ×3, không thành ×6). Câu tùy chỉnh không thuộc các mẫu trên vẫn ảnh hưởng lời kể như cũ; màn tạo nhân vật, bảng Sửa và HUD nay hiện rõ **“App nhận diện cơ chế”** để người chơi biết phần nào đang chạy thật.
+
+**BUG TESTER 3: cho ăn Rare Candy trong chính văn, AI nói lên cấp nhưng biến không đổi.** Kẹo bấm trực tiếp trong HUD vẫn tăng cấp; đường thiếu là hành động roleplay. Prompt chính và API cập nhật biến nay được dặn dùng `[[LEVEL]]` khi Pokémon ăn kẹo hoặc tăng cấp trực tiếp do năng lực. Kẹo hữu hạn đi kèm `[[ITEM Kẹo Hiếm | -1]]`; Kẹo vô hạn không bị trừ. Save cũ có câu “Kẹo Hiếm vô hạn” được tự migration khi tải game, không cần mở bảng Sửa rồi lưu lại.
+
+**Chốt an toàn:** `LEVEL` và nhánh `POKEMON` cũ chỉ cho phép tăng, không bao giờ hạ cấp; dùng functional updater/ref mới nhất để API phụ chạy chậm không áp lên bản Pokémon cũ; dùng `uid` khi đồng bộ vật phẩm hồi máu để không chạm nhầm hai cá thể cùng loài.
+
+**Kiểm tra trong gói bàn giao này:** `node test-dot73.mjs` PASS toàn bộ regression cho đúng nội dung tester (Max IV/EV, EXP trận ×3, chia EXP cả đội, Kẹo Hiếm vô hạn, `LEVEL +1/LvN`, tương thích `POKEMON` cũ, chống tụt cấp). Toàn bộ 84 file JS/JSX đã được transpile kiểm tra cú pháp; toàn bộ import tương đối hợp lệ; kiểm tra tĩnh kiểu `no-undef` không phát hiện tên chưa khai báo. Gói ZIP rút gọn không có `package.json`/cấu hình Vite nên chưa thể chạy chính lệnh `npm run lint` và `npm run build` từ riêng gói này.

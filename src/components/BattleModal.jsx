@@ -825,7 +825,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           setFinished(true)
           return
         }
-        const lured = applyPerksToMon({ ...enemyMon }, playerTraits?.perks)
+        const lured = applyPerksToMon({ ...enemyMon }, playerTraits)
         if (party.length < 6) {
           setParty([...party, lured])
           pushLog(`${enemyMon.name} quyết định ĐI THEO BẠN! Đã vào đội hình.`)
@@ -881,8 +881,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   function consumeItem(itemId) {
     setInventory((cur) =>
       (cur ?? [])
-        .map((it) => (it.id === itemId ? { ...it, qty: (it.qty ?? 1) - 1 } : it))
-        .filter((it) => (it.qty ?? 0) > 0),
+        .map((it) => (it.id === itemId && !it.infinite ? { ...it, qty: (it.qty ?? 1) - 1 } : it))
+        .filter((it) => it.infinite || (it.qty ?? 0) > 0),
     )
   }
 
@@ -915,7 +915,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const tier = getBossTier(enemyMon.name)
       const legendPenalty = tier?.key === 'high' ? 45 : tier ? 25 : 0
       // Đợt 70: thiên phú "Bàn Tay Thuần Phục" cộng thẳng 15% (vẫn kẹp 3-95%).
-      const perkBonus = catchRateBonus(playerTraits?.perks)
+      const perkBonus = catchRateBonus(playerTraits)
       const chance = Math.max(3, Math.min(95,
         Math.round(45 * (1 - hpRatio) + 12 + statusBonus + (BALL_BONUS[id] ?? 0) - legendPenalty + perkBonus),
       ))
@@ -924,7 +924,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       if (roll < chance) {
         const caught = applyPerksToMon(
           { ...enemyMon, hp: enemyMon.maxHp, status: null, sleepTurns: undefined },
-          playerTraits?.perks,
+          playerTraits,
         )
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), caught])

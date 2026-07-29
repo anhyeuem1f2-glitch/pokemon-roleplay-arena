@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
-import { MECHANIC_PERKS, applyPerksToMon, hasPerk } from '../data/playerPerks.js'
+import { MECHANIC_PERKS, applyPerksToMon, hasPerk, resolveMechanicEffects, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 
 // ============ SỬA TÍNH CÁCH & THIÊN PHÚ GIỮA TRUYỆN (đợt 70) ============
 // Tester báo: "Kỹ Năng: Pokemon mình bắt hay sở hữu sẽ Max IV/EV... cái này
@@ -42,7 +42,7 @@ export function PerkPicker({ perks, onToggle }) {
 }
 
 export default function TraitsModal({ onClose }) {
-  const { playerTraits, setPlayerTraits, party, setParty, playerMon, setPlayerMon } = useGame()
+  const { playerTraits, setPlayerTraits, party, setParty, playerMon, setPlayerMon, setInventory } = useGame()
   const [draft, setDraft] = useState(() => ({
     personality: playerTraits?.personality ?? [],
     superpower: playerTraits?.superpower ?? 'none',
@@ -68,6 +68,9 @@ export default function TraitsModal({ onClose }) {
     }))
   }
 
+  const detectedCustom = describeCustomMechanicEffects(draft)
+  const resolvedEffects = resolveMechanicEffects(draft)
+
   function save() {
     setPlayerTraits(draft)
     // ÁP NGAY CHO ĐỘI HÌNH HIỆN TẠI. Nếu chỉ áp cho Pokémon nhận SAU khi bật
@@ -75,10 +78,13 @@ export default function TraitsModal({ onClose }) {
     // nên bật "Huyết Thống Hoàn Mỹ" là cả đội đang có được nâng luôn.
     // Chỉ NÂNG chỉ số, không bao giờ hạ: tắt perk thì Pokémon giữ nguyên
     // những gì đã có (không tịch thu lại của người chơi).
-    if (hasPerk(draft.perks, 'maxIvEv')) {
-      setParty((cur) => (cur ?? []).map((m) => applyPerksToMon(m, draft.perks)))
-      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, draft.perks) : cur))
+    if (resolvedEffects.maxIvEv) {
+      setParty((cur) => (cur ?? []).map((m) => applyPerksToMon(m, draft)))
+      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, draft) : cur))
     }
+    // Năng lực "Kẹo Hiếm vô hạn" tạo vật phẩm x∞ ngay khi lưu; không phải
+    // chờ model nhớ phát [[ITEM]] ở lượt sau nữa.
+    setInventory((cur) => syncTraitGrantedItems(cur, draft))
     onClose()
   }
 
@@ -151,6 +157,19 @@ export default function TraitsModal({ onClose }) {
             Đây là chỗ duy nhất bạn tự đặt luật cho nhân vật của mình. AI sẽ tôn trọng đúng những gì
             bạn viết và dùng tag để biến nó thành số liệu thật khi cần (nhận vật phẩm, tiền, Pokémon…).
             Viết càng cụ thể thì càng chạy đúng.
+          </div>
+        )}
+        {draft.superpower === 'custom' && draft.customPower.trim() && (
+          <div style={{ marginTop: 8, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 10.5, lineHeight: 1.7 }}>
+            <div style={{ color: 'var(--mint)', fontWeight: 700, marginBottom: 3 }}>⚙ App nhận diện cơ chế:</div>
+            {detectedCustom.length > 0 ? detectedCustom.map((label) => (
+              <div key={label} style={{ color: 'var(--text-mid)' }}>• {label}</div>
+            )) : (
+              <div style={{ color: 'var(--text-dim)' }}>
+                Chưa thấy hiệu ứng số liệu đủ rõ — đoạn này vẫn ảnh hưởng lời kể. Mẫu dễ nhận: “EXP sau trận ×3”,
+                “Kẹo Hiếm vô hạn”, “cả đội dù không ra trận vẫn nhận EXP”, “Pokémon sở hữu Max IV/EV”.
+              </div>
+            )}
           </div>
         )}
 

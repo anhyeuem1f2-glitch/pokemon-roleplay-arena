@@ -745,6 +745,32 @@ export function levelUpMon(mon) {
 }
 
 
+/**
+ * Nâng một Pokémon tới cấp đích, chỉ cho phép ĐI LÊN (đợt 73).
+ * Dùng cho [[LEVEL ...]] và đường tương thích ngược khi model cũ lạm dụng
+ * [[POKEMON Loài | LvN]] để báo Pokémon đang có vừa lên cấp. Lặp qua
+ * levelUpMon để giữ đúng quy tắc máu: maxHp tăng nhưng phần HP đã mất không
+ * tự hồi đầy.
+ */
+export function raiseMonToLevel(mon, targetLevel) {
+  if (!mon) return mon
+  const target = Math.max(mon.level ?? 1, Math.min(MAX_LEVEL, Number(targetLevel) || 1))
+  let next = mon
+  while ((next.level ?? 1) < target) next = levelUpMon(next)
+  return next
+}
+
+/** Áp một chỉ dẫn LEVEL dạng +N hoặc LvN, không bao giờ hạ cấp. */
+export function applyLevelDirective(mon, directive) {
+  if (!mon || !directive) return mon
+  const current = mon.level ?? 1
+  const target = directive.mode === 'delta'
+    ? current + Math.max(0, Number(directive.value) || 0)
+    : Number(directive.value) || current
+  return raiseMonToLevel(mon, target)
+}
+
+
 // ============ CHỐT AN TOÀN CHỐNG TỤT CẤP (đợt 70) ============
 // Tester báo 3 lần liền cùng một triệu chứng: "trước trận lên Lv6, tiếp tục
 // diễn biến lại tụt về Lv5", "không nhận Exp", "đáng lẽ lên Lv7 mà không

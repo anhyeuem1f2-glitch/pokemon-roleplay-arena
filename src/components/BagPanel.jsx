@@ -73,7 +73,9 @@ export default function BagPanel({ inventory, onUse, canUse, busy = false, onBac
       <div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8, margin: '4px 0 10px' }}>
           {pockets.map((p) => {
-            const count = (groups[p.key] ?? []).reduce((a, it) => a + (it.qty ?? 1), 0)
+            const pocketItems = groups[p.key] ?? []
+            const hasInfinite = pocketItems.some((it) => it.infinite)
+            const count = pocketItems.reduce((a, it) => a + (it.qty ?? 1), 0)
             return (
               <button
                 key={p.key}
@@ -88,7 +90,7 @@ export default function BagPanel({ inventory, onUse, canUse, busy = false, onBac
                 <span style={{ fontSize: 22, lineHeight: 1 }}>{p.icon}</span>
                 <span style={{ fontSize: 11, textAlign: 'center' }}>{p.label}</span>
                 <span style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
-                  {count} món
+                  {hasInfinite ? '∞' : count} món
                 </span>
               </button>
             )
@@ -131,7 +133,7 @@ export default function BagPanel({ inventory, onUse, canUse, busy = false, onBac
               }}
             >
               <span>{it.name}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>x{it.qty ?? 1}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>{it.infinite ? 'x∞' : `x${it.qty ?? 1}`}</span>
             </button>
           )
         })}

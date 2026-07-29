@@ -123,7 +123,7 @@ export default function SafariModal({ onClose, onSafariEnd }) {
     if (finished === 'caught') {
       if (party.length < 6) {
         // Đợt 70: áp thiên phú cơ chế cho Pokémon bắt được ở Safari.
-        const caught = applyPerksToMon({ ...enemyMon }, playerTraits?.perks)
+        const caught = applyPerksToMon({ ...enemyMon }, playerTraits)
         setParty([...party, caught])
         if (!playerMon) setPlayerMon(caught)
       }

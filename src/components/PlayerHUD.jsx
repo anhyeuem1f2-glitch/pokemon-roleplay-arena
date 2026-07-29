@@ -6,7 +6,7 @@ import PokemonInfoModal from './PokemonInfoModal.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
-import { MECHANIC_PERKS } from '../data/playerPerks.js'
+import { MECHANIC_PERKS, describeCustomMechanicEffects } from '../data/playerPerks.js'
 import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
@@ -69,6 +69,7 @@ export default function PlayerHUD({ mobile = false }) {
   // Đợt 70: mở bảng sửa tính cách/thiên phú GIỮA TRUYỆN (tester báo
   // "cái này là không chỉnh sửa được hà Red").
   const [traitsOpen, setTraitsOpen] = useState(false)
+  const customMechanics = describeCustomMechanicEffects(playerTraits)
 
   return (
     <aside
@@ -185,6 +186,11 @@ export default function PlayerHUD({ mobile = false }) {
                 </div>
               ) : null
             })}
+            {customMechanics.map((label) => (
+              <div key={`custom-${label}`} style={{ color: 'var(--mint)', marginTop: 3 }}>
+                ⚙ Tùy chỉnh — {label}
+              </div>
+            ))}
             {!(playerTraits?.personality?.length > 0)
               && (!playerTraits?.superpower || playerTraits.superpower === 'none')
               && (playerTraits?.perks ?? []).length === 0 && (
@@ -360,10 +366,10 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
   }, [inventory, catalog])
 
   function consume(itemId) {
-    setInventory(
-      inventory
-        .map((it) => (it.id === itemId ? { ...it, qty: it.qty - 1 } : it))
-        .filter((it) => it.qty > 0),
+    setInventory((cur) =>
+      (cur ?? [])
+        .map((it) => (it.id === itemId && !it.infinite ? { ...it, qty: (it.qty ?? 1) - 1 } : it))
+        .filter((it) => it.infinite || (it.qty ?? 0) > 0),
     )
   }
 
@@ -386,8 +392,8 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
     else newHp = Math.min(mon.maxHp, mon.hp + (HEAL_AMOUNTS[item.id] ?? 20))
     const updated = { ...mon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined } : {}) }
     setParty(party.map((m, i) => (i === monIndex ? updated : m)))
-    // Đồng bộ con đang ra trận nếu chính là nó (so theo tên + level).
-    if (playerMon && playerMon.name === mon.name && playerMon.level === mon.level) {
+    // Đồng bộ đúng CÁ THỂ đang ra trận (ưu tiên uid, save cũ mới lùi về tên).
+    if (playerMon && isSameMon(playerMon, mon)) {
       setPlayerMon({ ...playerMon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined } : {}) })
     }
     consume(item.id)
@@ -430,7 +436,8 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       {/* Tabs phân mục — hiện đủ mọi mục, mục trống mờ đi */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         {Object.entries(SHOP_CATEGORY_LABELS).map(([cat, label]) => {
-          const count = grouped[cat]?.reduce((n, it) => n + it.qty, 0) ?? 0
+          const hasInfinite = grouped[cat]?.some((it) => it.infinite) ?? false
+          const count = grouped[cat]?.reduce((n, it) => n + (it.qty ?? 0), 0) ?? 0
           return (
             <button
               key={cat}
@@ -445,7 +452,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                 cursor: 'pointer',
               }}
             >
-              {label} {count > 0 ? `(${count})` : ''}
+              {label} {hasInfinite ? '(∞)' : count > 0 ? `(${count})` : ''}
             </button>
           )
         })}
@@ -471,7 +478,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                   }}
                 >
                   <span>{it.name}</span>
-                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>x{it.qty}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>{it.infinite ? 'x∞' : `x${it.qty}`}</span>
                 </button>
                 {isOpen && (
                   <div style={{ padding: '0 8px 8px', fontSize: 10.5 }}>

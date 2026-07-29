@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
 import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression } from '../data/pokemonSpecies.js'
+import { applyPerksToMon, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 
@@ -64,7 +65,7 @@ export function GameProvider({ children }) {
       const saved = localStorage.getItem('trainer-arena:player-traits')
       if (saved) return JSON.parse(saved)
     } catch { /* ignore */ }
-    return { personality: [], superpower: 'none', customPower: '' }
+    return { personality: [], superpower: 'none', customPower: '', perks: [] }
   })
   const setPlayerTraits = useCallback((next) => {
     setPlayerTraitsState((cur) => {
@@ -500,6 +501,18 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+  // Đợt 73: migrate NGAY save cũ theo thiên phú tùy chỉnh. Trước đây chỉ
+  // Intro/ô Sửa mới cấp Kẹo Hiếm hoặc max IV/EV, khiến người chơi đã có ván
+  // dở cập nhật bản mới vẫn thấy lời kể đúng nhưng số liệu cũ đứng yên.
+  useEffect(() => {
+    const effects = resolveMechanicEffects(playerTraits)
+    setInventory((cur) => syncTraitGrantedItems(cur, playerTraits))
+    if (effects.maxIvEv) {
+      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, playerTraits) : cur))
+      setParty((cur) => (cur ?? []).map((mon) => applyPerksToMon(mon, playerTraits)))
+    }
+  }, [playerTraits, setInventory, setParty, setPlayerMon])
 
   // --- Quan hệ với NPC (điểm hảo cảm -100..100) ---
   const [relationships, setRelationshipsState] = useState(() => {

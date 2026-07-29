@@ -6,7 +6,7 @@ import PokemonInfoModal from './PokemonInfoModal.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
 import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
-import { MECHANIC_PERKS, describeCustomMechanicEffects } from '../data/playerPerks.js'
+import { describeCustomMechanicEffects } from '../data/playerPerks.js'
 import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
@@ -176,16 +176,7 @@ export default function PlayerHUD({ mobile = false }) {
                   : (SUPERPOWERS.find((sp) => sp.key === playerTraits.superpower)?.label ?? playerTraits.superpower)}
               </div>
             )}
-            {/* Đợt 70: thiên phú CƠ CHẾ hiện riêng màu bạc hà để phân biệt với
-                siêu năng lực chỉ ảnh hưởng lời kể. */}
-            {(playerTraits?.perks ?? []).map((k) => {
-              const p = MECHANIC_PERKS.find((mp) => mp.key === k)
-              return p ? (
-                <div key={k} style={{ color: 'var(--mint)', marginTop: 3 }} title={p.desc}>
-                  ⚙ {p.label} — {p.short}
-                </div>
-              ) : null
-            })}
+            {/* Đợt 74: chỉ cơ chế đọc từ ô Tự mô tả mới hiện ở đây. */}
             {customMechanics.map((label) => (
               <div key={`custom-${label}`} style={{ color: 'var(--mint)', marginTop: 3 }}>
                 ⚙ Tùy chỉnh — {label}
@@ -193,7 +184,7 @@ export default function PlayerHUD({ mobile = false }) {
             ))}
             {!(playerTraits?.personality?.length > 0)
               && (!playerTraits?.superpower || playerTraits.superpower === 'none')
-              && (playerTraits?.perks ?? []).length === 0 && (
+              && customMechanics.length === 0 && (
               <div style={{ color: 'var(--text-dim)' }}>Chưa chọn — bấm “Sửa” để thiết lập.</div>
             )}
           </div>

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
 import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression } from '../data/pokemonSpecies.js'
-import { applyPerksToMon, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
+import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 
@@ -63,13 +63,19 @@ export function GameProvider({ children }) {
   const [playerTraits, setPlayerTraitsState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:player-traits')
-      if (saved) return JSON.parse(saved)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        // Đợt 74: thiên phú cơ chế dựng sẵn bị gỡ. Mọi cheat chỉ có hiệu lực
+        // khi người chơi chọn "Tự mô tả…" và viết trong customPower.
+        return { ...parsed, perks: [] }
+      }
     } catch { /* ignore */ }
     return { personality: [], superpower: 'none', customPower: '', perks: [] }
   })
   const setPlayerTraits = useCallback((next) => {
     setPlayerTraitsState((cur) => {
-      const resolved = typeof next === 'function' ? next(cur) : next
+      const raw = typeof next === 'function' ? next(cur) : next
+      const resolved = { ...(raw ?? {}), perks: [] }
       try { localStorage.setItem('trainer-arena:player-traits', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
@@ -502,17 +508,24 @@ export function GameProvider({ children }) {
     })
   }, [])
 
-  // Đợt 73: migrate NGAY save cũ theo thiên phú tùy chỉnh. Trước đây chỉ
-  // Intro/ô Sửa mới cấp Kẹo Hiếm hoặc max IV/EV, khiến người chơi đã có ván
-  // dở cập nhật bản mới vẫn thấy lời kể đúng nhưng số liệu cũ đứng yên.
+  // Đợt 73-74: đồng bộ save NGAY theo năng lực TỰ MÔ TẢ. Nếu save cũ
+  // từng bật perk Max IV/EV dựng sẵn, gỡ đúng boost mang cờ `perkMark` để cheat
+  // không tồn tại mãi sau khi lựa chọn đó đã bị xoá. Pokémon không mang cờ cũ
+  // không bị chạm vào; customPower có ghi Max IV/EV thì vẫn áp như người chơi muốn.
   useEffect(() => {
     const effects = resolveMechanicEffects(playerTraits)
-    setInventory((cur) => syncTraitGrantedItems(cur, playerTraits))
-    if (effects.maxIvEv) {
-      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, playerTraits) : cur))
-      setParty((cur) => (cur ?? []).map((mon) => applyPerksToMon(mon, playerTraits)))
+    const syncMon = (mon) => {
+      if (!mon) return mon
+      return effects.maxIvEv
+        ? applyPerksToMon(mon, playerTraits)
+        : normalizeLegacyPerkBoost(mon, playerTraits)
     }
-  }, [playerTraits, setInventory, setParty, setPlayerMon])
+
+    setInventory((cur) => syncTraitGrantedItems(cur, playerTraits))
+    setPlayerMon((cur) => syncMon(cur))
+    setParty((cur) => (cur ?? []).map(syncMon))
+    setPcBox((cur) => (cur ?? []).map(syncMon))
+  }, [playerTraits, setInventory, setParty, setPcBox, setPlayerMon])
 
   // --- Quan hệ với NPC (điểm hảo cảm -100..100) ---
   const [relationships, setRelationshipsState] = useState(() => {

@@ -2278,3 +2278,23 @@ App không giao số liệu cho AI tự đoán: battle engine tự nhân EXP và
 **Chốt an toàn:** `LEVEL` và nhánh `POKEMON` cũ chỉ cho phép tăng, không bao giờ hạ cấp; dùng functional updater/ref mới nhất để API phụ chạy chậm không áp lên bản Pokémon cũ; dùng `uid` khi đồng bộ vật phẩm hồi máu để không chạm nhầm hai cá thể cùng loài.
 
 **Kiểm tra trong gói bàn giao này:** `node test-dot73.mjs` PASS toàn bộ regression cho đúng nội dung tester (Max IV/EV, EXP trận ×3, chia EXP cả đội, Kẹo Hiếm vô hạn, `LEVEL +1/LvN`, tương thích `POKEMON` cũ, chống tụt cấp). Toàn bộ 84 file JS/JSX đã được transpile kiểm tra cú pháp; toàn bộ import tương đối hợp lệ; kiểm tra tĩnh kiểu `no-undef` không phát hiện tên chưa khai báo. Gói ZIP rút gọn không có `package.json`/cấu hình Vite nên chưa thể chạy chính lệnh `npm run lint` và `npm run build` từ riêng gói này.
+
+## Cập nhật (đợt 74) — DNA phải phản ánh biến thật, làm lại UI bản đồ, cheat chỉ đến từ “Tự mô tả…”
+
+**BUG TESTER: DNA đọc theo lời kể nhưng biến Pokémon không đổi.** Viewer cũ dựng dòng “Nhận Pokémon/Lên cấp” trực tiếp từ tag mà model khai. Vì vậy chỉ cần model viết `[[POKEMON Froakie | Lv9]]` là DNA tuyên bố Lv9, kể cả app không tìm thấy đúng cá thể hoặc đã bỏ qua cập nhật. Đợt 74 đổi thứ tự xử lý: `POKEMON` / `LEVEL` / `ITEM` phải đi qua `applyParsedState()` trước, hàm này trả về báo cáo áp state thật rồi DNA mới được dựng. Viewer hiện rõ:
+
+- `✅` app đã tìm đúng target và gửi thay đổi vào state.
+- `⚠` không tìm thấy Pokémon/vật phẩm nên **không áp**.
+- `ℹ` tag hợp lệ nhưng không làm thay đổi biến, ví dụ yêu cầu Lv5 khi Pokémon đã Lv6.
+
+Bộ dò target được tách thành `utils/ownedMonTarget.js`, nhận cả cách viết đời thường như “Froakie của tôi”, “Pokémon Froakie”, species slug và “Pokémon đang ra trận”; vẫn ưu tiên `uid` để không nhầm hai cá thể cùng loài. Nhánh tương thích model cũ `[[POKEMON Loài | LvN]]` tiếp tục nâng cá thể đang sở hữu thay vì bỏ qua. API cập nhật biến chạy nền nay gắn kết quả bằng **id của đúng tin AI**, không còn tìm “tin AI cuối cùng” rồi có nguy cơ đính DNA sang lượt kế tiếp.
+
+**UI bản đồ được làm lại.** Modal rộng hơn, có header rõ ràng và nền blur; ảnh bản đồ nằm riêng bên trái, danh sách địa điểm thành sidebar bên phải — không còn rải một dãy nút click xuyên giữa khu vực bản đồ. Thêm nút **− / +**, phần trăm zoom, reset, nhấp đúp đổi 100%/200%, lăn chuột để zoom và kéo ảnh để pan. Trên màn hình hẹp, danh sách tự xuống dưới bản đồ.
+
+**UI “Chi tiết lượt” và “Tính cách & năng lực” được polish lại.** Viewer DNA có sidebar ba tab, badge “ĐÃ ÁP / KHÔNG ÁP / KHÔNG ĐỔI” và tổng số cập nhật thành công/cảnh báo. Bảng sửa năng lực chia section, chip lựa chọn và khung xem ngay những cơ chế app đã nhận diện từ câu tự viết.
+
+**CHEAT CHỈ CÓ HIỆU LỰC TỪ NĂNG LỰC TÙY CHỈNH.** Xoá toàn bộ lựa chọn thiên phú cơ chế dựng sẵn. Max IV/EV, nhân EXP, chia EXP cho cả đội, Kẹo Hiếm vô hạn và cộng tỉ lệ bắt chỉ chạy khi `superpower === "custom"` và người chơi tự ghi rõ trong ô “Tự mô tả…”. Mảng `perks` từ save cũ bị vô hiệu hoá khi đọc/lưu để không bật ngầm.
+
+Save cũ từng bị perk dựng sẵn Max IV/EV ghi đè được migration theo cờ `perkMark`: nếu hiện không có custom Max IV/EV, app bỏ cờ cheat, trả EV về 0 và sinh một bộ IV hợp lệ ổn định theo `uid` (reload không reroll). Pokémon không mang cờ perk cũ tuyệt đối không bị đụng tới; người chơi thật sự có ghi custom Max IV/EV vẫn được giữ hiệu ứng.
+
+**Kiểm tra trong gói bàn giao:** `node test-dot73.mjs` PASS sau khi cập nhật quyết định mới; `node test-dot74.mjs` PASS toàn bộ regression cho custom-only cheat, migration save cũ, dò target Pokémon, `LEVEL` chạm đúng cá thể, zoom/sidebar bản đồ và DNA dùng báo cáo áp state thật. Toàn bộ 85 file JS/JSX parse cú pháp thành công, toàn bộ import tương đối hợp lệ. Gói rút gọn vẫn không có `package.json`, nên chưa chạy được chính lệnh `npm run lint` và `npm run build` từ riêng gói này.

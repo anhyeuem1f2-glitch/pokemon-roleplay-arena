@@ -13,6 +13,7 @@ import {
   sharesBattleExpWithParty, syncTraitGrantedItems,
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
+import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget, resolveOwnedSpeciesTarget } from '../utils/ownedMonTarget.js'
 import { buildMonSmart, detectMentionedSpecies, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, detectLocationFromMetadata, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
@@ -250,29 +251,8 @@ function LorebookEditor({ lorebook, onChange }) {
 }
 
 
-// ===== KHỚP TÊN POKÉMON TRONG TAG LEVEL (đợt 73) =====
-function normalizeMonTarget(value) {
-  return String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-}
-
-function isActiveMonTarget(target) {
-  const t = normalizeMonTarget(target)
-  return ['pokemon dang ra tran', 'dang ra tran', 'active', 'pokemon active', 'pokemon hien tai', 'hien tai'].includes(t)
-}
-
-function monMatchesLevelTarget(mon, target, activeMon = null) {
-  if (!mon) return false
-  if (isActiveMonTarget(target)) return activeMon ? isSameMon(mon, activeMon) : true
-  const wanted = normalizeMonTarget(target)
-  return Boolean(wanted && normalizeMonTarget(mon.name) === wanted)
-}
+// ===== KHỚP TARGET POKÉMON CHO TAG STATE =====
+// Logic thuần nằm ở utils/ownedMonTarget.js để regression test trực tiếp.
 
 // API phụ chỉ được BỔ SUNG tag bị thiếu. Model vẫn có thể lặp lại tag chính
 // dù đã được gửi danh sách đã áp; với LEVEL +1 thì lặp một lần = tăng sai hai
@@ -300,7 +280,7 @@ function filterSupplementalDuplicates(extra, applied) {
 // để viewer "Biến cập nhật" hiển thị. Cắt raw/thinking để không phình
 // localStorage (messages đã persist từ đợt 46).
 const META_CLIP = 14000
-function describeParsedChanges(parsed, movedTo, suffix = '') {
+function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport = null) {
   const out = []
   const tag = suffix ? ` ${suffix}` : ''
   if (parsed.money) out.push(`💰 Tiền ${parsed.money > 0 ? '+' : ''}${parsed.money}${tag}`)
@@ -312,25 +292,28 @@ function describeParsedChanges(parsed, movedTo, suffix = '') {
     const label = h.who === 'mon' ? 'Pokémon' : 'người chơi'
     out.push(`🍙 Độ no ${label} ${h.delta > 0 ? '+' : ''}${h.delta}${tag}`)
   }
-  // FIX đợt 70: parseStoryStateTags trả về {species, level} nhưng chỗ này đọc
-  // pk.name → viewer hiện "🔴 Nhận Pokemon: undefined Lv.7" (tester chụp màn
-  // hình đúng dòng này ở Bug 3). Cùng loại lỗi với vụ "Độ no undefined" đợt 69.
-  for (const pk of parsed.pokemons ?? []) out.push(`🔴 Nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
-  for (const lv of parsed.levels ?? []) {
-    const value = lv.mode === 'delta' ? `${lv.value > 0 ? '+' : ''}${lv.value}` : `Lv.${lv.value}`
-    out.push(`⬆ Cấp Pokémon ${lv.target}: ${value}${tag}`)
+  // Đợt 74: không còn lấy nguyên tag để tuyên bố "đã áp". POKEMON /
+  // LEVEL / ITEM phải đi qua báo cáo của applyParsedState; target không tồn
+  // tại hoặc item không hợp lệ sẽ hiện cảnh báo thay vì DNA nói sai.
+  if (applicationReport) {
+    for (const line of applicationReport.lines ?? []) out.push(`${line}${tag}`)
+  } else {
+    // Fallback cho tin cũ/test cũ chưa có báo cáo áp biến.
+    for (const pk of parsed.pokemons ?? []) out.push(`🔴 Yêu cầu nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
+    for (const lv of parsed.levels ?? []) {
+      const value = lv.mode === 'delta' ? `${lv.value > 0 ? '+' : ''}${lv.value}` : `Lv.${lv.value}`
+      out.push(`⬆ Yêu cầu đổi cấp ${lv.target}: ${value}${tag}`)
+    }
+    for (const it of parsed.items ?? []) {
+      const known = resolveItemByName(it.name)
+      out.push(known
+        ? `🎒 ${it.qty > 0 ? 'Yêu cầu nhận' : 'Yêu cầu mất'}: ${known.name} x${Math.abs(it.qty)}${tag}`
+        : `⚠ Không có món "${it.name}" trong danh mục${tag}`)
+    }
   }
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
-  for (const it of parsed.items ?? []) {
-    const known = resolveItemByName(it.name)
-    // Báo rõ khi AI gọi tên món không có trong danh mục — không thì người
-    // chơi thấy truyện kể được tặng đồ mà túi trống, lại tưởng mất đồ.
-    out.push(known
-      ? `🎒 ${it.qty > 0 ? 'Nhận' : 'Mất'} vật phẩm: ${known.name} x${Math.abs(it.qty)}${tag}`
-      : `🎒 (bỏ qua — không có món "${it.name}" trong danh mục)${tag}`)
-  }
   if (parsed.pokecenter) out.push(`✚ Trung tâm Pokémon: ${parsed.pokecenter.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
   if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
@@ -373,7 +356,7 @@ export default function RoleplayChat() {
     storyDate,
     advanceStoryDate,
     party,
-    setParty, storyTone, storageFull, playerTraits,
+    setParty, setPcBox, storyTone, storageFull, playerTraits,
     hunger,
     adjustHunger,
     stateApiConfig,
@@ -407,7 +390,11 @@ export default function RoleplayChat() {
   // ra trận mới nhất để [[LEVEL Pokémon đang ra trận | +1]] không áp nhầm bản
   // closure cũ. Không lấy kết quả ra khỏi state updater.
   const latestPlayerMonRef = useRef(playerMon)
+  const latestPartyRef = useRef(party)
+  const latestInventoryRef = useRef(inventory)
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
+  useEffect(() => { latestPartyRef.current = party }, [party])
+  useEffect(() => { latestInventoryRef.current = inventory }, [inventory])
 
   // Dọn ký ức + tóm tắt cho các tin bị xoá (đợt 61). idxs = mảng index bị xoá.
   // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
@@ -551,73 +538,134 @@ export default function RoleplayChat() {
   // HUNGER / NPC / FACT. LEVEL là đường chính thức cho Kẹo Hiếm/năng lực;
   // POKEMON trùng loài chỉ còn là nhánh tương thích model cũ.
   function applyParsedState(parsed, turnNow) {
+    const report = { lines: [] }
+    let previewActive = latestPlayerMonRef.current
+    let previewParty = [...(latestPartyRef.current ?? [])]
+
+    function replacePreviewMon(identity, transform) {
+      if (previewActive && monIdentityMatches(previewActive, identity)) previewActive = transform(previewActive)
+      previewParty = previewParty.map((mon) => (monIdentityMatches(mon, identity) ? transform(mon) : mon))
+    }
+
     try {
       for (const pk of parsed.pokemons ?? []) {
-        const entry = pokedexSpecies.find((e) => e.name.toLowerCase() === pk.species.toLowerCase())
+        const wanted = normalizeMonTarget(pk.species)
+        const entry = pokedexSpecies.find((e) =>
+          [e.name, e.species].map(normalizeMonTarget).includes(wanted),
+        )
         if (!entry) {
           console.warn('[pokemon-tag] Không tìm thấy loài trong pokedex:', pk.species)
+          report.lines.push(`⚠ Không áp Pokémon “${pk.species}”: không tìm thấy loài trong Pokédex`)
           continue
         }
-        const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-        // Đợt 73 — tương thích ngược với model/API phụ cũ: trước khi có
-        // [[LEVEL]], chúng thường dùng [[POKEMON Froakie | Lv11]] để nói con
-        // Froakie ĐANG CÓ vừa lên cấp. Code cũ thấy trùng tên thì bỏ qua hoàn
-        // toàn, nên viewer báo Lv11 còn biến vẫn Lv5. Nay: trùng loài = chỉ
-        // NÂNG cá thể hiện có tới cấp tag (không hạ); chưa có mới dựng cá thể.
-        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits)
-        const sameSpecies = (mon) => normalizeMonTarget(mon?.name) === normalizeMonTarget(pk.species)
-        setPlayerMon((cur) => {
-          if (!cur) return newMon
-          return sameSpecies(cur) ? raiseMonToLevel(cur, pk.level) : cur
-        })
-        setParty((cur) => {
-          const next = [...(cur ?? [])]
-          const at = next.findIndex(sameSpecies)
-          if (at >= 0) {
-            next[at] = raiseMonToLevel(next[at], pk.level)
-            return next
+
+        // Tương thích model cũ: POKEMON trùng cá thể đang có = yêu cầu nâng
+        // cấp, nhưng DNA chỉ ghi thành công khi app thật sự tìm được target.
+        const existing = resolveOwnedSpeciesTarget(pk.species, previewActive, previewParty)
+        if (existing) {
+          const before = existing.level ?? 1
+          const after = Math.max(before, Math.min(100, Number(pk.level) || before))
+          if (after <= before) {
+            report.lines.push(`ℹ ${existing.name} đang Lv.${before} — tag Lv.${pk.level} không làm thay đổi biến`)
+            continue
           }
-          return next.length < 6 ? [...next, newMon] : next
-        })
+          const identity = { uid: existing.uid, name: existing.name }
+          const raise = (mon) => raiseMonToLevel(mon, after)
+          setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
+          setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
+          replacePreviewMon(identity, raise)
+          report.lines.push(`✅ ${existing.name}: Lv.${before} → Lv.${after}`)
+          continue
+        }
+
+        const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
+        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits)
+        if (previewParty.length < 6) {
+          setParty((cur) => {
+            const next = [...(cur ?? [])]
+            if (next.some((mon) => monIdentityMatches(mon, newMon))) return next
+            return next.length < 6 ? [...next, newMon] : next
+          })
+          setPlayerMon((cur) => cur ?? newMon)
+          previewParty.push(newMon)
+          if (!previewActive) previewActive = newMon
+          report.lines.push(`✅ Nhận Pokémon: ${newMon.name} Lv.${newMon.level}`)
+        } else {
+          // Đội đầy thì đưa vào PC thay vì để DNA báo nhận rồi dữ liệu biến mất.
+          setPcBox((cur) => [...(cur ?? []), newMon])
+          report.lines.push(`✅ Nhận Pokémon: ${newMon.name} Lv.${newMon.level} · đội đầy, đã gửi vào PC`)
+        }
       }
 
-      // Tag chính thức đợt 73 cho tăng cấp trực tiếp (Kẹo Hiếm/năng lực).
-      // Mỗi setter tự đọc bản mới nhất; không dựng state từ closure cũ.
       for (const directive of parsed.levels ?? []) {
-        const active = latestPlayerMonRef.current
-        setPlayerMon((cur) => (monMatchesLevelTarget(cur, directive.target, cur) ? applyLevelDirective(cur, directive) : cur))
-        setParty((cur) => {
-          const next = [...(cur ?? [])]
-          const at = next.findIndex((mon) => monMatchesLevelTarget(mon, directive.target, active))
-          if (at < 0) return next
-          next[at] = applyLevelDirective(next[at], directive)
-          return next
-        })
+        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        if (!targetMon) {
+          report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          continue
+        }
+        const before = targetMon.level ?? 1
+        const previewAfter = applyLevelDirective(targetMon, directive)
+        const after = previewAfter?.level ?? before
+        if (after <= before) {
+          report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn này không làm thay đổi biến`)
+          continue
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const apply = (mon) => applyLevelDirective(mon, directive)
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        replacePreviewMon(identity, apply)
+        report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
       }
-    } catch (e2) { console.warn('[state] POKEMON/LEVEL lỗi:', e2.message) }
+
+      // Cập nhật ref lạc quan để API phụ chạy ngay sau đó nhìn thấy đúng bản
+      // vừa áp, không dùng lại snapshot cũ rồi báo DNA lệch lần nữa.
+      latestPlayerMonRef.current = previewActive
+      latestPartyRef.current = previewParty
+    } catch (e2) {
+      console.warn('[state] POKEMON/LEVEL lỗi:', e2.message)
+      report.lines.push(`⚠ Lỗi khi áp Pokémon/cấp: ${e2.message}`)
+    }
+
     try {
-      // EXP TỪ LUYỆN TẬP / THỜI GIAN (đợt 67) — người chơi báo "huấn luyện
-      // và time skip không tăng cấp". Áp cho TOÀN ĐỘI (cả đội cùng tập/cùng
-      // đi đường), mức thấp hơn nhiều so với đánh trận để không phá cân bằng.
-      // ===== ĐỢT 72 — AI TRAO/LẤY VẬT PHẨM =====
-      // Đây là mắt xích khiến "thiên phú tùy chỉnh không có tác dụng": người
-      // chơi tự viết năng lực của mình, AI đọc và kể theo, nhưng không có
-      // đường nào để lời kể đó chạm vào túi đồ. Nay có.
-      // Dùng functional updater (quy tắc số 4): tag ITEM có thể tới từ API
-      // phụ chạy nền, closure lúc đó đã cũ.
-      const itemChanges = (parsed.items ?? [])
-        .map((raw) => ({ entry: resolveItemByName(raw.name), qty: raw.qty, raw }))
-        .filter((x) => x.entry)
-      if (itemChanges.length > 0) {
+      const itemChanges = (parsed.items ?? []).map((raw) => ({
+        entry: resolveItemByName(raw.name), qty: raw.qty, raw,
+      }))
+      let previewInventory = [...(latestInventoryRef.current ?? [])]
+
+      for (const { entry, qty, raw } of itemChanges) {
+        if (!entry) {
+          report.lines.push(`⚠ Không áp vật phẩm “${raw.name}”: không có trong danh mục`)
+          continue
+        }
+        const at = previewInventory.findIndex((it) => it.id === entry.id)
+        if (qty > 0) {
+          if (at === -1) previewInventory.push({ id: entry.id, name: entry.name, qty })
+          else previewInventory[at] = { ...previewInventory[at], qty: (previewInventory[at].qty ?? 0) + qty }
+          report.lines.push(`✅ Nhận vật phẩm: ${entry.name} x${qty}`)
+        } else if (at === -1) {
+          report.lines.push(`⚠ Không thể trừ ${entry.name}: trong túi không có vật phẩm này`)
+        } else if (previewInventory[at].infinite) {
+          report.lines.push(`ℹ ${entry.name} là vật phẩm vô hạn — không bị trừ`)
+        } else {
+          const have = Math.max(0, Number(previewInventory[at].qty) || 0)
+          const removed = Math.min(have, Math.abs(qty))
+          const left = have - removed
+          if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
+          else previewInventory.splice(at, 1)
+          report.lines.push(`✅ Mất vật phẩm: ${entry.name} x${removed}`)
+        }
+      }
+
+      const validItemChanges = itemChanges.filter((x) => x.entry)
+      if (validItemChanges.length > 0) {
         setInventory((cur) => {
           let next = [...(cur ?? [])]
-          for (const { entry, qty } of itemChanges) {
+          for (const { entry, qty } of validItemChanges) {
             const at = next.findIndex((it) => it.id === entry.id)
             if (at === -1) {
               if (qty > 0) next.push({ id: entry.id, name: entry.name, qty })
             } else {
-              // Năng lực "Kẹo Hiếm vô hạn": model/API phụ có lỡ khai
-              // [[ITEM Kẹo Hiếm | -1]] thì cũng không được làm mất vật phẩm.
               if (next[at].infinite && qty < 0) continue
               const left = (next[at].qty ?? 0) + qty
               if (left > 0) next[at] = { ...next[at], qty: left }
@@ -626,55 +674,52 @@ export default function RoleplayChat() {
           }
           return syncTraitGrantedItems(next, playerTraits)
         })
+        latestInventoryRef.current = syncTraitGrantedItems(previewInventory, playerTraits)
       }
 
       const trainLv = parsed.training ?? 0
       const daysPassed = parsed.dateAdvance ?? 0
       if (trainLv > 0 || daysPassed > 0) {
-        // Đợt 70: thiên phú "Thiên Phú Rèn Luyện" nhân đôi EXP luyện tập/ngày trôi.
+        // Từ đợt 74 hệ số >1 chỉ đến từ năng lực TỰ MÔ TẢ.
         const expMul = trainingExpMultiplier(playerTraits)
         const grow = (mon) => {
           if (!mon) return mon
           const amount = Math.round(
-            ((trainLv > 0 ? expFromTraining(mon, trainLv) : 0) +
-              (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)) * expMul,
+            ((trainLv > 0 ? expFromTraining(mon, trainLv) : 0)
+              + (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)) * expMul,
           )
           return amount > 0 ? applyExpGain(mon, amount).mon : mon
         }
-        // ===== BUG ĐỢT 70 (tester báo 3 triệu chứng, CÙNG MỘT nguyên nhân) =====
-        //   • "trước trận đấu lên Lv6, sau khi tiếp tục diễn biến thì tụt về Lv5"
-        //   • "không nhận Exp"
-        //   • "đáng lẽ lên Lv7 nhưng lại không lên"
-        // NGUYÊN NHÂN THẬT: đợt 69 tính `grow(playerMon)` với `playerMon` đọc
-        // từ CLOSURE của lần render lúc callAI bắt đầu chạy. Nhưng thứ tự thực
-        // tế là: handleBattleEnd() gọi setPlayerMon(Lv6) → NGAY sau đó await
-        // callAI(...) → biến `playerMon` trong closure VẪN LÀ BẢN Lv5 CŨ. Đến
-        // khi AI trả lời có [[TRAIN]] hoặc [[DATE +n]], dòng
-        // `setPlayerMon(grownActive)` ghi ĐÈ bản Lv6 bằng bản Lv5-cũ-cộng-tí-EXP
-        // → cấp tụt lại, EXP vừa thắng trận bay sạch. API phụ chạy nền còn tệ
-        // hơn: nó gọi applyParsedState MUỘN HƠN NỮA nhưng vẫn dùng đúng closure
-        // cũ đó, nên ghi đè thêm một lần thứ hai.
-        // CÁCH SỬA: KHÔNG đọc playerMon/party từ closure nữa — chỉ dùng
-        // functional updater, để React đưa vào bản MỚI NHẤT. `grow()` là hàm
-        // thuần (chỉ phụ thuộc exp/level của chính con mon) nên playerMon và
-        // bản trong đội hình cùng xuất phát từ một số liệu sẽ cho cùng kết quả,
-        // không cần đồng bộ chéo — hết luôn nguy cơ lệch cấp HUD ↔ trận.
         setPlayerMon((cur) => (cur ? grow(cur) : cur))
         setParty((cur) => (cur ?? []).map((pm) => grow(pm)))
+        previewActive = previewActive ? grow(previewActive) : previewActive
+        previewParty = previewParty.map((pm) => grow(pm))
+        latestPlayerMonRef.current = previewActive
+        latestPartyRef.current = previewParty
       }
 
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {
         advanceStoryDate(parsed.dateAdvance ?? 0, parsed.datePart)
       }
-    } catch (e2) { console.warn('[state] DATE lỗi:', e2.message) }
+    } catch (e2) {
+      console.warn('[state] ITEM/DATE lỗi:', e2.message)
+      report.lines.push(`⚠ Lỗi khi áp vật phẩm/thời gian: ${e2.message}`)
+    }
+
     try {
-      const dp = (parsed.hunger ?? []).reduce((acc, h) => { acc[h.who === 'mon' ? 'mon' : 'player'] += h.delta; return acc }, { player: 0, mon: 0 })
+      const dp = (parsed.hunger ?? []).reduce((acc, h) => {
+        acc[h.who === 'mon' ? 'mon' : 'player'] += h.delta
+        return acc
+      }, { player: 0, mon: 0 })
       if (dp.player || dp.mon) adjustHunger(dp)
     } catch (e2) { console.warn('[state] HUNGER lỗi:', e2.message) }
+
     try {
       for (const n of parsed.npcs ?? []) upsertNpc(n.name, n.fields, turnNow)
       for (const f of parsed.facts ?? []) addFact(f.key, f.text, turnNow)
     } catch (e2) { console.warn('[state] NPC/FACT lỗi:', e2.message) }
+
+    return report
   }
 
   async function callAI(nextMessages, scanExtra = '', configOverride = null) {
@@ -802,6 +847,10 @@ export default function RoleplayChat() {
         relationships, setRelationships,
         bodyStatus, setBodyStatus,
       })
+      // Đợt 74: áp POKEMON/LEVEL/ITEM trước khi dựng DNA và lấy báo cáo
+      // thực tế. DNA không còn chỉ lặp lại tag rồi tuyên bố nhầm là đã áp.
+      const turnNow = nextMessages.length
+      const mainApplyReport = applyParsedState(stateParsed, turnNow)
       // Vị trí tính TRƯỚC khi lưu tin (đợt 48) để đưa vào meta viewer.
       let movedTo = null
       if ((stateParsed.moves ?? []).length) {
@@ -831,13 +880,18 @@ export default function RoleplayChat() {
         raw: (reply ?? '').slice(0, META_CLIP),
         thinking: extractThinking(reply).slice(0, META_CLIP),
         changes: [
-          ...describeParsedChanges(stateParsed, movedTo),
+          ...describeParsedChanges(stateParsed, movedTo, '', mainApplyReport),
           ...(displayText !== stateParsed.cleaned ? ['✍ Văn đã qua API chau chuốt văn phong'] : []),
         ],
       }
+      // API cập nhật biến chạy nền có thể trả lời sau khi người chơi đã sang
+      // lượt kế tiếp. Gắn id cố định để DNA bổ sung quay đúng tin đã sinh ra nó,
+      // không đính nhầm vào "tin AI cuối cùng" rồi khiến viewer khó kiểm chứng.
+      const turnMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       setMessages((m) => [
         ...m,
         {
+          id: turnMessageId,
           role: 'assistant',
           content: displayText,
           meta: turnMeta,
@@ -863,13 +917,6 @@ export default function RoleplayChat() {
       // (3) fallback quét địa danh trong chính văn. Dò metadata trên reply
       // GỐC vì dòng đó bị cleanAiOutput bóc mất khi lấy <content>.
       if (movedTo) setPlayerLocation(movedTo)
-      // ===== ÁP BIẾN TRẠNG THÁI (refactor đợt 36) =====
-      // Gom toàn bộ việc áp tag vào 1 hàm — dùng cho CẢ tag của model chính
-      // lẫn tag bổ sung từ API cập nhật biến. Từng phần bọc try/catch riêng
-      // để 1 tag lỗi KHÔNG giết cả pipeline (bài học vụ setPlayerMon crash
-      // làm mọi cập nhật phía sau chết theo).
-      const turnNow = nextMessages.length
-      applyParsedState(stateParsed, turnNow)
       // API CẬP NHẬT BIẾN (đợt 36, tuỳ chọn): model phụ đọc lại chính văn và
       // BỔ SUNG các tag model chính quên khai (kèm danh sách tag đã áp để
       // không áp trùng). Chạy nền — lỗi chỉ warn.
@@ -895,22 +942,26 @@ export default function RoleplayChat() {
           .then((extraTagsText) => {
             if (!extraTagsText) return
             const extra = filterSupplementalDuplicates(parseStoryStateTags(extraTagsText), stateParsed)
-            applyParsedState(extra, turnNow)
+            const extraApplyReport = applyParsedState(extra, turnNow)
             // Tiền/quan hệ bổ sung từ API phụ: áp qua applyStoryState như luồng chính.
             if (extra.money || extra.rel.length || extra.body.length) {
               applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
             }
             // Ghi các biến bổ sung vào viewer của đúng tin AI cuối (đợt 48).
-            const extraLines = describeParsedChanges(extra, null, '(API phụ)')
+            const extraLines = describeParsedChanges(extra, null, '(API phụ)', extraApplyReport)
             if (extraLines.length) {
               setMessages((msgs) => {
-                for (let k = msgs.length - 1; k >= 0; k--) {
-                  if (msgs[k].role === 'assistant') {
-                    const upd = { ...msgs[k], meta: { ...(msgs[k].meta ?? {}), changes: [...(msgs[k].meta?.changes ?? []), ...extraLines] } }
-                    return msgs.map((mm, ii) => (ii === k ? upd : mm))
-                  }
+                const at = msgs.findIndex((m2) => m2.id === turnMessageId)
+                if (at < 0) return msgs // tin đã bị xoá trước khi API phụ trả về
+                const current = msgs[at]
+                const updated = {
+                  ...current,
+                  meta: {
+                    ...(current.meta ?? {}),
+                    changes: [...(current.meta?.changes ?? []), ...extraLines],
+                  },
                 }
-                return msgs
+                return msgs.map((m2, index) => (index === at ? updated : m2))
               })
             }
           })

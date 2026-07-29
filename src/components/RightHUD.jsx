@@ -129,16 +129,40 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       {mapOpen && (
         <div
           onClick={() => setMapOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80, padding: 20 }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 80, padding: 16,
+            display: 'grid', placeItems: 'center',
+            background: 'radial-gradient(circle at 50% 15%, rgba(120,200,170,.13), transparent 40%), rgba(2,7,11,.80)',
+            backdropFilter: 'blur(8px)',
+          }}
         >
-          <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: 'min(680px, 96vw)', maxHeight: '88vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <span className="page-title" style={{ margin: 0 }}>Bản đồ thế giới</span>
-              <button className="btn" style={{ padding: '4px 10px' }} onClick={() => setMapOpen(false)}>
-                Đóng
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="panel"
+            style={{
+              width: 'min(1120px, 97vw)', maxHeight: '94vh', overflowY: 'auto',
+              padding: 0, borderRadius: 16, boxShadow: '0 30px 100px rgba(0,0,0,.55)',
+            }}
+          >
+            <div
+              style={{
+                position: 'sticky', top: 0, zIndex: 3,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                padding: '14px 16px', borderBottom: '1px solid var(--line)',
+                background: 'color-mix(in srgb, var(--bg-panel) 92%, transparent)', backdropFilter: 'blur(10px)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 9.5, color: 'var(--amber)', fontWeight: 800, letterSpacing: '.14em' }}>ĐIỀU HƯỚNG THẾ GIỚI</div>
+                <span className="page-title" style={{ margin: '2px 0 0', display: 'block' }}>Bản đồ khu vực</span>
+              </div>
+              <button className="btn" style={{ padding: '7px 12px' }} onClick={() => setMapOpen(false)}>
+                ✕ Đóng
               </button>
             </div>
-            <RegionMap location={playerLocation} onSetLocation={setPlayerLocation} fixedRegion />
+            <div style={{ padding: 16 }}>
+              <RegionMap location={playerLocation} onSetLocation={setPlayerLocation} fixedRegion />
+            </div>
           </div>
         </div>
       )}

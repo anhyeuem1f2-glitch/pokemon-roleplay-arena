@@ -1,155 +1,319 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { REGIONS, getArea } from '../data/regions.js'
 import { getMapPin } from '../data/mapPins.js'
 
-// ============ ẢNH BẢN ĐỒ VÙNG THẬT (đợt 30) ============
-// Cùng kiến trúc "tự dò file" của hệ nhạc nền (bản quyền artwork Pokémon nên
-// app KHÔNG đóng gói sẵn ảnh): bạn bỏ ảnh vào public/maps/ đặt tên theo key
-// vùng — kanto.png, johto.png, ... paldea.png (thử lần lượt .png → .jpg →
-// .webp). Có ảnh thì hiện bản đồ thật phía trên, thiếu thì chỉ hiện lộ trình
-// chữ như cũ, không bao giờ lỗi. Chi tiết: public/maps/README.txt.
+// ============ BẢN ĐỒ TƯƠNG TÁC (đợt 74) ============
+// Ảnh vẫn do chủ dự án tự bỏ vào public/maps/. Giao diện mới tách bản đồ và
+// danh sách địa điểm thành hai vùng rõ ràng; không rải nút chọn địa điểm giữa
+// khung ảnh. Có zoom bằng nút, con lăn, kéo để pan và nút đặt lại góc nhìn.
+
 const MAP_EXTS = ['png', 'jpg', 'webp']
+const MIN_ZOOM = 1
+const MAX_ZOOM = 4
+const ZOOM_STEP = 0.25
 
 function mapUrl(regionKey, ext) {
   const base = (import.meta.env?.BASE_URL ?? '/').replace(/\/+$/, '')
   return `${base}/maps/${regionKey}.${ext}`
 }
 
-function RegionMapImage({ regionKey, location }) {
+function clampZoom(value) {
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Number(value) || MIN_ZOOM))
+}
+
+function IconButton({ title, children, onClick, disabled }) {
+  return (
+    <button
+      type="button"
+      className="btn"
+      title={title}
+      aria-label={title}
+      disabled={disabled}
+      onClick={onClick}
+      style={{
+        width: 34, height: 32, padding: 0, display: 'grid', placeItems: 'center',
+        borderRadius: 8, fontSize: 16, fontWeight: 800,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function MapCanvas({ regionKey, location }) {
   const [extIdx, setExtIdx] = useState(0)
   const [failed, setFailed] = useState(false)
-  // Đổi vùng → thử lại từ .png.
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const dragRef = useRef(null)
+
+  function resetView() {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }
+
   useEffect(() => {
     setExtIdx(0)
     setFailed(false)
+    resetView()
   }, [regionKey])
-  if (failed) {
-    return (
-      <p style={{ fontSize: 10.5, color: 'var(--text-dim)', margin: '10px 0 0' }}>
-        (Chưa có ảnh bản đồ cho vùng này — bỏ file <code>{regionKey}.png</code> vào{' '}
-        <code>public/maps/</code> để hiện bản đồ thật. Xem public/maps/README.txt.)
-      </p>
-    )
+
+  function updateZoom(next) {
+    const value = clampZoom(next)
+    setZoom(value)
+    if (value === 1) setPan({ x: 0, y: 0 })
   }
-  // Chấm đỏ vị trí người chơi (đợt 36): chỉ vẽ khi vùng đang xem đúng là
-  // vùng người chơi đứng + khu có toạ độ pin (data/mapPins.js — chỉnh tay
-  // % ngay trong file đó nếu lệch so với ảnh bạn vẽ).
-  const pin = location && location.regionKey === regionKey ? getMapPin(regionKey, location.areaKey) : null
+
+  function onWheel(e) {
+    e.preventDefault()
+    updateZoom(zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP))
+  }
+
+  function onPointerDown(e) {
+    if (zoom <= 1) return
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    dragRef.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y }
+  }
+
+  function onPointerMove(e) {
+    const drag = dragRef.current
+    if (!drag) return
+    setPan({ x: drag.panX + e.clientX - drag.x, y: drag.panY + e.clientY - drag.y })
+  }
+
+  function stopDrag(e) {
+    dragRef.current = null
+    e.currentTarget.releasePointerCapture?.(e.pointerId)
+  }
+
+  const pin = location && location.regionKey === regionKey
+    ? getMapPin(regionKey, location.areaKey)
+    : null
+
   return (
-    <div style={{ position: 'relative', marginTop: 12 }}>
-      <img
-        src={mapUrl(regionKey, MAP_EXTS[extIdx])}
-        alt={`Bản đồ vùng ${regionKey}`}
-        onError={() => {
-          // Hết đuôi để thử → coi như vùng này chưa có ảnh.
-          if (extIdx < MAP_EXTS.length - 1) setExtIdx(extIdx + 1)
-          else setFailed(true)
+    <div style={{ minWidth: 0 }}>
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          marginBottom: 8,
         }}
-        style={{ width: '100%', borderRadius: 8, border: '1px solid var(--line)', display: 'block' }}
-      />
-      {pin && (
-        <>
-          <style>{`@keyframes map-pin-pulse { 0% { box-shadow: 0 0 0 0 rgba(230,57,57,0.6); } 70% { box-shadow: 0 0 0 12px rgba(230,57,57,0); } 100% { box-shadow: 0 0 0 0 rgba(230,57,57,0); } }`}</style>
+      >
+        <div>
+          <div style={{ fontSize: 9.5, color: 'var(--amber)', fontWeight: 800, letterSpacing: '.13em' }}>GÓC NHÌN</div>
+          <div style={{ color: 'var(--text-dim)', fontSize: 10.5, marginTop: 2 }}>
+            Lăn chuột để zoom · kéo ảnh khi đã phóng to
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <IconButton title="Thu nhỏ" disabled={zoom <= MIN_ZOOM} onClick={() => updateZoom(zoom - ZOOM_STEP)}>−</IconButton>
+          <button
+            type="button"
+            className="btn"
+            onClick={resetView}
+            title="Đặt lại góc nhìn"
+            style={{ minWidth: 66, height: 32, padding: '0 9px', borderRadius: 8, fontFamily: 'var(--font-mono)', fontSize: 11 }}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <IconButton title="Phóng to" disabled={zoom >= MAX_ZOOM} onClick={() => updateZoom(zoom + ZOOM_STEP)}>+</IconButton>
+          <IconButton title="Đặt lại góc nhìn" onClick={resetView}>⌂</IconButton>
+        </div>
+      </div>
+
+      <div
+        onWheel={onWheel}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={stopDrag}
+        onPointerCancel={stopDrag}
+        onDoubleClick={() => updateZoom(zoom >= 2 ? 1 : 2)}
+        style={{
+          position: 'relative', overflow: 'hidden', height: 'clamp(300px, 54vh, 560px)',
+          border: '1px solid var(--line)', borderRadius: 13,
+          background:
+            'radial-gradient(circle at 30% 20%, rgba(120,200,170,.10), transparent 34%), radial-gradient(circle at 75% 70%, rgba(232,184,74,.08), transparent 36%), var(--bg-deep)',
+          cursor: zoom > 1 ? (dragRef.current ? 'grabbing' : 'grab') : 'zoom-in',
+          touchAction: 'none', userSelect: 'none',
+        }}
+      >
+        {!failed ? (
           <div
-            title="Vị trí của bạn"
             style={{
-              position: 'absolute', left: `${pin[0]}%`, top: `${pin[1]}%`,
-              width: 13, height: 13, borderRadius: '50%',
-              background: '#e63939', border: '2.5px solid #fff',
-              transform: 'translate(-50%, -50%)',
-              animation: 'map-pin-pulse 1.6s ease-out infinite',
-              pointerEvents: 'none',
+              position: 'absolute', inset: 0,
+              transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
+              transformOrigin: 'center center', transition: dragRef.current ? 'none' : 'transform .18s ease',
+              willChange: 'transform',
             }}
-          />
-        </>
-      )}
+          >
+            <img
+              src={mapUrl(regionKey, MAP_EXTS[extIdx])}
+              alt={`Bản đồ vùng ${regionKey}`}
+              draggable={false}
+              onError={() => {
+                if (extIdx < MAP_EXTS.length - 1) setExtIdx((i) => i + 1)
+                else setFailed(true)
+              }}
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+            />
+            {pin && (
+              <div
+                title="Vị trí của bạn"
+                style={{
+                  position: 'absolute', left: `${pin[0]}%`, top: `${pin[1]}%`,
+                  width: 16, height: 16, borderRadius: '50%',
+                  background: '#e95b55', border: '3px solid #fff',
+                  transform: 'translate(-50%, -50%)',
+                  boxShadow: '0 0 0 7px rgba(233,91,85,.20), 0 3px 12px rgba(0,0,0,.45)',
+                  pointerEvents: 'none',
+                }}
+              >
+                <span
+                  style={{
+                    position: 'absolute', inset: -8, borderRadius: '50%', border: '1px solid rgba(233,91,85,.65)',
+                    animation: 'map-pin-ring 1.6s ease-out infinite',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', padding: 28, textAlign: 'center' }}>
+            <div style={{ maxWidth: 420 }}>
+              <div style={{ fontSize: 34, marginBottom: 9 }}>🗺</div>
+              <div style={{ color: 'var(--text-hi)', fontWeight: 750, fontSize: 14 }}>Chưa có ảnh bản đồ vùng này</div>
+              <div style={{ color: 'var(--text-dim)', fontSize: 11, lineHeight: 1.7, marginTop: 6 }}>
+                Bỏ file <code>{regionKey}.png</code>, <code>.jpg</code> hoặc <code>.webp</code> vào <code>public/maps/</code>.
+                Danh sách địa điểm bên cạnh vẫn hoạt động bình thường.
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div
+          style={{
+            position: 'absolute', left: 10, bottom: 10, padding: '6px 9px', borderRadius: 8,
+            background: 'rgba(4,10,14,.76)', backdropFilter: 'blur(7px)', border: '1px solid rgba(255,255,255,.08)',
+            color: 'var(--text-dim)', fontSize: 9.5, pointerEvents: 'none',
+          }}
+        >
+          Nhấp đúp: 100% / 200%
+        </div>
+      </div>
     </div>
   )
 }
 
-// Bản đồ dạng LỘ TRÌNH cách điệu (không dùng ảnh map thật của game — vừa
-// không có nguồn ảnh ổn định để hotlink, vừa dính bản quyền artwork): mỗi vùng
-// là 1 chuỗi khu vực nối nhau theo đúng tiến trình game gốc, khu đứng sau =
-// level cao hơn. Vị trí người chơi hiện marker ●, bấm vào khu bất kỳ để dời
-// tới đó (chỉnh tay khi auto-detect từ chính văn dò sai/thiếu).
+function AreaList({ region, location, onSetLocation }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 9.5, color: 'var(--amber)', fontWeight: 800, letterSpacing: '.13em' }}>ĐỊA ĐIỂM</div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 10.5, marginTop: 2 }}>Chọn điểm đến để sửa vị trí thủ công</div>
+      </div>
+      <div
+        style={{
+          display: 'flex', flexDirection: 'column', gap: 7,
+          maxHeight: 'clamp(300px, 54vh, 560px)', overflowY: 'auto', paddingRight: 4,
+        }}
+      >
+        {region.areas.map((area, index) => {
+          const isHere = location?.regionKey === region.key && location?.areaKey === area.key
+          return (
+            <button
+              key={area.key}
+              type="button"
+              onClick={() => onSetLocation({ regionKey: region.key, areaKey: area.key })}
+              title={`Wild Lv${area.level[0]}-${area.level[1]}`}
+              style={{
+                display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) auto', alignItems: 'center', gap: 9,
+                width: '100%', textAlign: 'left', padding: '9px 10px', borderRadius: 10, cursor: 'pointer',
+                border: `1px solid ${isHere ? 'var(--mint)' : 'var(--line)'}`,
+                background: isHere ? 'rgba(120,200,170,.08)' : 'var(--bg-deep)', color: 'inherit',
+              }}
+            >
+              <span
+                style={{
+                  width: 26, height: 26, borderRadius: 8, display: 'grid', placeItems: 'center',
+                  background: isHere ? 'var(--mint)' : 'rgba(255,255,255,.035)',
+                  color: isHere ? '#07110e' : 'var(--text-dim)', fontSize: 10, fontWeight: 800,
+                }}
+              >
+                {isHere ? '●' : String(index + 1).padStart(2, '0')}
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: 'block', color: isHere ? 'var(--mint)' : 'var(--text-hi)', fontSize: 11.5, fontWeight: isHere ? 750 : 600 }}>
+                  {area.name}
+                </span>
+                <span style={{ display: 'block', color: 'var(--text-dim)', fontSize: 9.5, marginTop: 2 }}>
+                  Pokémon hoang dã Lv{area.level[0]}–{area.level[1]}
+                </span>
+              </span>
+              <span style={{ color: isHere ? 'var(--mint)' : 'var(--text-dim)', fontSize: 13 }}>{isHere ? 'Đang ở' : '›'}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function RegionMap({ location, onSetLocation, fixedRegion = false }) {
   const [regionKey, setRegionKey] = useState(location?.regionKey ?? 'kanto')
-  // fixedRegion (đợt 36): trong truyện chỉ hiện VÙNG ĐANG Ở — đổi vùng theo
-  // vị trí người chơi, ẩn dropdown chọn vùng (Dev tester vẫn duyệt cả 9).
+
   useEffect(() => {
     if (fixedRegion && location?.regionKey) setRegionKey(location.regionKey)
   }, [fixedRegion, location?.regionKey])
+
   const region = REGIONS.find((r) => r.key === regionKey) ?? REGIONS[0]
   const currentArea = location ? getArea(location.regionKey, location.areaKey) : null
+  const currentRegion = location ? REGIONS.find((r) => r.key === location.regionKey) : null
 
   return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12.5 }}>
-          Vị trí hiện tại:{' '}
+    <div style={{ minWidth: 0 }}>
+      <style>{`
+        @keyframes map-pin-ring { 0% { opacity: .9; transform: scale(.65); } 75%,100% { opacity: 0; transform: scale(1.75); } }
+        .region-map-layout { display:grid; grid-template-columns:minmax(0,1fr) 250px; gap:14px; }
+        @media (max-width: 760px) { .region-map-layout { grid-template-columns:1fr; } }
+      `}</style>
+
+      <div
+        style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          padding: '10px 12px', marginBottom: 12, borderRadius: 11,
+          border: '1px solid var(--line)', background: 'linear-gradient(135deg, rgba(120,200,170,.065), rgba(232,184,74,.035))',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 9.5, color: 'var(--text-dim)', letterSpacing: '.11em', fontWeight: 750 }}>VỊ TRÍ HIỆN TẠI</div>
           {currentArea ? (
-            <strong style={{ color: 'var(--mint)' }}>
-              {currentArea.name} ({REGIONS.find((r) => r.key === location.regionKey)?.name}) · wild Lv
-              {currentArea.level[0]}-{currentArea.level[1]}
-            </strong>
+            <div style={{ marginTop: 3 }}>
+              <strong style={{ color: 'var(--mint)', fontSize: 13 }}>{currentArea.name}</strong>
+              <span style={{ color: 'var(--text-mid)', fontSize: 11 }}> · {currentRegion?.name} · wild Lv{currentArea.level[0]}–{currentArea.level[1]}</span>
+            </div>
           ) : (
-            <span style={{ color: 'var(--text-dim)' }}>chưa xác định (wild Lv8-15 mặc định)</span>
+            <div style={{ color: 'var(--text-dim)', fontSize: 11.5, marginTop: 3 }}>Chưa xác định · mặc định wild Lv8–15</div>
           )}
         </div>
+
         {fixedRegion ? (
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--mint)', padding: '4px 0' }}>
-            {region.name} (Gen {region.gen}) — vùng bạn đang ở
+          <div style={{ padding: '7px 10px', borderRadius: 9, background: 'var(--bg-deep)', border: '1px solid var(--line)', color: 'var(--text-hi)', fontSize: 11.5, fontWeight: 700 }}>
+            {region.name} <span style={{ color: 'var(--text-dim)', fontWeight: 500 }}>(Gen {region.gen})</span>
           </div>
         ) : (
-          <select value={regionKey} onChange={(e) => setRegionKey(e.target.value)} style={{ fontSize: 12 }}>
-            {REGIONS.map((r) => (
-              <option key={r.key} value={r.key}>
-                {r.name} (Gen {r.gen})
-              </option>
-            ))}
+          <select value={regionKey} onChange={(e) => setRegionKey(e.target.value)} style={{ minWidth: 170, fontSize: 12 }}>
+            {REGIONS.map((r) => <option key={r.key} value={r.key}>{r.name} (Gen {r.gen})</option>)}
           </select>
         )}
       </div>
 
-      {/* Ảnh bản đồ thật của vùng (nếu người dùng đã bỏ file vào public/maps/) */}
-      <RegionMapImage regionKey={region.key} location={location} />
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 12 }}>
-        {region.areas.map((area, i) => {
-          const isHere = location?.regionKey === region.key && location?.areaKey === area.key
-          return (
-            <React.Fragment key={area.key}>
-              {i > 0 && <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>→</span>}
-              <button
-                onClick={() => onSetLocation({ regionKey: region.key, areaKey: area.key })}
-                title={`Wild Lv${area.level[0]}-${area.level[1]} — bấm để dời tới đây`}
-                style={{
-                  fontSize: 11,
-                  padding: '4px 9px',
-                  borderRadius: 999,
-                  border: `1px solid ${isHere ? 'var(--mint)' : 'var(--line)'}`,
-                  background: isHere ? 'var(--mint-dim)' : 'var(--bg-deep)',
-                  color: isHere ? '#0d1a16' : 'var(--text-mid)',
-                  cursor: 'pointer',
-                  fontWeight: isHere ? 700 : 400,
-                }}
-              >
-                {isHere ? '● ' : ''}
-                {area.name}
-                <span style={{ opacity: 0.65, marginLeft: 4 }}>
-                  Lv{area.level[0]}-{area.level[1]}
-                </span>
-              </button>
-            </React.Fragment>
-          )
-        })}
+      <div className="region-map-layout">
+        <MapCanvas regionKey={region.key} location={location} />
+        <AreaList region={region} location={location} onSetLocation={onSetLocation} />
       </div>
 
-      <p style={{ fontSize: 11, color: 'var(--text-dim)', margin: '10px 0 0' }}>
-        Vị trí tự cập nhật khi chính văn nhắc địa danh (VD "cả nhóm tới Cerulean City") — dò sai
-        thì bấm chỉnh tay ở trên. Level Pokémon hoang dã khi bấm pokeball sẽ random theo dải của
-        khu vực hiện tại.
-      </p>
+      <div style={{ marginTop: 11, color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65 }}>
+        App vẫn tự dò địa danh trong chính văn. Danh sách bên phải chỉ dùng để sửa khi AI khai thiếu hoặc dò nhầm vị trí.
+      </div>
     </div>
   )
 }

@@ -1,53 +1,58 @@
 import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
-import { MECHANIC_PERKS, applyPerksToMon, hasPerk, resolveMechanicEffects, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
+import {
+  applyPerksToMon,
+  resolveMechanicEffects,
+  describeCustomMechanicEffects,
+  syncTraitGrantedItems,
+} from '../data/playerPerks.js'
 
-// ============ SỬA TÍNH CÁCH & THIÊN PHÚ GIỮA TRUYỆN (đợt 70) ============
-// Tester báo: "Kỹ Năng: Pokemon mình bắt hay sở hữu sẽ Max IV/EV... cái này
-// là KHÔNG CHỈNH SỬA ĐƯỢC hà Red" và "kĩ năng và thiên phú xài không được".
-// Đúng: đợt 61-69 chỉ cho chọn ĐÚNG MỘT LẦN ở màn tạo nhân vật, vào truyện
-// rồi là chốt cứng, không có đường quay lại — kể cả khi bấm nhầm. Bảng này
-// mở thẳng từ HUD, sửa lúc nào cũng được, lưu ngay vào localStorage.
+// ============ SỬA TÍNH CÁCH & NĂNG LỰC GIỮA TRUYỆN (đợt 74) ============
+// Toàn bộ hiệu ứng sửa số liệu chỉ được nhận từ ô "Tự mô tả…". Các lựa chọn
+// dựng sẵn chỉ là chất liệu roleplay; không còn nút bật Max IV/EV/EXP/catch
+// riêng để tránh người chơi vô tình kích hoạt cheat.
 
-/** Ô chọn thiên phú CƠ CHẾ — dùng chung cho màn tạo nhân vật và bảng sửa. */
-export function PerkPicker({ perks, onToggle }) {
+function ChoiceChip({ active, children, onClick, tone = 'amber' }) {
+  const color = tone === 'mint' ? 'var(--mint)' : 'var(--amber)'
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {MECHANIC_PERKS.map((p) => {
-        const on = hasPerk(perks, p.key)
-        return (
-          <button
-            key={p.key}
-            onClick={() => onToggle(p.key)}
-            style={{
-              textAlign: 'left',
-              border: `1px solid ${on ? 'var(--mint)' : 'var(--line)'}`,
-              background: on ? 'rgba(120,200,170,0.07)' : 'transparent',
-              borderRadius: 8,
-              padding: '9px 11px',
-              cursor: 'pointer',
-              color: 'inherit',
-            }}
-          >
-            <div style={{ fontSize: 12.5, color: on ? 'var(--mint)' : 'var(--text-mid)', fontWeight: 600 }}>
-              {on ? '☑' : '☐'} {p.label} <span style={{ opacity: 0.75, fontWeight: 400 }}>— {p.short}</span>
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.6 }}>{p.desc}</div>
-          </button>
-        )
-      })}
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: `1px solid ${active ? color : 'var(--line)'}`,
+        color: active ? color : 'var(--text-mid)',
+        background: active ? `color-mix(in srgb, ${color} 9%, transparent)` : 'var(--bg-deep)',
+        borderRadius: 999,
+        padding: '7px 13px',
+        fontSize: 12,
+        cursor: 'pointer',
+        transition: 'transform .15s ease, border-color .15s ease, background .15s ease',
+      }}
+    >
+      {active ? '● ' : ''}{children}
+    </button>
+  )
+}
+
+function SectionHeading({ eyebrow, title, note }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ color: 'var(--amber)', fontSize: 9.5, fontWeight: 800, letterSpacing: '.14em' }}>{eyebrow}</div>
+      <div style={{ color: 'var(--text-hi)', fontSize: 15, fontWeight: 750, marginTop: 2 }}>{title}</div>
+      {note && <div style={{ color: 'var(--text-dim)', fontSize: 10.5, marginTop: 3, lineHeight: 1.55 }}>{note}</div>}
     </div>
   )
 }
 
 export default function TraitsModal({ onClose }) {
-  const { playerTraits, setPlayerTraits, party, setParty, playerMon, setPlayerMon, setInventory } = useGame()
+  const { playerTraits, setPlayerTraits, party, setParty, setPlayerMon, setInventory } = useGame()
   const [draft, setDraft] = useState(() => ({
     personality: playerTraits?.personality ?? [],
     superpower: playerTraits?.superpower ?? 'none',
     customPower: playerTraits?.customPower ?? '',
-    perks: playerTraits?.perks ?? [],
+    // Giữ field để save cũ không vỡ, nhưng đợt 74 luôn vô hiệu hoá perk dựng sẵn.
+    perks: [],
   }))
 
   function togglePersonality(key) {
@@ -61,132 +66,138 @@ export default function TraitsModal({ onClose }) {
     }))
   }
 
-  function togglePerk(key) {
-    setDraft((d) => ({
-      ...d,
-      perks: d.perks.includes(key) ? d.perks.filter((k) => k !== key) : [...d.perks, key],
-    }))
-  }
-
   const detectedCustom = describeCustomMechanicEffects(draft)
   const resolvedEffects = resolveMechanicEffects(draft)
 
   function save() {
-    setPlayerTraits(draft)
-    // ÁP NGAY CHO ĐỘI HÌNH HIỆN TẠI. Nếu chỉ áp cho Pokémon nhận SAU khi bật
-    // thì tester bật lên sẽ chẳng thấy gì đổi và lại báo "xài không được" —
-    // nên bật "Huyết Thống Hoàn Mỹ" là cả đội đang có được nâng luôn.
-    // Chỉ NÂNG chỉ số, không bao giờ hạ: tắt perk thì Pokémon giữ nguyên
-    // những gì đã có (không tịch thu lại của người chơi).
+    const nextTraits = { ...draft, perks: [] }
+    setPlayerTraits(nextTraits)
+
+    // Chỉ áp cơ chế khi CHÍNH ô Tự mô tả nhận diện được luật tương ứng.
     if (resolvedEffects.maxIvEv) {
-      setParty((cur) => (cur ?? []).map((m) => applyPerksToMon(m, draft)))
-      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, draft) : cur))
+      setParty((cur) => (cur ?? []).map((m) => applyPerksToMon(m, nextTraits)))
+      setPlayerMon((cur) => (cur ? applyPerksToMon(cur, nextTraits) : cur))
     }
-    // Năng lực "Kẹo Hiếm vô hạn" tạo vật phẩm x∞ ngay khi lưu; không phải
-    // chờ model nhớ phát [[ITEM]] ở lượt sau nữa.
-    setInventory((cur) => syncTraitGrantedItems(cur, draft))
+    setInventory((cur) => syncTraitGrantedItems(cur, nextTraits))
     onClose()
   }
-
-  const monCount = (party ?? []).length
 
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 95, padding: 20 }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 95, padding: 18,
+        display: 'grid', placeItems: 'center',
+        background: 'radial-gradient(circle at 50% 16%, rgba(120,200,170,.13), transparent 38%), rgba(3,8,12,.78)',
+        backdropFilter: 'blur(8px)',
+      }}
     >
-      <div onClick={(e) => e.stopPropagation()} className="panel" style={{ width: 'min(560px, 96vw)', maxHeight: '88vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span className="page-title" style={{ margin: 0 }}>Tính cách &amp; Thiên phú</span>
-          <button className="btn" style={{ padding: '4px 10px' }} onClick={onClose}>Đóng</button>
-        </div>
-
-        <div style={{ fontSize: 12, color: 'var(--text-mid)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-          Tính cách <span style={{ color: 'var(--text-dim)', textTransform: 'none' }}>(tối đa 4)</span>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
-          {PERSONALITY_TRAITS.map((t) => {
-            const on = draft.personality.includes(t.key)
-            return (
-              <button
-                key={t.key}
-                onClick={() => togglePersonality(t.key)}
-                style={{
-                  border: `1px solid ${on ? 'var(--amber)' : 'var(--line)'}`,
-                  color: on ? 'var(--amber)' : 'var(--text-mid)',
-                  background: 'transparent', borderRadius: 999, padding: '5px 12px',
-                  fontSize: 12, cursor: 'pointer',
-                }}
-              >
-                {t.label}
-              </button>
-            )
-          })}
-        </div>
-
-        <div style={{ fontSize: 12, color: 'var(--text-mid)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.6 }}>
-          Siêu năng lực <span style={{ color: 'var(--text-dim)', textTransform: 'none' }}>(ảnh hưởng LỜI KỂ)</span>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {SUPERPOWERS.map((p) => (
-            <button
-              key={p.key}
-              onClick={() => setDraft((d) => ({ ...d, superpower: p.key }))}
-              style={{
-                border: `1px solid ${draft.superpower === p.key ? 'var(--amber)' : 'var(--line)'}`,
-                color: draft.superpower === p.key ? 'var(--amber)' : 'var(--text-mid)',
-                background: 'transparent', borderRadius: 999, padding: '5px 12px',
-                fontSize: 12, cursor: 'pointer',
-              }}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        {draft.superpower === 'custom' && (
-          <textarea
-            className="input"
-            style={{ width: '100%', marginTop: 10, minHeight: 70 }}
-            placeholder="Mô tả năng lực riêng của bạn…"
-            value={draft.customPower}
-            onChange={(e) => setDraft((d) => ({ ...d, customPower: e.target.value }))}
-          />
-        )}
-        {draft.superpower === 'custom' && (
-          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6, lineHeight: 1.7 }}>
-            Đây là chỗ duy nhất bạn tự đặt luật cho nhân vật của mình. AI sẽ tôn trọng đúng những gì
-            bạn viết và dùng tag để biến nó thành số liệu thật khi cần (nhận vật phẩm, tiền, Pokémon…).
-            Viết càng cụ thể thì càng chạy đúng.
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="panel"
+        style={{
+          width: 'min(760px, 96vw)', maxHeight: '91vh', overflow: 'hidden', padding: 0,
+          borderRadius: 16, boxShadow: '0 28px 90px rgba(0,0,0,.52)',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16,
+            padding: '16px 18px', borderBottom: '1px solid var(--line)',
+            background: 'linear-gradient(135deg, rgba(232,184,74,.09), rgba(120,200,170,.06))',
+          }}
+        >
+          <div>
+            <div style={{ color: 'var(--amber)', fontSize: 9.5, fontWeight: 800, letterSpacing: '.15em' }}>HỒ SƠ NHÂN VẬT</div>
+            <div className="page-title" style={{ margin: '3px 0 0' }}>Tính cách &amp; năng lực</div>
           </div>
-        )}
-        {draft.superpower === 'custom' && draft.customPower.trim() && (
-          <div style={{ marginTop: 8, padding: '8px 10px', border: '1px solid var(--line)', borderRadius: 8, fontSize: 10.5, lineHeight: 1.7 }}>
-            <div style={{ color: 'var(--mint)', fontWeight: 700, marginBottom: 3 }}>⚙ App nhận diện cơ chế:</div>
-            {detectedCustom.length > 0 ? detectedCustom.map((label) => (
-              <div key={label} style={{ color: 'var(--text-mid)' }}>• {label}</div>
-            )) : (
-              <div style={{ color: 'var(--text-dim)' }}>
-                Chưa thấy hiệu ứng số liệu đủ rõ — đoạn này vẫn ảnh hưởng lời kể. Mẫu dễ nhận: “EXP sau trận ×3”,
-                “Kẹo Hiếm vô hạn”, “cả đội dù không ra trận vẫn nhận EXP”, “Pokémon sở hữu Max IV/EV”.
+          <button className="btn" style={{ padding: '7px 12px' }} onClick={onClose}>✕ Đóng</button>
+        </div>
+
+        <div style={{ padding: 18, overflowY: 'auto', maxHeight: 'calc(91vh - 132px)' }}>
+          <section style={{ padding: 14, border: '1px solid var(--line)', borderRadius: 12, background: 'var(--bg-deep)' }}>
+            <SectionHeading
+              eyebrow="TÍNH KHÍ"
+              title="Nhân vật sẽ phản ứng như thế nào?"
+              note="Chọn tối đa 4 nét. Đây là chỉ dẫn nhất quán cho lời kể, không sửa chỉ số game."
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {PERSONALITY_TRAITS.map((t) => (
+                <ChoiceChip key={t.key} active={draft.personality.includes(t.key)} onClick={() => togglePersonality(t.key)}>
+                  {t.label}
+                </ChoiceChip>
+              ))}
+            </div>
+          </section>
+
+          <section style={{ marginTop: 14, padding: 14, border: '1px solid var(--line)', borderRadius: 12, background: 'var(--bg-deep)' }}>
+            <SectionHeading
+              eyebrow="NĂNG LỰC"
+              title="Chọn chất liệu roleplay hoặc tự viết luật riêng"
+              note="Các lựa chọn có sẵn chỉ ảnh hưởng lời kể. Muốn Max IV/EV, nhân EXP, Kẹo Hiếm vô hạn… phải chọn “Tự mô tả…”."
+            />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {SUPERPOWERS.map((p) => (
+                <ChoiceChip
+                  key={p.key}
+                  active={draft.superpower === p.key}
+                  tone={p.key === 'custom' ? 'mint' : 'amber'}
+                  onClick={() => setDraft((d) => ({ ...d, superpower: p.key }))}
+                >
+                  {p.label}
+                </ChoiceChip>
+              ))}
+            </div>
+
+            {draft.superpower === 'custom' && (
+              <>
+                <textarea
+                  className="input"
+                  style={{ width: '100%', marginTop: 12, minHeight: 112, resize: 'vertical', lineHeight: 1.65 }}
+                  placeholder={'Viết rõ luật bạn muốn. Ví dụ:\n• Pokémon sở hữu Max IV/EV\n• EXP sau trận ×3\n• Cả đội dù không ra trận vẫn nhận EXP\n• Kẹo Hiếm vô hạn'}
+                  value={draft.customPower}
+                  onChange={(e) => setDraft((d) => ({ ...d, customPower: e.target.value }))}
+                />
+
+                <div
+                  style={{
+                    marginTop: 10, borderRadius: 10, padding: '11px 12px',
+                    border: `1px solid ${detectedCustom.length ? 'var(--mint)' : 'var(--line)'}`,
+                    background: detectedCustom.length ? 'rgba(120,200,170,.06)' : 'rgba(255,255,255,.015)',
+                  }}
+                >
+                  <div style={{ color: detectedCustom.length ? 'var(--mint)' : 'var(--text-mid)', fontWeight: 750, fontSize: 11.5 }}>
+                    {detectedCustom.length ? '✓ App đã nhận diện cơ chế' : '○ Chưa có cơ chế số liệu rõ ràng'}
+                  </div>
+                  {detectedCustom.length > 0 ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 7, marginTop: 9 }}>
+                      {detectedCustom.map((label) => (
+                        <div key={label} style={{ padding: '7px 9px', borderRadius: 8, background: 'rgba(0,0,0,.16)', color: 'var(--text-hi)', fontSize: 11 }}>
+                          ⚙ {label}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65, marginTop: 6 }}>
+                      Đoạn mô tả vẫn đi vào lời kể. App chỉ chạm vào biến khi câu viết đủ rõ và thuộc cơ chế đang hỗ trợ.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {draft.superpower !== 'custom' && (
+              <div style={{ marginTop: 12, padding: '9px 11px', borderRadius: 9, border: '1px dashed var(--line)', color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65 }}>
+                Chế độ tiêu chuẩn: không Max IV/EV tự động, không nhân EXP, không Kẹo Hiếm vô hạn và không cộng tỉ lệ bắt.
               </div>
             )}
-          </div>
-        )}
-
-        <div style={{ fontSize: 12, color: 'var(--text-mid)', margin: '18px 0 6px', textTransform: 'uppercase', letterSpacing: 0.6 }}>
-          Thiên phú cơ chế <span style={{ color: 'var(--mint)', textTransform: 'none' }}>(áp THẲNG vào số liệu game)</span>
-        </div>
-        <PerkPicker perks={draft.perks} onToggle={togglePerk} />
-
-        <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 12, lineHeight: 1.7 }}>
-          Bật <strong>Huyết Thống Hoàn Mỹ</strong> sẽ nâng luôn {monCount > 0 ? `${monCount} Pokémon đang có trong đội` : 'mọi Pokémon bạn nhận sau này'}.
-          Tắt perk KHÔNG thu hồi chỉ số đã nâng — Pokémon giữ nguyên những gì đã có.
+          </section>
         </div>
 
-        <div className="btn-row" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 9, padding: '13px 18px', borderTop: '1px solid var(--line)', background: 'var(--bg-panel)' }}>
           <button className="btn" onClick={onClose}>Huỷ</button>
-          <button className="btn" style={{ borderColor: 'var(--mint)', color: 'var(--mint)' }} onClick={save}>
-            Lưu thay đổi
+          <button className="btn" style={{ borderColor: 'var(--mint)', color: 'var(--mint)', paddingInline: 18 }} onClick={save}>
+            ✓ Lưu thay đổi
           </button>
         </div>
       </div>

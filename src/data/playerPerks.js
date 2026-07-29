@@ -17,39 +17,12 @@ const EV_STAT_CAP = 252
 const EV_TOTAL_CAP = 510
 const MAX_CUSTOM_MULTIPLIER = 100
 
-export const MECHANIC_PERKS = [
-  {
-    key: 'maxIvEv',
-    label: 'Huyết Thống Hoàn Mỹ',
-    short: 'Max IV/EV khi sở hữu',
-    desc:
-      'Mọi Pokémon vào ĐỘI HÌNH của bạn (được tặng, bắt được, dụ theo) lập tức đạt IV 31 toàn bộ ' +
-      'và EV kịch trần 252/252/6 dồn vào 3 chỉ số mạnh nhất của loài. Chỉ số được tính lại ngay.',
-    note:
-      'THIÊN PHÚ "Huyết Thống Hoàn Mỹ": mọi Pokémon về tay người chơi đều bộc lộ trọn vẹn tiềm năng ' +
-      'huyết thống — khoẻ hơn hẳn cá thể cùng loài cùng cấp. Hãy phản ánh điều này trong lời kể (người ' +
-      'am hiểu nhìn ra ngay đây là cá thể phẩm chất hiếm thấy), nhưng đừng biến nhân vật thành bất khả ' +
-      'chiến bại: chỉ số cao KHÔNG bù được chênh lệch level, kinh nghiệm trận mạc hay quân số.',
-  },
-  {
-    key: 'fastLearner',
-    label: 'Thiên Phú Rèn Luyện',
-    short: 'EXP luyện tập ×2',
-    desc: 'EXP nhận từ luyện tập ([[TRAIN]]) và từ ngày tháng trôi qua được nhân đôi.',
-    note:
-      'THIÊN PHÚ "Thiên Phú Rèn Luyện": người chơi có con mắt huấn luyện thiên bẩm — cùng một buổi tập, ' +
-      'Pokémon của họ tiến bộ nhanh gấp đôi người khác. Hãy để các cảnh luyện tập có sức nặng và tiến bộ rõ rệt.',
-  },
-  {
-    key: 'tamer',
-    label: 'Bàn Tay Thuần Phục',
-    short: 'Tỉ lệ bắt +15%',
-    desc: 'Cộng thẳng 15% vào tỉ lệ bắt Pokémon (vẫn bị kẹp trong khoảng 3–95% như cũ).',
-    note:
-      'THIÊN PHÚ "Bàn Tay Thuần Phục": Pokémon hoang dã bớt kháng cự trước người chơi một cách khó lý giải — ' +
-      'bóng của họ ít khi bật ra. Tả cảnh bắt Pokémon theo hướng đó, nhưng vẫn có thể thất bại.',
-  },
-]
+export const MECHANIC_PERKS = []
+
+// Đợt 74: bỏ toàn bộ thiên phú cheat dựng sẵn. Các hiệu ứng có tác động
+// số liệu (Max IV/EV, nhân EXP, Kẹo Hiếm vô hạn, cộng tỉ lệ bắt...) chỉ
+// được phép bật khi người chơi chủ động chọn "Tự mô tả…" và viết rõ luật
+// trong customPower. Save cũ còn mảng perks vẫn đọc được nhưng mảng đó vô hiệu.
 
 export function getPerk(key) {
   return MECHANIC_PERKS.find((p) => p.key === key) ?? null
@@ -168,17 +141,16 @@ export function parseCustomMechanicEffects(source) {
 
 /** Gộp perk dựng sẵn + luật tự mô tả thành một cấu hình duy nhất. */
 export function resolveMechanicEffects(source) {
-  const traits = traitsFrom(source)
+  // CHỈ phần siêu năng lực TỰ MÔ TẢ mới được bật cơ chế số liệu.
+  // `parseCustomMechanicEffects` tự trả cấu hình rỗng khi superpower !== custom.
   const custom = parseCustomMechanicEffects(source)
   return {
-    maxIvEv: hasPerk(traits.perks, 'maxIvEv') || custom.maxIvEv,
+    maxIvEv: custom.maxIvEv,
     battleExpMultiplier: custom.battleExpMultiplier,
-    // Chọn hệ số lớn hơn, KHÔNG nhân chồng ×2 perk dựng sẵn với ×3 tự viết
-    // thành ×6 ngoài ý muốn của người chơi.
-    trainingExpMultiplier: Math.max(hasPerk(traits.perks, 'fastLearner') ? 2 : 1, custom.trainingExpMultiplier),
+    trainingExpMultiplier: custom.trainingExpMultiplier,
     allPartyBattleExp: custom.allPartyBattleExp,
     infiniteRareCandy: custom.infiniteRareCandy,
-    catchRateBonus: (hasPerk(traits.perks, 'tamer') ? 15 : 0) + custom.catchRateBonus,
+    catchRateBonus: custom.catchRateBonus,
     custom,
   }
 }
@@ -234,6 +206,46 @@ function maxEvsFor(baseStats) {
     left -= grant
   }
   return evs
+}
+
+// Đợt 74: đợt 73 từng ghi đè IV/EV rồi chỉ lưu cờ `perkMark`, không lưu bản
+// gốc. Khi bỏ thiên phú dựng sẵn, để cheat không tồn tại vĩnh viễn trong save
+// cũ, cá thể có đúng cờ này sẽ được trả về một bộ IV hợp lệ, ổn định theo uid
+// và EV = 0. Dùng seed cố định để reload không reroll chỉ số liên tục.
+function seededLegacyIvs(mon) {
+  const key = `${mon?.uid ?? ''}|${mon?.name ?? ''}|${mon?.species ?? ''}|${mon?.level ?? 1}|legacy-perk`
+  let seed = 2166136261
+  for (let i = 0; i < key.length; i++) {
+    seed ^= key.charCodeAt(i)
+    seed = Math.imul(seed, 16777619)
+  }
+  const next = () => {
+    seed = Math.imul(seed ^ (seed >>> 15), 2246822519)
+    seed = Math.imul(seed ^ (seed >>> 13), 3266489917)
+    seed ^= seed >>> 16
+    return seed >>> 0
+  }
+  const roll = () => next() % 32
+  return { hp: roll(), atk: roll(), def: roll(), spa: roll(), spd: roll(), spe: roll() }
+}
+
+/**
+ * Gỡ riêng boost Max IV/EV do thiên phú dựng sẵn cũ từng áp.
+ * - Có năng lực TỰ MÔ TẢ Max IV/EV hiện tại → giữ/áp max như bình thường.
+ * - Không có → bỏ `perkMark`, trả IV về bộ hợp lệ cố định và EV về 0.
+ * Pokémon không mang cờ perk cũ tuyệt đối không bị đụng tới.
+ */
+export function normalizeLegacyPerkBoost(mon, source) {
+  if (!mon || mon.perkMark !== 'maxIvEv') return mon
+  if (resolveMechanicEffects(source).maxIvEv) return applyPerksToMon(mon, source)
+
+  const restored = {
+    ...mon,
+    ivs: seededLegacyIvs(mon),
+    evs: zeroEVs(),
+  }
+  delete restored.perkMark
+  return recomputeMonStats(restored)
 }
 
 /**
@@ -308,7 +320,7 @@ export function syncTraitGrantedItems(inventory, source) {
 }
 
 /** Note mô tả các perk dựng sẵn đang bật, chèn vào prompt mỗi lượt. */
-export function buildPerksNote(perks) {
-  const notes = (perks ?? []).map((k) => getPerk(k)?.note).filter(Boolean)
-  return notes.length ? notes.join('\n') : null
+export function buildPerksNote() {
+  // Giữ export để save/code cũ không vỡ, nhưng thiên phú dựng sẵn đã bị xoá.
+  return null
 }

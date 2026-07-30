@@ -2415,3 +2415,8 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 **BỘ CHIÊU CÓ TÍNH CHIẾN THUẬT NHƯNG VẪN HỢP LỆ.** Thuật toán vẫn ưu tiên Atk/SpA, STAB, coverage và chiêu đặc trưng, đồng thời giữ một chiêu hỗ trợ hữu ích khi phù hợp. Mọi chiêu được chọn đều phải nằm trong learnset hợp lệ của loài và không vượt mốc level; tối đa 4 chiêu. Bộ fallback chỉ dùng trong lúc dữ liệu mạng chưa sẵn sàng và sẽ được thay tự động sau đó.
 
 **Kiểm tra trong gói bàn giao:** regression đợt 73–83 đều PASS. Test đợt 83 bao phủ wild không học chiêu tương lai/TM, trainer cấp thấp bị giới hạn TM, trainer cấp cao tối đa 2 TM, repair snapshot giữ nguyên HP/status, và fallback Gen 8 cho loài không có learnset Gen 9.
+
+## Cập nhật (đợt 84) — level đội hình Tứ Thiên Vương / Champion
+
+**LIÊN ĐOÀN DÙNG BẢNG LEVEL CỐ ĐỊNH, KHÔNG CÒN RƠI VỀ CÔNG THỨC TRAINER THƯỜNG.** Mỗi Tứ Thiên Vương có đội 6 Pokémon theo thứ tự `Lv85, Lv85, Lv90, Lv90, Lv95, Lv95`; sau đủ sáu ô, người tiếp theo bắt đầu lại từ cặp Lv85. Champion có đúng `Lv98, Lv98, Lv99, Lv99, Lv100, Lv100`. App lưu `trainerTeamSlot` vào message để các marker battle nối tiếp lấy đúng ô; đấu đôi tiêu thụ hai ô cùng lúc. Quy tắc này ghi đè level canon thấp hơn trong dữ liệu tham khảo và không bị `realTeam` nhân vượt Lv100.
+

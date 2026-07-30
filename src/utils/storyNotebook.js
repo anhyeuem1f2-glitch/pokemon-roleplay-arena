@@ -8,6 +8,8 @@
 // Mục đích: chống AI bịa quá khứ — tên/tuổi/nghề/đội Pokémon của NPC, lời
 // hứa, mốc thời gian... đều có "giấy trắng mực đen".
 
+import { deterministicNpcId } from '../data/persistentIdentity.js'
+
 const STORAGE_KEY = 'trainer-arena:story-notebook-v1'
 const MAX_NPCS = 80
 const MAX_FACTS = 250
@@ -58,7 +60,7 @@ export function subscribeNotebook(fn) {
 
 export function getNotebook() {
   const s = load()
-  return { npcs: [...s.npcs], facts: [...s.facts] }
+  return { npcs: s.npcs.map(normalizeNpc), facts: [...s.facts] }
 }
 
 export function getNotebookCounts() {
@@ -72,16 +74,64 @@ export function clearNotebook() {
   notify()
 }
 
+function teamField(fields = {}) {
+  const key = Object.keys(fields).find((field) => /^(đội|doi|team)$/i.test(field.trim()))
+  return key ? fields[key] : ''
+}
+
+export function parseNpcTeam(value) {
+  return String(value ?? '').split(/[,;\n]+/).map((part, index) => {
+    const match = part.trim().match(/^(.+?)(?:\s+Lv\.?\s*(\d+))?$/i)
+    if (!match?.[1]) return null
+    return {
+      slot: index,
+      species: match[1].trim(),
+      level: Math.max(1, Math.min(200, Number(match[2]) || 10)),
+    }
+  }).filter(Boolean).slice(0, 6)
+}
+
+function normalizeNpc(npc) {
+  if (!npc) return npc
+  const parsedTeam = parseNpcTeam(teamField(npc.fields))
+  return {
+    ...npc,
+    id: npc.id || deterministicNpcId(npc.name),
+    team: parsedTeam.length ? parsedTeam : (Array.isArray(npc.team) ? npc.team : []),
+    encounters: Number(npc.encounters) || 0,
+    battles: Number(npc.battles) || 0,
+  }
+}
+
 /** Upsert NPC theo tên (không phân biệt hoa thường) — field mới GHI ĐÈ field cũ cùng tên, field cũ khác giữ nguyên. */
 export function upsertNpc(name, fields, turn) {
   const s = load()
   const idx = s.npcs.findIndex((n) => n.name.toLowerCase() === name.toLowerCase())
   if (idx >= 0) {
-    s.npcs[idx] = { ...s.npcs[idx], fields: { ...s.npcs[idx].fields, ...fields }, turn }
+    const merged = { ...s.npcs[idx], fields: { ...s.npcs[idx].fields, ...fields }, turn }
+    s.npcs[idx] = normalizeNpc({ ...merged, encounters: (Number(merged.encounters) || 0) + 1 })
   } else {
-    s.npcs.push({ name, fields, turn })
+    s.npcs.push(normalizeNpc({ id: deterministicNpcId(name), name, fields, turn, encounters: 1, battles: 0 }))
     if (s.npcs.length > MAX_NPCS) s.npcs.shift()
   }
+  persist()
+  notify()
+}
+
+/** NPC có tên dài nhất được nhắc trong đoạn — dùng để tái sử dụng đội cũ. */
+export function findNpcProfileInText(text) {
+  const lower = String(text ?? '').toLowerCase()
+  return load().npcs.map(normalizeNpc)
+    .filter((npc) => npc.name.length >= 2 && lower.includes(npc.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)[0] ?? null
+}
+
+export function recordNpcBattle(npcId, team = null) {
+  const s = load()
+  const at = s.npcs.findIndex((npc) => normalizeNpc(npc).id === npcId)
+  if (at < 0) return
+  const npc = normalizeNpc(s.npcs[at])
+  s.npcs[at] = { ...npc, team: Array.isArray(team) && team.length ? team : npc.team, battles: npc.battles + 1 }
   persist()
   notify()
 }
@@ -118,10 +168,11 @@ export function removeFact(fact) {
 
 /** Format 1 NPC thành 1 dòng gọn cho prompt. */
 export function formatNpcLine(npc) {
-  const parts = Object.entries(npc.fields ?? {})
+  const stable = normalizeNpc(npc)
+  const parts = Object.entries(stable.fields ?? {})
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`)
-  return `NPC ${npc.name}${parts.length ? ` — ${parts.join('; ')}` : ''}`
+  return `NPC ${stable.name} [mã ${stable.id}]${parts.length ? ` — ${parts.join('; ')}` : ''}${stable.team.length ? `; đội cố định: ${stable.team.map((m) => `${m.species} Lv${m.level}`).join(', ')}` : ''}; đã gặp ${stable.encounters} lần, đấu ${stable.battles} trận`
 }
 
 /**

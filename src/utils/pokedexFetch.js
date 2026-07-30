@@ -11,11 +11,28 @@ import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './brows
 // cho 1 số loài nhất định, và những loài đó ĐÃ nằm sẵn trong dữ liệu tải về.
 
 const POKEDEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
-const CACHE_KEY = 'trainer-arena:pokedex-cache-v10'
+// v11 giữ dex number/gen/form/tags để Pokédex hành trình và encounter sinh
+// thái không phải đoán từ tên. Giữ tên v10 ở hằng legacy để regression cũ
+// nhận diện đường migration và localStorage cũ được dọn sau khi tải lại.
+const CACHE_KEY = 'trainer-arena:pokedex-cache-v11'
+const LEGACY_CACHE_KEY = 'trainer-arena:pokedex-cache-v10'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 function toID(text) {
   return String(text ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function generationFromNum(num) {
+  if (!Number.isFinite(num) || num <= 0) return null
+  if (num <= 151) return 1
+  if (num <= 251) return 2
+  if (num <= 386) return 3
+  if (num <= 493) return 4
+  if (num <= 649) return 5
+  if (num <= 721) return 6
+  if (num <= 809) return 7
+  if (num <= 905) return 8
+  return 9
 }
 
 function normalizeEntry(species, key) {
@@ -41,6 +58,11 @@ function normalizeEntry(species, key) {
     name: species.name,
     species: key,
     spriteId,
+    num: Number.isFinite(species.num) ? species.num : null,
+    gen: Number.isFinite(species.gen) ? species.gen : generationFromNum(species.num),
+    forme: species.forme ?? null,
+    tags: Array.isArray(species.tags) ? [...species.tags] : [],
+    isNonstandard: species.isNonstandard ?? null,
     types: species.types.map((t) => t.toLowerCase()),
     // Base stats THẬT (hp/atk/def/spa/spd/spe) — dùng để tính HP và sát
     // thương đúng theo từng loài, thay vì công thức chung chung khiến 2 loài
@@ -93,6 +115,7 @@ export async function loadFullPokedex() {
   const cachedDb = await readLargeCache(CACHE_KEY)
   if (cachedDb && Date.now() - cachedDb.savedAt < CACHE_MAX_AGE && cachedDb.list?.length > 500) {
     removeLegacyLocalCache(CACHE_KEY)
+    removeLegacyLocalCache(LEGACY_CACHE_KEY)
     return cachedDb.list
   }
 
@@ -104,6 +127,7 @@ export async function loadFullPokedex() {
       if (Date.now() - parsed.savedAt < CACHE_MAX_AGE && parsed.list?.length > 500) {
         await writeLargeCache(CACHE_KEY, parsed)
         removeLegacyLocalCache(CACHE_KEY)
+        removeLegacyLocalCache(LEGACY_CACHE_KEY)
         return parsed.list
       }
     }
@@ -124,5 +148,6 @@ export async function loadFullPokedex() {
 
   await writeLargeCache(CACHE_KEY, { savedAt: Date.now(), list })
   removeLegacyLocalCache(CACHE_KEY)
+  removeLegacyLocalCache(LEGACY_CACHE_KEY)
   return list
 }

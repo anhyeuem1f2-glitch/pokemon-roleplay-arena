@@ -1,3 +1,5 @@
+import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
+
 // ============ GIAO THỨC TRẠNG THÁI TRONG CHÍNH VĂN (đợt 24) ============
 // Cùng triết lý với [[BATTLE]] và [[DMG]]: AI kể chuyện bằng lời, còn các
 // thay đổi TRẠNG THÁI GAME (tiền, hảo cảm NPC, thương tích cơ thể, vào cửa
@@ -32,7 +34,12 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Nhân vật BƯỚC VÀO TRUNG TÂM POKÉMON (Pokémon Center — nơi y tá Joy chữa trị): [[POKECENTER Tên trung tâm]] — hệ thống sẽ hiện 2 nút cho người chơi tự bấm: CHỮA TRỊ và MÁY PC. Vì vậy trong lời kể ĐỪNG tự ý viết rằng Pokémon đã được chữa xong hay đã đổi đội hình — chỉ tả cảnh bước vào, y tá chào hỏi, rồi DỪNG LẠI để người chơi chọn. Khi nhân vật rời đi thì kể rõ là đã rời khỏi trung tâm.\n- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]]; nếu biết vị trí cụ thể trên bản đồ thì thêm toạ độ phần trăm [[MOVE Tên khu vực | x=42 | y=58]] (x: trái→phải 0-100, y: trên→dưới 0-100). VD [[MOVE Cerulean City | x=66 | y=24]]. Chỉ tag khi THỰC SỰ đổi chỗ; không bịa x/y khi văn bản không đủ rõ.
 - Nhân vật hoặc Pokémon ĂN UỐNG / bỏ bữa / lao lực rõ rệt trong diễn biến: [[HUNGER người+25]] hoặc [[HUNGER pokemon+30]] (độ NO 0-100; ăn = cộng, đói lả/vận động nặng = trừ; app tự trừ dần theo ngày nên chỉ tag khi có sự kiện rõ ràng).
 - Thời gian trong truyện trôi qua (ngủ một đêm, đi đường nhiều ngày, chờ đợi...): [[DATE +1]] (số ngày trôi); chuyển buổi trong cùng ngày: [[DATE buổi=sáng|trưa|chiều|tối|đêm]]. Ngày giờ hiện tại luôn được cung cấp trong ngữ cảnh — lời kể về thời gian phải khớp với nó.
-- NPC CÓ TÊN xuất hiện lần đầu, hoặc lộ thông tin quan trọng mới: khai báo hồ sơ bằng [[NPC Tên | tuổi=24 | nghề=Kiểm lâm | đội=Pikachu Lv25, Luxray Lv30 | ghi chú=em gái của trưởng gym]] — các trường tuổi/nghề/đội/ghi chú đều tuỳ chọn, cập nhật NPC cũ thì chỉ cần ghi trường thay đổi. QUY TẮC TẠO NPC: tên phải ĐA DẠNG đúng chất thế giới Pokémon (đừng lặp lại mãi vài cái tên quen tay như "Elara"); tuổi + nghề nghiệp hợp bối cảnh (dân thường đa số KHÔNG phải trainer); nếu là trainer thì đội hình 1-4 Pokémon hợp nghề/vùng, LEVEL PHẢI HỢP LÝ với khu vực hiện tại và trình độ người chơi (dân thường/tân binh thấp, kiểm lâm/cảnh sát trung bình, gym leader cao) — không lạm phát level.
+- NPC CÓ TÊN xuất hiện lần đầu, hoặc lộ thông tin quan trọng mới: khai báo hồ sơ bằng [[NPC Tên | tuổi=24 | nghề=Kiểm lâm | đội=Pikachu Lv25, Luxray Lv30 | ghi chú=em gái của trưởng gym]] — các trường tuổi/nghề/đội/ghi chú đều tuỳ chọn, cập nhật NPC cũ thì chỉ cần ghi trường thay đổi. QUY TẮC TẠO NPC: tên phải ĐA DẠNG đúng chất thế giới Pokémon (đừng lặp lại mãi vài cái tên quen tay như "Elara"); tuổi + nghề nghiệp hợp bối cảnh (dân thường đa số KHÔNG phải trainer); nếu là trainer thì đội hình 1-6 Pokémon hợp nghề/vùng/kinh nghiệm (tân binh thường 1-2, trainer lâu năm 3-6), LEVEL PHẢI HỢP LÝ với khu vực hiện tại và trình độ thật của trainer (dân thường/tân binh thấp, kiểm lâm/cảnh sát trung bình, gym leader cao) — không lạm phát level chỉ để đuổi theo người chơi. NPC gặp lại phải giữ đúng đội đã lưu; chỉ cập nhật khi truyện thật sự cho thấy họ bắt thêm, tiến hoá hoặc luyện đội mạnh lên, không reroll đội theo mỗi lần xuất hiện.
+- Khi người chơi THỰC SỰ được trao huy hiệu chính thức: [[BADGE Tên huy hiệu | region=Kanto | gym=Pewter Gym | leader=Brock]]. Huy hiệu là sưu tầm tự chọn trong sandbox; không trao chỉ vì thắng một trận không chính thức.
+- Nhiệm vụ được nhận/cập nhật/kết thúc rõ ràng: [[QUEST mã-ngắn | status=active|completed|failed|paused | title=... | giver=... | objective=... | reward=... | region=...]]. Dùng cùng một mã cho mọi lần cập nhật; chỉ completed khi chính văn xác nhận mục tiêu đã hoàn tất.
+- Danh tiếng với PHE PHÁI thay đổi: [[REP Tên phe=+5 | lý do]]; khác với REL của một NPC. Phạm tội, cứu người, phá kế hoạch hoặc hoàn thành việc cho phe phải có hậu quả hợp lý.
+- Mức TRUY NÃ thay đổi vì hành vi phạm pháp/được minh oan/nộp phạt: [[WANTED +1 | region=Kanto | reason=phá kho hàng | bounty=500]]. Số âm dùng khi giảm truy nã; không tự xoá chỉ vì sang lượt khác.
+- Pokémon nhận Ribbon/Mark trong một sự kiện thật: [[RIBBON Tên Pokémon | Tên Ribbon]] hoặc [[MARK Tên Pokémon | Tên Mark]]. Shiny là thuộc tính cố định lúc sinh cá thể, tuyệt đối không đổi bằng tag hay lời kể.
 - Pokémon được LUYỆN TẬP có chủ đích trong lượt này (tập chiêu, chạy bền, đối luyện, huấn luyện cùng NPC...): [[TRAIN cường độ]] với cường độ 1-3 (1 = tập nhẹ/ngắn, 2 = tập nghiêm túc cả buổi, 3 = tập khổ luyện cật lực). VD: [[TRAIN 2]]. Chỉ khai khi thực sự có cảnh luyện tập, KHÔNG khai cho việc đi đường hay đánh trận thường.
 - Sự kiện/thoả thuận/mốc thời gian/địa danh QUAN TRỌNG cần nhớ lâu dài: [[FACT từ khoá 1, từ khoá 2 | nội dung CHI TIẾT]] — hoạt động như một entry World Info: phần trước dấu | là 1-3 TỪ KHOÁ KÍCH HOẠT (cách nhau bằng dấu phẩy: tên người, tên Pokémon, địa danh, tên vật phẩm...), phần sau là NỘI DUNG ĐẦY ĐỦ của sự kiện (ai, cái gì, ở đâu, điều kiện/hệ quả) để lần sau đọc lại là hiểu ngay ngữ cảnh — KHÔNG viết cụt kiểu vài chữ. VD: [[FACT Cubone, bà lão Lavender | Ngày 12/4 tại Lavender, người chơi hứa với bà lão Yui sẽ quay lại giúp tìm con Cubone bị mất trước mùa đông; bà hứa trả công bằng chiếc Moon Stone gia truyền]]. Chỉ ghi thông tin THẬT đã xảy ra, mỗi fact 1 dòng riêng.
 Không bịa thay đổi không có trong diễn biến. Không dùng tag nào khác ngoài danh sách trên (và [[BATTLE]]). Mọi tag ĐẶT Ở CUỐI TIN, mỗi tag 1 dòng riêng — KHÔNG nhét tag vào giữa câu văn hay vào phần suy nghĩ. QUY TẮC CHĂM GHI SỔ (quan trọng): lượt nào xuất hiện NHÂN VẬT CÓ TÊN mới → PHẢI có [[NPC]]; lượt nào có sự kiện/thoả thuận/lời hứa/vật phẩm/địa điểm đáng nhớ lại về sau → PHẢI có [[FACT]] với nội dung chi tiết. Thà ghi hơi nhiều còn hơn bỏ sót — sổ tay này là trí nhớ dài hạn duy nhất của truyện.`
@@ -72,6 +79,12 @@ const SHOP_RE = /\[\[\s*SHOP\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
 // đổi — vì AI không hề có cách nào bỏ đồ vào túi. Nay có.
 const ITEM_RE = /\[\[\s*ITEM\s+([^\]|]+?)(?:\s*\|\s*([+-]?\d+))?\s*\]\]/gi
 const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
+const BADGE_RE = /\[\[\s*BADGE\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
+const QUEST_RE = /\[\[\s*QUEST\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
+const REP_RE = /\[\[\s*REP\s+([^=\]|]+?)\s*=\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi
+const WANTED_RE = /\[\[\s*WANTED\s+([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi
+const RIBBON_RE = /\[\[\s*RIBBON\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
+const MARK_RE = /\[\[\s*MARK\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 
 /**
  * Parse mọi tag trạng thái trong text. Trả về:
@@ -81,7 +94,7 @@ const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
  * Regex không neo dòng: model thực tế thường nhét tag giữa câu.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], equipment: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], equipment: [], hunger: [], moves: [], moveDirectives: [], items: [], badges: [], quests: [], reputations: [], wanted: [], collectionAwards: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
   const moneyEntries = []
   const rel = []
@@ -101,6 +114,11 @@ export function parseStoryStateTags(text) {
   let datePart = null
   let pokecenter = null
   const items = []
+  const badges = []
+  const quests = []
+  const reputations = []
+  const wanted = []
+  const collectionAwards = []
 
   for (const m of text.matchAll(MONEY_RE)) {
     const value = parseInt(m[1], 10)
@@ -225,6 +243,19 @@ export function parseStoryStateTags(text) {
     const who = /^p(okemon|okémon)$/i.test(m[1]) || m[1].toLowerCase().startsWith('pok') ? 'mon' : 'player'
     hunger.push({ who, delta: parseInt(m[2], 10) })
   }
+  for (const m of text.matchAll(BADGE_RE)) badges.push(parseBadgeDirective(m[1], m[2]))
+  for (const m of text.matchAll(QUEST_RE)) quests.push(parseQuestDirective(m[1], m[2]))
+  for (const m of text.matchAll(REP_RE)) reputations.push({ name: m[1].trim(), delta: parseInt(m[2], 10), note: (m[3] ?? '').trim() })
+  for (const m of text.matchAll(WANTED_RE)) {
+    const fields = {}
+    for (const segment of String(m[2] ?? '').split('|')) {
+      const at = segment.indexOf('=')
+      if (at > 0) fields[segment.slice(0, at).trim().toLowerCase()] = segment.slice(at + 1).trim()
+    }
+    wanted.push({ delta: parseInt(m[1], 10), region: fields.region ?? '', reason: fields.reason ?? '', bounty: parseInt(fields.bounty ?? '0', 10) || 0 })
+  }
+  for (const m of text.matchAll(RIBBON_RE)) collectionAwards.push({ kind: 'ribbon', target: m[1].trim(), name: m[2].trim() })
+  for (const m of text.matchAll(MARK_RE)) collectionAwards.push({ kind: 'mark', target: m[1].trim(), name: m[2].trim() })
 
   const cleaned = text
     .replace(MONEY_RE, '')
@@ -246,6 +277,12 @@ export function parseStoryStateTags(text) {
     .replace(DATE_PART_RE, '')
     .replace(MOVE_RE, '')
     .replace(HUNGER_RE, '')
+    .replace(BADGE_RE, '')
+    .replace(QUEST_RE, '')
+    .replace(REP_RE, '')
+    .replace(WANTED_RE, '')
+    .replace(RIBBON_RE, '')
+    .replace(MARK_RE, '')
     // Tag nằm giữa câu bị gỡ để lại vụn: ", ," / "( )" / 2 dấu cách — dọn nhẹ.
     .replace(/\(\s*\)/g, '')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -255,7 +292,7 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, equipment, hunger, moves, moveDirectives, items, dateAdvance,
+  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, equipment, hunger, moves, moveDirectives, items, badges, quests, reputations, wanted, collectionAwards, dateAdvance,
     training, datePart, pokecenter, cleaned }
 }
 

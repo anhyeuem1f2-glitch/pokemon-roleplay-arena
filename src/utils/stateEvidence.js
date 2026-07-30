@@ -294,6 +294,41 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     if (!ok) reject(rejected, 'fact', entry, 'nội dung FACT chưa được chính văn xác nhận đủ rõ')
     return ok
   })
+  next.badges = (parsed?.badges ?? []).filter((entry) => {
+    const ok = storySentences(prose).some((line) => mentions(line, entry.name)
+      && hasAny(line, ['huy hiệu', 'badge', 'trao', 'nhận được', 'được tặng'])
+      && !hasFutureOrConditional(line) && !hasNegation(line))
+    if (!ok) reject(rejected, 'badge', entry, `chính văn chưa xác nhận đã được trao huy hiệu ${entry.name}`)
+    return ok
+  })
+  next.quests = (parsed?.quests ?? []).filter((entry) => {
+    const target = entry.title || entry.objective
+    const actions = entry.status === 'completed' ? ['hoàn thành', 'đã xong', 'thành công', 'bàn giao']
+      : entry.status === 'failed' ? ['thất bại', 'không kịp', 'nhiệm vụ hỏng']
+        : ['nhiệm vụ', 'giao việc', 'nhờ', 'nhận lời', 'chấp nhận', 'mục tiêu']
+    const ok = storySentences(prose).some((line) => (mentions(line, target) || mentions(prose, target))
+      && hasAny(line, actions) && (entry.status === 'active' || !hasFutureOrConditional(line)))
+    if (!ok) reject(rejected, 'quest', entry, `chính văn chưa xác nhận cập nhật nhiệm vụ ${entry.title}`)
+    return ok
+  })
+  next.reputations = (parsed?.reputations ?? []).filter((entry) => {
+    const ok = mentions(prose, entry.name) && hasAny(prose, ['danh tiếng', 'uy tín', 'tin tưởng', 'kính trọng', 'căm ghét', 'thù địch', 'mất mặt', 'biết ơn'])
+    if (!ok) reject(rejected, 'rep', entry, `chính văn chưa thể hiện danh tiếng với ${entry.name} thay đổi`)
+    return ok
+  })
+  next.wanted = (parsed?.wanted ?? []).filter((entry) => {
+    const ok = hasAny(prose, entry.delta > 0
+      ? ['truy nã', 'phạm pháp', 'cảnh sát', 'bị bắt', 'tiền thưởng', 'lệnh bắt']
+      : ['xoá truy nã', 'minh oan', 'nộp phạt', 'được tha', 'huỷ lệnh bắt'])
+    if (!ok) reject(rejected, 'wanted', entry, 'chính văn chưa xác nhận mức truy nã thay đổi')
+    return ok
+  })
+  next.collectionAwards = (parsed?.collectionAwards ?? []).filter((entry) => {
+    const ok = (genericMonTarget(entry.target) || mentions(prose, entry.target)) && mentions(prose, entry.name)
+      && hasAny(prose, ['ribbon', 'ruy băng', 'mark', 'dấu ấn', 'trao', 'nhận được'])
+    if (!ok) reject(rejected, entry.kind, entry, `chính văn chưa xác nhận ${entry.target} nhận ${entry.name}`)
+    return ok
+  })
 
   // Model chính và API phụ đôi lúc lặp nguyên một tag trong cùng câu trả
   // lời. Cùng một bằng chứng chính văn chỉ được đổi biến một lần; nếu thật
@@ -311,6 +346,11 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.hunger = dedupeEntries(next.hunger, 'hunger', rejected)
   next.npcs = dedupeEntries(next.npcs, 'npc', rejected)
   next.facts = dedupeEntries(next.facts, 'fact', rejected)
+  next.badges = dedupeEntries(next.badges, 'badge', rejected)
+  next.quests = dedupeEntries(next.quests, 'quest', rejected)
+  next.reputations = dedupeEntries(next.reputations, 'rep', rejected)
+  next.wanted = dedupeEntries(next.wanted, 'wanted', rejected)
+  next.collectionAwards = dedupeEntries(next.collectionAwards, 'collection', rejected)
   if (parsed?.pokecenter) {
     const named = parsed.pokecenter.name && parsed.pokecenter.name !== 'Trung tâm Pokémon'
       ? mentions(prose, parsed.pokecenter.name) : true

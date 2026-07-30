@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
-import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression } from '../data/pokemonSpecies.js'
+import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, repairOwnedMonMoves } from '../data/pokemonSpecies.js'
 import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
@@ -663,6 +663,18 @@ export function GameProvider({ children }) {
       cancelled = true
     }
   }, [])
+
+
+  // Đợt 82: chữa save cũ bị kẹt 0-2 chiêu và bổ sung metadata chiêu đầy đủ
+  // ngay khi bảng learnset đã sẵn sàng. Không thay bộ 4 chiêu hợp lệ; chỉ
+  // chuẩn hoá object và lấp các ô bị mất bằng level-up move gần nhất.
+  useEffect(() => {
+    if (movesDbStatus !== 'ready' || !movesDb?.allMoves) return
+    const repair = (mon) => repairOwnedMonMoves(mon, movesDb)
+    setPlayerMon((cur) => repair(cur))
+    setParty((cur) => (cur ?? []).map(repair))
+    setPcBox((cur) => (cur ?? []).map(repair))
+  }, [movesDb, movesDbStatus, setParty, setPcBox, setPlayerMon])
 
   const value = {
     apiConfig,

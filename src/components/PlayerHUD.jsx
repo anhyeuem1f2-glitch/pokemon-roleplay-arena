@@ -62,7 +62,7 @@ export default function PlayerHUD({ mobile = false }) {
   const {
     playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger, playerTraits,
     party, setParty, playerMon, setPlayerMon,
-    relationships, inventory, setInventory,
+    relationships, inventory, setInventory, movesDb,
   } = useGame()
   const [infoMon, setInfoMon] = useState(null)
   // Đợt 54: bấm khung avatar để đổi ảnh ngay giữa truyện.
@@ -280,6 +280,7 @@ export default function PlayerHUD({ mobile = false }) {
         setPlayerMon={setPlayerMon}
         bodyStatus={bodyStatus}
         setBodyStatus={setBodyStatus}
+        movesDb={movesDb}
       />
 
       {/* Quan hệ NPC */}
@@ -326,7 +327,7 @@ export default function PlayerHUD({ mobile = false }) {
 
       {traitsOpen && <TraitsModal onClose={() => setTraitsOpen(false)} />}
 
-      {infoMon && <PokemonInfoModal mon={infoMon} hungerMon={playerMon && isSameMon(infoMon, playerMon) ? hunger.mon : null} onClose={() => setInfoMon(null)} />}
+      {infoMon && <PokemonInfoModal mon={infoMon} party={party} activeMon={playerMon} hunger={hunger.mon} onSelect={setInfoMon} onClose={() => setInfoMon(null)} />}
     </aside>
   )
 }
@@ -342,7 +343,7 @@ export default function PlayerHUD({ mobile = false }) {
 const HEAL_AMOUNTS = { potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30 }
 const HUMAN_HEAL = { bandage: 10, medkit: 30 }
 
-function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, setPlayerMon, bodyStatus, setBodyStatus }) {
+function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, setPlayerMon, bodyStatus, setBodyStatus, movesDb }) {
   const [openCat, setOpenCat] = useState('heal')
   const [openItem, setOpenItem] = useState(null) // item id đang mở chi tiết
   const [feedback, setFeedback] = useState(null)
@@ -415,7 +416,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       setFeedback(`${mon.name} đã đạt cấp tối đa (Lv.100).`)
       return
     }
-    const leveled = levelUpMon(mon)
+    const leveled = levelUpMon(mon, movesDb)
     setParty(party.map((m, i) => (i === monIndex ? leveled : m)))
     if (playerMon && isSameMon(playerMon, mon)) setPlayerMon(leveled)
     consume(item.id)

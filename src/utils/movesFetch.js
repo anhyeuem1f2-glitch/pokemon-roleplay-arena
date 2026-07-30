@@ -1,17 +1,17 @@
 import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './browserCache.js'
 
 // Tải dữ liệu CHIÊU THỨC THẬT (power/type/category) và LEARNSET THẬT (chiêu
-// nào học được ở level nào) trực tiếp từ Showdown — cùng tinh thần với
-// pokedexFetch.js. Nhờ đó Pokémon sẽ mang đúng bộ chiêu tối ưu theo level
-// thật của nó (VD level 80 có bộ chiêu A, lên level 100 học được chiêu B mạnh
-// hơn thì dùng B) thay vì chỉ 1 chiêu STAB cố định theo hệ.
+// nào học được ở level nào). PokémonDB là nguồn đối chiếu dễ đọc cho người
+// chơi; runtime dùng JSON có cấu trúc của Pokémon Showdown để phủ toàn bộ loài
+// mà không phải scrape HTML/CORS ở từng trang Pokédex. Hai nguồn cùng biểu diễn
+// learnset theo thế hệ; app lọc đúng Gen 9 rồi mở màn học/quên chiêu khi lên cấp.
 
 const MOVES_URL = 'https://play.pokemonshowdown.com/data/moves.json'
 const LEARNSETS_URL = 'https://play.pokemonshowdown.com/data/learnsets.json'
 // v5 (đợt 35): bảng all giữ thêm boosts/target/self/secondary — bắt buộc bump
 // key vì cache lưu output ĐÃ xử lý, người dùng cache cũ sẽ thiếu field mới.
-const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v7'
-const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v2'
+const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v8'
+const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v3'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 // Gen hiện tại dùng để lọc learnset — learnsets.json ghi lịch sử học chiêu
@@ -67,6 +67,7 @@ export async function loadMovesData() {
     for (const [id, m] of Object.entries(raw)) {
       if (m.isZ || m.isMax) continue // bỏ Z-move/Max move — không thuộc bể chiêu thường
       all[id] = {
+        id,
         name: m.name,
         type: (m.type || 'Normal').toLowerCase(),
         category: m.category,
@@ -86,9 +87,12 @@ export async function loadMovesData() {
         multihit: m.multihit || null,
         priority: m.priority || 0,
         weather: m.weather || null,
+        pp: m.pp ?? null,
+        description: m.shortDesc || m.desc || '',
       }
       if (!m.basePower || m.basePower <= 0) continue
       out[id] = {
+        id,
         name: m.name,
         power: m.basePower,
         type: (m.type || 'Normal').toLowerCase(),
@@ -115,6 +119,8 @@ export async function loadMovesData() {
         multihit: m.multihit || null,
         priority: m.priority || 0,
         weather: m.weather || null,
+        pp: m.pp ?? null,
+        description: m.shortDesc || m.desc || '',
       }
     }
     return { damaging: out, all }

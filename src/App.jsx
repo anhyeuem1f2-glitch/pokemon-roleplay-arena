@@ -6,6 +6,7 @@ import SettingsPage from './components/SettingsPage.jsx'
 import DevPage from './components/DevPage.jsx'
 import PlayerHUD from './components/PlayerHUD.jsx'
 import RightHUD from './components/RightHUD.jsx'
+import MoveLearnModal from './components/MoveLearnModal.jsx'
 
 function GearIcon() {
   return (
@@ -118,6 +119,8 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <MoveLearnModal />
 
       {/* Mobile (đợt 53): 2 nút bật/tắt HUD thay cho 2 cột dọc. */}
       {isMobile && (

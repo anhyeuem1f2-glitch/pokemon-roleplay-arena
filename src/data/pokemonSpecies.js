@@ -321,6 +321,150 @@ function effectMultiplier(mv) {
   return mult
 }
 
+
+// ============ HỌC CHIÊU KHI LÊN CẤP (đợt 82) ============
+// Pokémon chỉ được mang tối đa 4 chiêu. Trước đây app chỉ sinh moveset lúc
+// Pokémon được tạo, sau đó lên cấp KHÔNG BAO GIỜ dò learnset lại; save cũ tải
+// trước khi movesDb sẵn sàng còn bị kẹt với 2 chiêu fallback (Ember/Scratch).
+// Các helper dưới đây tạo hàng chờ học chiêu theo level, giữ hàng chờ ngay
+// trên cá thể để persist qua reload và cho UI chuẩn "học / quên chiêu" xử lý.
+export function moveId(value) {
+  return String(value?.id ?? value?.name ?? value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function learnsetForMon(mon, movesDb) {
+  if (!mon || !movesDb?.learnsets) return []
+  const ids = [mon.species, mon.baseSpeciesId, mon.name].map(moveId).filter(Boolean)
+  for (const id of ids) {
+    if (movesDb.learnsets[id]?.length) return movesDb.learnsets[id]
+  }
+  return []
+}
+
+function fullMoveFromDb(moveRef, movesDb) {
+  const id = moveId(moveRef?.move ?? moveRef)
+  if (!id) return null
+  const source = movesDb?.allMoves?.[id] ?? movesDb?.moves?.[id]
+  if (!source) return null
+  return { ...source, id: source.id ?? id }
+}
+
+/** Các chiêu level-up đi qua trong khoảng (fromLevel, toLevel]. */
+export function levelUpMovesBetween(mon, fromLevel, toLevel, movesDb) {
+  if (!mon || !movesDb?.allMoves || toLevel <= fromLevel) return []
+  const known = new Set((mon.moves ?? []).map(moveId))
+  const pending = new Set((mon.pendingMoveLearns ?? []).map(moveId))
+  const seen = new Set()
+  return learnsetForMon(mon, movesDb)
+    .filter((entry) => entry.method === 'L' && entry.level > fromLevel && entry.level <= toLevel)
+    .sort((a, b) => a.level - b.level || a.move.localeCompare(b.move))
+    .map((entry) => {
+      const move = fullMoveFromDb(entry, movesDb)
+      return move ? { ...move, learnedAtLevel: entry.level } : null
+    })
+    .filter((move) => {
+      const id = moveId(move)
+      if (!id || known.has(id) || pending.has(id) || seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+}
+
+/** Chiêu có level 0 trong learnset là chiêu học ngay khi tiến hoá. */
+export function queueEvolutionMoves(mon, movesDb) {
+  if (!mon || !movesDb?.allMoves) return mon
+  const known = new Set((mon.moves ?? []).map(moveId))
+  const pending = new Set((mon.pendingMoveLearns ?? []).map(moveId))
+  const additions = []
+  for (const entry of learnsetForMon(mon, movesDb)) {
+    if (entry.method !== 'L' || entry.level !== 0) continue
+    const move = fullMoveFromDb(entry, movesDb)
+    const id = moveId(move)
+    if (!move || !id || known.has(id) || pending.has(id)) continue
+    additions.push({ ...move, learnedAtLevel: mon.level ?? 1, learnedOnEvolution: true })
+    pending.add(id)
+  }
+  return additions.length ? { ...mon, pendingMoveLearns: [...(mon.pendingMoveLearns ?? []), ...additions] } : mon
+}
+
+/** Gắn các chiêu mới vào hàng chờ; không tự thay chiêu người chơi đang dùng. */
+export function queueLevelUpMoves(mon, fromLevel, toLevel, movesDb) {
+  if (!mon) return mon
+  const additions = levelUpMovesBetween(mon, fromLevel, toLevel, movesDb)
+  if (!additions.length) return mon
+  return {
+    ...mon,
+    pendingMoveLearns: [...(mon.pendingMoveLearns ?? []), ...additions],
+  }
+}
+
+/**
+ * Sửa save cũ bị chỉ còn 0-2 chiêu hoặc move object thiếu metadata.
+ * - Giữ các chiêu hiện có nếu hợp lệ.
+ * - Bổ sung từ những chiêu level-up gần nhất mà loài đã đạt tới.
+ * - Không vượt quá 4 và không tự thay bộ 4 chiêu hợp lệ của người chơi.
+ */
+export function repairOwnedMonMoves(mon, movesDb) {
+  if (!mon || !movesDb?.allMoves) return mon
+  const normalized = []
+  const seen = new Set()
+  for (const raw of mon.moves ?? []) {
+    const id = moveId(raw)
+    if (!id || seen.has(id)) continue
+    const full = movesDb.allMoves[id]
+    normalized.push(full
+      ? { ...full, id }
+      : (typeof raw === 'string' ? { id, name: raw, type: 'normal', category: 'Status', power: 0 } : { ...raw, id }))
+    seen.add(id)
+    if (normalized.length >= 4) break
+  }
+
+  if (normalized.length < 4) {
+    const eligible = learnsetForMon(mon, movesDb)
+      .filter((entry) => entry.method === 'L' && entry.level <= (mon.level ?? 1))
+      .sort((a, b) => b.level - a.level || a.move.localeCompare(b.move))
+    for (const entry of eligible) {
+      if (normalized.length >= 4) break
+      const move = fullMoveFromDb(entry, movesDb)
+      const id = moveId(move)
+      if (!move || !id || seen.has(id)) continue
+      normalized.push(move)
+      seen.add(id)
+    }
+  }
+
+  if (!normalized.length) return mon
+  const pending = (mon.pendingMoveLearns ?? [])
+    .map((move) => {
+      const id = moveId(move)
+      const full = movesDb.allMoves[id]
+      return full ? { ...full, id, learnedAtLevel: move.learnedAtLevel } : move
+    })
+    .filter((move) => !seen.has(moveId(move)))
+  return {
+    ...mon,
+    moves: normalized.slice(0, 4),
+    pendingMoveLearns: pending,
+    moveDataVersion: 2,
+  }
+}
+
+/** Học chiêu đầu hàng chờ; replaceIndex=null chỉ hợp lệ khi còn dưới 4 chiêu. */
+export function resolvePendingMoveLearn(mon, { replaceIndex = null, skip = false } = {}) {
+  if (!mon?.pendingMoveLearns?.length) return mon
+  const [candidate, ...rest] = mon.pendingMoveLearns
+  if (skip) return { ...mon, pendingMoveLearns: rest }
+  const known = new Set((mon.moves ?? []).map(moveId))
+  if (known.has(moveId(candidate))) return { ...mon, pendingMoveLearns: rest }
+  const moves = [...(mon.moves ?? [])]
+  if (moves.length < 4) moves.push(candidate)
+  else if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && replaceIndex < 4) moves[replaceIndex] = candidate
+  else return mon
+  return { ...mon, moves: moves.slice(0, 4), pendingMoveLearns: rest }
+}
+
 /**
  * Giao thức chọn chiêu:
  * 1. Lấy toàn bộ chiêu học được (level-up tới level hiện tại; + chiêu TM nếu
@@ -338,10 +482,10 @@ function pickMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, in
   const learnable =
     movesDb?.learnsets?.[speciesEntry.species] ??
     (speciesEntry.baseSpeciesId ? movesDb?.learnsets?.[speciesEntry.baseSpeciesId] : null)
-  if (learnable?.length && movesDb?.moves) {
+  if (learnable?.length && movesDb?.allMoves) {
     const available = learnable
       .filter((e) => e.method === 'L' ? e.level <= level : includeTm)
-      .map((e) => movesDb.moves[e.move])
+      .map((e) => movesDb.allMoves[e.move])
       .filter(Boolean)
 
     if (available.length) {
@@ -578,7 +722,8 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     maxHp: generated.maxHp ?? mon.maxHp,
     hp: Math.min(generated.maxHp ?? mon.maxHp ?? 1, mon.hp ?? generated.maxHp ?? 1),
   }
-  return wasFainted ? { ...evolved, hp: 0 } : evolved
+  const withEvolutionMoves = queueEvolutionMoves(evolved, movesDb)
+  return wasFainted ? { ...withEvolutionMoves, hp: 0 } : withEvolutionMoves
 }
 
 
@@ -791,7 +936,7 @@ export function expGainFrom(defeated, { isTrainerMon = false } = {}) {
  * Cộng EXP cho 1 Pokémon, tự lên cấp và tính lại chỉ số.
  * Trả về { mon, gained, levelsGained, newLevel } — KHÔNG sửa mon gốc.
  */
-export function applyExpGain(mon, amount) {
+export function applyExpGain(mon, amount, movesDb = null) {
   if (!mon || !amount || amount <= 0) return { mon, gained: 0, levelsGained: 0, newLevel: mon?.level ?? 1 }
   const oldLevel = mon.level ?? 1
   if (oldLevel >= MAX_LEVEL) return { mon, gained: 0, levelsGained: 0, newLevel: MAX_LEVEL }
@@ -804,6 +949,7 @@ export function applyExpGain(mon, amount) {
     // Lên cấp: tính lại chỉ số theo IV/EV/nature; recomputeMonStats giữ
     // nguyên lượng máu đã mất và cộng thêm phần maxHp tăng lên.
     next = recomputeMonStats(next)
+    next = queueLevelUpMoves(next, oldLevel, newLevel, movesDb)
   }
   return { mon: next, gained: amount, levelsGained: Math.max(0, newLevel - oldLevel), newLevel }
 }
@@ -863,11 +1009,12 @@ export function syncMonInParty(party, mon) {
  * dư đang tích luỹ, chứ không phải cộng thêm vào chỗ đang có.
  * Máu tăng theo maxHp mới (không hồi máu đã mất, đúng luật gốc).
  */
-export function levelUpMon(mon) {
+export function levelUpMon(mon, movesDb = null) {
   if (!mon) return mon
   const next = Math.min(MAX_LEVEL, (mon.level ?? 1) + 1)
   if (next === mon.level) return mon
-  return recomputeMonStats({ ...mon, level: next, exp: expForLevel(next) })
+  const leveled = recomputeMonStats({ ...mon, level: next, exp: expForLevel(next) })
+  return queueLevelUpMoves(leveled, mon.level ?? 1, next, movesDb)
 }
 
 
@@ -878,22 +1025,22 @@ export function levelUpMon(mon) {
  * levelUpMon để giữ đúng quy tắc máu: maxHp tăng nhưng phần HP đã mất không
  * tự hồi đầy.
  */
-export function raiseMonToLevel(mon, targetLevel) {
+export function raiseMonToLevel(mon, targetLevel, movesDb = null) {
   if (!mon) return mon
   const target = Math.max(mon.level ?? 1, Math.min(MAX_LEVEL, Number(targetLevel) || 1))
   let next = mon
-  while ((next.level ?? 1) < target) next = levelUpMon(next)
+  while ((next.level ?? 1) < target) next = levelUpMon(next, movesDb)
   return next
 }
 
 /** Áp một chỉ dẫn LEVEL dạng +N hoặc LvN, không bao giờ hạ cấp. */
-export function applyLevelDirective(mon, directive) {
+export function applyLevelDirective(mon, directive, movesDb = null) {
   if (!mon || !directive) return mon
   const current = mon.level ?? 1
   const target = directive.mode === 'delta'
     ? current + Math.max(0, Number(directive.value) || 0)
     : Number(directive.value) || current
-  return raiseMonToLevel(mon, target)
+  return raiseMonToLevel(mon, target, movesDb)
 }
 
 

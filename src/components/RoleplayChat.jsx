@@ -674,14 +674,14 @@ export default function RoleplayChat() {
           continue
         }
         const before = targetMon.level ?? 1
-        const previewAfter = applyLevelDirective(targetMon, directive)
+        const previewAfter = applyLevelDirective(targetMon, directive, movesDb)
         const after = previewAfter?.level ?? before
         if (after <= before) {
           report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn này không làm thay đổi biến`)
           continue
         }
         const identity = { uid: targetMon.uid, name: targetMon.name }
-        const apply = (mon) => applyLevelDirective(mon, directive)
+        const apply = (mon) => applyLevelDirective(mon, directive, movesDb)
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
@@ -734,7 +734,7 @@ export default function RoleplayChat() {
             continue
           }
           const identity = { uid: existing.uid, name: existing.name }
-          const raise = (mon) => raiseMonToLevel(mon, after)
+          const raise = (mon) => raiseMonToLevel(mon, after, movesDb)
           setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
           setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
           replacePreviewMon(identity, raise)
@@ -760,7 +760,7 @@ export default function RoleplayChat() {
           let current = prevo
           if (requestedLevel > beforeLevel) {
             const identity = { uid: prevo.uid, name: prevo.name }
-            const raise = (mon) => raiseMonToLevel(mon, requestedLevel)
+            const raise = (mon) => raiseMonToLevel(mon, requestedLevel, movesDb)
             setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
             setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
             replacePreviewMon(identity, raise)
@@ -956,7 +956,7 @@ export default function RoleplayChat() {
           // Độ thân mật chỉ đổi khi chính văn có [[FRIEND]] đã qua đối
           // chiếu. Không tự cộng chỉ vì thời gian trôi/luyện tập, vì đó là
           // biến truyện chứ không phải phần thưởng máy móc ngầm.
-          return amount > 0 ? applyExpGain(mon, amount).mon : mon
+          return amount > 0 ? applyExpGain(mon, amount, movesDb).mon : mon
         }
         setPlayerMon((cur) => (cur ? grow(cur) : cur))
         setParty((cur) => (cur ?? []).map((pm) => grow(pm)))
@@ -1626,7 +1626,7 @@ export default function RoleplayChat() {
           if (participates) {
             for (const foe of battleEnemies) next = applyEvGain(next, foe)
           }
-          const result = applyExpGain(next, gain)
+          const result = applyExpGain(next, gain, movesDb)
           if (result.levelsGained > 0) {
             levelUps.push({ name: result.mon.name, newLevel: result.newLevel, levels: result.levelsGained })
           }

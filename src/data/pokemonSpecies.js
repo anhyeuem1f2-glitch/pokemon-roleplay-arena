@@ -975,15 +975,26 @@ export const NATURE_BEHAVIOR = {
   Careful: 'cẩn trọng, dè chừng người lạ, kiểm tra kỹ trước khi tin',
 }
 
+/** Mô tả riêng phần hành vi của Nature để các luồng hội thoại ngoài main
+ * prompt (battle/Safari) dùng chung, tránh mỗi nơi diễn giải Nature một kiểu. */
+export function describeNatureBehavior(mon) {
+  const nature = mon?.nature
+  if (!nature) return 'chưa xác định'
+  const behavior = NATURE_BEHAVIOR[nature]
+  return behavior ? `${nature}: ${behavior}` : String(nature)
+}
+
 /** Mô tả 1 Pokémon cho prompt: tên, level, tính cách + nét hành vi. */
 export function describeMonForPrompt(mon) {
   if (!mon?.name) return null
-  const beh = mon.nature ? NATURE_BEHAVIOR[mon.nature] : null
-  const parts = [`${mon.name} (Lv.${mon.level ?? '?'}`]
+  const displayName = mon.nickname?.trim()
+    ? `${mon.nickname.trim()} (${mon.name})`
+    : mon.name
+  const parts = [`${displayName} (Lv.${mon.level ?? '?'}`]
   if (mon.types?.length) parts.push(`, hệ ${mon.types.join('/')}`)
   parts.push(')')
   let line = parts.join('')
-  if (mon.nature) line += ` — tính cách ${mon.nature}${beh ? `: ${beh}` : ''}`
+  if (mon.nature) line += ` — Nature ${describeNatureBehavior(mon)}`
   if (mon.ability) line += ` — Ability ${mon.ability}`
   const friendship = normalizeFriendship(mon)
   const bond = friendshipTier(friendship.friendship)
@@ -993,14 +1004,26 @@ export function describeMonForPrompt(mon) {
 
 /** Note bơm vào prompt để AI cho Pokémon hành xử ĐÚNG cá tính (đợt 63). */
 export function buildPartyBehaviorNote(party, activeMon) {
-  const list = (party ?? []).filter((m) => m?.name)
+  // Đợt 85: save cũ hoặc một callback chạy giữa hai setter có thể có
+  // playerMon thật nhưng party tạm rỗng/chưa đồng bộ. Luôn hợp nhất cá thể
+  // đang hoạt động vào danh sách và khử trùng theo uid để Nature không biến
+  // mất khỏi prompt đúng lúc Pokémon đang xuất hiện trong truyện.
+  const list = []
+  for (const mon of [...(party ?? []), activeMon]) {
+    if (!mon?.name || list.some((entry) => isSameMon(entry, mon))) continue
+    list.push(mon)
+  }
   if (!list.length) return null
   const lines = list.map((m) => {
-    const tag = activeMon && isSameMon(m, activeMon) ? ' [đang ra trận]' : ''
+    const tag = activeMon && isSameMon(m, activeMon) ? ' [đang hoạt động]' : ''
     return `- ${describeMonForPrompt(m)}${tag}`
   })
   return [
-    '[Hệ thống — ĐỘI HÌNH POKÉMON CỦA NGƯỜI CHƠI. Mỗi con có TÍNH CÁCH riêng: hãy cho chúng HÀNH ĐỘNG đúng cá tính đó (phản ứng, tiếng kêu, thói quen, cách nghe lời hay bướng bỉnh) chứ không phải con nào cũng ngoan như nhau. Tính cách ảnh hưởng cả hành vi ngoài trận lẫn cách chiến đấu. Không nhắc tới ghi chú này:]',
+    'HỒ SƠ HÀNH VI POKÉMON CỦA NGƯỜI CHƠI — CHỈ DẪN NHẬP VAI BẮT BUỘC:',
+    '- Nature vừa giữ tác động tăng/giảm chỉ số của game, vừa là khí chất nền quyết định phản ứng, tiếng kêu, thói quen, mức chủ động, cách nghe lời hoặc bướng bỉnh trong chính văn.',
+    '- Friendship điều chỉnh mức tin tưởng/phối hợp nhưng KHÔNG xoá cá tính: một Pokémon Adamant rất thân vẫn bướng theo cách thân thiết; một Pokémon Timid gắn bó có thể cố vượt sợ hãi để bảo vệ huấn luyện viên.',
+    '- Thể hiện Nature bằng hành động cụ thể và biến hoá theo tình huống; không chỉ gọi tên tính cách, không biến thành một trò lặp lại ở mọi đoạn.',
+    '- Chỉ cho Pokémon hành động khi nó đang ở ngoài Poké Ball hoặc bối cảnh cho phép; không tự thả cả đội chỉ để phô diễn Nature. Không nhắc tới hồ sơ hệ thống này trong truyện.',
     ...lines,
   ].join('\n')
 }

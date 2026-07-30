@@ -1098,7 +1098,10 @@ export default function RoleplayChat() {
       if (traitsNote) history = [...history, { role: 'user', content: `[Hệ thống — ${traitsNote} Không nhắc tới ghi chú này.]` }]
 
       const partyNote = buildPartyBehaviorNote(party, playerMon)
-      if (partyNote) history = [...history, { role: 'user', content: partyNote }]
+      // Đợt 85: đây là luật nhập vai thật, không phải lời người chơi. Gửi bằng
+      // system role để preset/provider không xem nhẹ Nature như một ghi chú
+      // hội thoại có thể bỏ qua.
+      if (partyNote) history = [...history, { role: 'system', content: partyNote }]
 
       // QUYỀN TỰ DO SÁNG TẠO (đợt 63): người chơi phản ánh AI bị gò bó bởi
       // input — chỉ thuật lại đúng câu lệnh, thế giới đứng im. Nhắc mỗi lượt
@@ -1214,7 +1217,12 @@ export default function RoleplayChat() {
       if (animeApiConfig?.baseUrl && animeApiConfig?.model) {
         try {
           displayText = truncateAfterInteractiveMarker(
-            await polishProse({ ...apiConfig, ...animeApiConfig }, displayText, buildToneNote(storyTone)),
+            await polishProse(
+              { ...apiConfig, ...animeApiConfig },
+              displayText,
+              buildToneNote(storyTone),
+              partyNote,
+            ),
           )
         } catch (polErr) {
           console.warn('[polish] bỏ qua chau chuốt:', polErr.message)

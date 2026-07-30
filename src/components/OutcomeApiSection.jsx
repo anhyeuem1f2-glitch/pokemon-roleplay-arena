@@ -1,10 +1,9 @@
 import React, { useState } from 'react'
 import { listModels } from '../services/aiClient.js'
+import PokemonToggle from './PokemonToggle.jsx'
 
 function OutcomeApiField({ label, value, onChange }) {
   const enabled = Boolean(value)
-  // Tải danh sách model từ endpoint /models của chính API phụ này (đợt 26) —
-  // cùng logic với nút tải model của API chính, không phải gõ tay model id.
   const [models, setModels] = useState(null)
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelsError, setModelsError] = useState(null)
@@ -21,7 +20,7 @@ function OutcomeApiField({ label, value, onChange }) {
       setModels(ids)
       if (ids.length === 0) setModelsError('Provider trả về danh sách rỗng.')
     } catch (err) {
-      setModelsError(err.message)
+      setModelsError(`${err.message} (vẫn gõ tay được tên model)`)
       setModels(null)
     } finally {
       setLoadingModels(false)
@@ -29,17 +28,13 @@ function OutcomeApiField({ label, value, onChange }) {
   }
 
   return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 10, marginTop: 8 }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: 'var(--text-mid)' }}>
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) =>
-            onChange(e.target.checked ? { baseUrl: '', apiKey: '', model: '' } : null)
-          }
-        />
-        {label} — dùng API riêng
-      </label>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, marginTop: 10, background: 'rgba(255,255,255,0.01)' }}>
+      <PokemonToggle
+        checked={enabled}
+        onChange={(next) => onChange(next ? { baseUrl: '', apiKey: '', model: '' } : null)}
+        label={label}
+        hint={enabled ? 'Đang dùng cấu hình riêng cho tuyến này.' : 'Tắt = tuyến này quay về dùng API chính.'}
+      />
       {enabled && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <input
@@ -83,7 +78,7 @@ function OutcomeApiField({ label, value, onChange }) {
 
 // Cấu hình API phụ 1 (tuyến chạy thoát) và API phụ 2 (tuyến thua cuộc) theo
 // kiến trúc nhiều API đã bàn — để trống thì tự dùng API chính như bình thường.
-export default function OutcomeApiSection({ outcomeApiConfig, setOutcomeApiConfig, animeApiConfig, setAnimeApiConfig }) {
+export default function OutcomeApiSection({ outcomeApiConfig, animeApiConfig, setOutcomeApiConfig, setAnimeApiConfig }) {
   return (
     <div className="field">
       <label>API phụ cho tuyến kết quả trận đấu (tuỳ chọn)</label>

@@ -10,6 +10,7 @@ import DirectorSection from './DirectorSection.jsx'
 import WikiSection from './WikiSection.jsx'
 import StateApiSection from './StateApiSection.jsx'
 import WorldbookSection from './WorldbookSection.jsx'
+import PokemonToggle from './PokemonToggle.jsx'
 
 const PRESET_PAGE_SIZE = 8
 
@@ -134,8 +135,14 @@ function MainPresetManager({ mainPreset, setMainPreset, onPresetPrefill }) {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={block.enabled} onChange={() => toggleBlock(block.identifier)} />
-              <span style={{ fontSize: 13, flex: 1 }}>{block.name}</span>
+              <div style={{ flex: 1 }}>
+                <PokemonToggle
+                  compact
+                  checked={block.enabled}
+                  onChange={() => toggleBlock(block.identifier)}
+                  label={block.name}
+                />
+              </div>
               {block.marker && <span className="status-pill">marker</span>}
               {!block.marker && (
                 <button className="btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => toggleExpanded(block.identifier)}>
@@ -209,7 +216,7 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
       </p>
       <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {mainPreset.regexScripts.map((s) => (
-          <label
+          <div
             key={s.id}
             style={{
               display: 'flex',
@@ -222,10 +229,11 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
               opacity: s.enabled ? 1 : 0.55,
             }}
           >
-            <input type="checkbox" checked={s.enabled} onChange={() => toggle(s.id)} />
-            <span style={{ flex: 1 }}>{s.scriptName}</span>
+            <div style={{ flex: 1 }}>
+              <PokemonToggle compact checked={s.enabled} onChange={() => toggle(s.id)} label={s.scriptName} />
+            </div>
             {s.isDecorative && <span className="status-pill">HTML</span>}
-          </label>
+          </div>
         ))}
       </div>
     </div>

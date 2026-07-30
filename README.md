@@ -2364,3 +2364,11 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 **LƯU TRỮ VÀ SỬA TIN.** Lựa chọn là dữ liệu nhỏ được persist cùng message và giữ nguyên khi compact lịch sử. Sửa chính văn AI hoặc sửa input làm căn cứ sẽ xoá các lựa chọn cũ để không đưa gợi ý sai ngữ cảnh.
 
 **Kiểm tra trong gói bàn giao:** regression đợt 73–79 đều PASS. Test đợt 79 bao phủ định dạng của ba kiểu preset tham khảo, bóc nhãn/nội dung, chống trùng, giới hạn số lượng, gỡ lựa chọn khỏi chính văn có/không có `<content>`, trường hợp model quên thẻ bọc, giữ lựa chọn qua compact storage và smoke toàn bộ dây chuyền UI/fallback. Toàn bộ 95 file JS/JSX transpile cú pháp thành công; toàn bộ import tương đối tồn tại. Gói nguồn rút gọn không có `package.json`, nên chưa chạy được chính lệnh `npm run lint` và `npm run build`.
+
+### Đợt 80 — Đại tu màn hình mở đầu + công tắc Poké Ball
+
+- Thêm đoạn tri ân ngắn màn mở đầu Pokémon Red/Blue: Gengar và Nidorino lao vào nhau theo phong cách sprite Game Boy, có nút bỏ qua và tôn trọng `prefers-reduced-motion`.
+- Khi mở trang, `public/music/intro.mp3` được phát một lần; trong lúc đoạn tri ân kết thúc và title dần hiện ra, bài intro vẫn tiếp tục. Chỉ khi `intro.mp3` phát hết, hệ nhạc mới tự quay về `title and adventure.mp3` / `title.mp3`.
+- Màn hình chính có Poké Ball lớn xoay giữa tiêu đề/phụ đề và các nút hành trình.
+- Các checkbox bật API phụ, API cập nhật biến, Embedding/Rerank và tra cứu canon được thay bằng công tắc Poké Ball: tắt là bóng xám mở nắp, bật là đóng lại và hiện màu đỏ/trắng.
+- Deploy nhạc: bảo đảm file tồn tại đúng tên `public/music/intro.mp3` (chữ thường). Không cần import file nhạc trong JavaScript.

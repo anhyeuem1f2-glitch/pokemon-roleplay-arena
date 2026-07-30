@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
@@ -20,6 +20,8 @@ import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
+import RetroBattleIntro from './RetroBattleIntro.jsx'
+import { musicManager } from '../utils/musicManager.js'
 
 // ============ MÀN TẠO NHÂN VẬT v3 — WIZARD 4 TRANG (đợt 34) ============
 // Thiết kế lại toàn bộ theo yêu cầu "bớt phèn": wizard nhiều trang, mọi lựa
@@ -31,6 +33,7 @@ import PokeballSpinner from './PokeballSpinner.jsx'
 // màn chọn tướng.
 
 const GENDERS = ['Nam', 'Nữ', 'Khác / không tiết lộ']
+const TITLE_INTRO_SESSION_KEY = 'trainer-arena-title-seen-v1'
 
 const STEPS = [
   { key: 'profile', label: 'Hồ sơ' },
@@ -129,6 +132,45 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const introSeen = typeof window !== 'undefined' && window.sessionStorage.getItem(TITLE_INTRO_SESSION_KEY) === '1'
+  const [showMenu, setShowMenu] = useState(introSeen)
+  const [showHomage, setShowHomage] = useState(!introSeen)
+  const [homageDimmed, setHomageDimmed] = useState(false)
+  const [titlePhase, setTitlePhase] = useState(introSeen ? 'settled' : 'intro')
+
+  useEffect(() => {
+    if (stage !== 'title') return undefined
+    const seen = typeof window !== 'undefined' && window.sessionStorage.getItem(TITLE_INTRO_SESSION_KEY) === '1'
+    if (seen) {
+      setShowMenu(true)
+      setShowHomage(false)
+      setHomageDimmed(false)
+      setTitlePhase('settled')
+      return undefined
+    }
+    setShowMenu(false)
+    setShowHomage(true)
+    setHomageDimmed(false)
+    setTitlePhase('intro')
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(TITLE_INTRO_SESSION_KEY, '1')
+    const timers = [
+      window.setTimeout(() => musicManager.playJingle(['intro']), 120),
+      window.setTimeout(() => setShowMenu(true), 2600),
+      window.setTimeout(() => { setHomageDimmed(true); setTitlePhase('reveal') }, 3600),
+      window.setTimeout(() => { setShowHomage(false); setTitlePhase('settled') }, 7200),
+    ]
+    return () => timers.forEach((t) => window.clearTimeout(t))
+  }, [stage, messages.length])
+
+  function skipTitleIntro() {
+    setShowMenu(true)
+    setHomageDimmed(true)
+    setTitlePhase('reveal')
+    window.setTimeout(() => {
+      setShowHomage(false)
+      setTitlePhase('settled')
+    }, 320)
+  }
 
   // Hồ sơ
   const [trainerName, setTrainerName] = useState('')
@@ -382,40 +424,59 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
 
   if (stage === 'title') {
     return (
-      <div className="intro-bg">
-        <div className="intro-content">
-          <div>
-            <div className="intro-title">TRAINER ARENA</div>
-            <p style={{ color: 'var(--text-mid)', marginTop: 12, fontSize: 14 }}>
-              Thế giới nhập vai của huấn luyện viên Pokémon
-            </p>
-          </div>
-          {/* Đợt 46: còn truyện dở (messages đã persist) → cho quay lại chơi
-              tiếp thay vì chỉ có đường tạo mới. */}
-          {messages.length > 0 && (
-            <button className="btn--gold" onClick={() => setGameStarted(true)}>
-              ▶ Tiếp tục hành trình
-            </button>
-          )}
-          <button className={messages.length > 0 ? 'btn' : 'btn--gold'} onClick={() => { setStage('setup'); setStep(0) }}>
-            Bắt đầu một hành trình mới
+      <div className={`intro-bg ${showMenu ? 'intro-bg--revealed' : ''}`}>
+        {showHomage && <RetroBattleIntro active={!homageDimmed} dimmed={homageDimmed} />}
+        {showHomage && (
+          <button className="intro-skip" onClick={skipTitleIntro}>
+            Bỏ qua intro
           </button>
-          <div className="btn-row" style={{ justifyContent: 'center' }}>
-            <button className="btn" onClick={onOpenSettings} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              Cài đặt API
-            </button>
-            {/* Đợt 49: nút Dev ở TITLE SCREEN cũng phải theo cờ ?dev=1 —
-                đây chính là cái nút "sống dai" trên bản deploy: đợt 48 chỉ
-                ẩn nút ở header màn chơi mà quên mất màn hình chính có nút
-                Dev RIÊNG của nó. Bài học: ẩn 1 tính năng phải grep TOÀN BỘ
-                điểm vào, không chỉ chỗ mình nhớ. */}
-            {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev') && (
-              <button className="btn" onClick={onOpenDev}>Chế độ Dev</button>
-            )}
+        )}
+        <div className={`intro-content intro-content--title ${showMenu ? 'is-visible' : 'is-hidden'}`}>
+          <div className="intro-stage-card">
+            <div>
+              <div className="intro-title">TRAINER ARENA</div>
+              <p className="intro-subtitle">Thế giới nhập vai của huấn luyện viên Pokémon</p>
+            </div>
+
+            <div className="intro-spinner-wrap">
+              <PokeballSpinner
+                size={112}
+                label={titlePhase === 'intro'
+                  ? 'Đang phát intro...'
+                  : titlePhase === 'reveal'
+                    ? 'Intro vẫn đang chạy — màn hình chính đang hiện ra dần.'
+                    : 'Sẵn sàng bắt đầu hành trình.'}
+              />
+            </div>
+
+            <div className="intro-menu">
+              {messages.length > 0 && (
+                <button className="btn--gold" onClick={() => setGameStarted(true)}>
+                  ▶ Tiếp tục hành trình
+                </button>
+              )}
+              <button className={messages.length > 0 ? 'btn intro-menu__secondary' : 'btn--gold'} onClick={() => { setStage('setup'); setStep(0) }}>
+                Bắt đầu một hành trình mới
+              </button>
+              <div className="btn-row" style={{ justifyContent: 'center' }}>
+                <button className="btn" onClick={onOpenSettings} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  Cài đặt API
+                </button>
+                {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev') && (
+                  <button className="btn" onClick={onOpenDev}>Chế độ Dev</button>
+                )}
+              </div>
+            </div>
+
+            <div className="intro-meta-row">
+              <span className={`status-pill ${configured ? 'status-pill--ok' : 'status-pill--error'}`}>
+                {configured ? 'API đã sẵn sàng' : 'Chưa cấu hình API'}
+              </span>
+              <span className="status-pill">{messages.length > 0 ? 'Lưu truyện đã sẵn' : 'Màn khởi đầu mới'}</span>
+            </div>
+
+            {!configured && <p className="intro-hint">Mẹo: mở “Cài đặt API” trước khi bắt đầu để kiểm tra model và kết nối.</p>}
           </div>
-          {!configured && (
-            <p style={{ color: 'var(--text-dim)', fontSize: 12 }}>Mẹo: bấm "Cài đặt API" ở trên trước khi bắt đầu.</p>
-          )}
         </div>
       </div>
     )

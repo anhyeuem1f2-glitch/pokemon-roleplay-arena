@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { listModels, embedTexts, rerankDocs } from '../services/aiClient.js'
 import { getMemoryCount, clearMemory, subscribeMemory } from '../utils/storyMemory.js'
+import PokemonToggle from './PokemonToggle.jsx'
 
 // ============ CẤU HÌNH TRÍ NHỚ DÀI HẠN (đợt 29) ============
 // 2 API riêng cho hệ RAG của chính văn:
@@ -57,18 +58,13 @@ function MemoryApiField({ label, hint, value, onChange, onTest, testLabel }) {
   }
 
   return (
-    <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 10, marginTop: 8 }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: 'var(--text-mid)' }}>
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) =>
-            onChange(e.target.checked ? { baseUrl: '', apiKey: '', model: '' } : null)
-          }
-        />
-        {label}
-      </label>
-      <small style={{ display: 'block', color: 'var(--text-dim)', marginTop: 2 }}>{hint}</small>
+    <div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, marginTop: 10, background: 'rgba(255,255,255,0.01)' }}>
+      <PokemonToggle
+        checked={enabled}
+        onChange={(next) => onChange(next ? { baseUrl: '', apiKey: '', model: '' } : null)}
+        label={label}
+        hint={hint}
+      />
       {enabled && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <input

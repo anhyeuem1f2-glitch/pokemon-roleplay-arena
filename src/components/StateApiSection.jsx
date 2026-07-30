@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { listModels } from '../services/aiClient.js'
 import { extractMissingStateTags } from '../services/stateExtractor.js'
+import PokemonToggle from './PokemonToggle.jsx'
 
 // ============ API CẬP NHẬT BIẾN (đợt 36) ============
 // Model phụ đọc lại chính văn mỗi lượt và BỔ SUNG các tag trạng thái model
@@ -72,15 +73,14 @@ export default function StateApiSection() {
     <div className="field">
       <label>API cập nhật biến (chống "truyện chạy mà biến đứng yên")</label>
       <small>
-        Lớp cập nhật biến giờ LUÔN CHẠY sau mỗi lượt (mặc định dùng chính API chính). Bật mục này nếu muốn tách sang một model riêng nhỏ + rẻ để tiết kiệm — model phụ đọc lại chính văn và bổ sung tag trạng thái mà model chính quên khai (tiền, Pokémon, độ no, ngày giờ, NPC, fact, quan hệ). Chạy nền, lỗi tự bỏ qua, temperature 0 tự đặt sẵn.</small>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 8 }}>
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => setStateApiConfig(e.target.checked ? { baseUrl: '', apiKey: '', model: '' } : null)}
-        />
-        Bật API cập nhật biến
-      </label>
+        Lớp cập nhật biến giờ LUÔN CHẠY sau mỗi lượt (mặc định dùng chính API chính). Bật mục này nếu muốn tách sang một model riêng nhỏ + rẻ để tiết kiệm — model phụ đọc lại chính văn và bổ sung tag trạng thái mà model chính quên khai (tiền, Pokémon, độ no, ngày giờ, NPC, fact, quan hệ). Chạy nền, lỗi tự bỏ qua, temperature 0 tự đặt sẵn.
+      </small>
+      <PokemonToggle
+        checked={enabled}
+        onChange={(next) => setStateApiConfig(next ? { baseUrl: '', apiKey: '', model: '' } : null)}
+        label="Bật API cập nhật biến"
+        hint={enabled ? 'Poké Ball đóng — API phụ đang hoạt động.' : 'Poké Ball mở màu xám — đang dùng tuyến mặc định.'}
+      />
       {enabled && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <input value={cfg.baseUrl} onChange={(e) => update({ baseUrl: e.target.value })} placeholder="Base URL (VD https://api.openai.com/v1)" />

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import {
   getWikiSettings, setWikiEnabled, subscribeWiki, getWikiCacheCount, clearWikiCache, fetchWikiSummary,
 } from '../services/wikiLookup.js'
+import PokemonToggle from './PokemonToggle.jsx'
 
 // ============ CÀI ĐẶT TƯ LIỆU CANON (đợt 33) ============
 // Bật/tắt tự tra Bulbapedia khi truyện nhắc nhân vật gốc + xoá cache +
@@ -40,10 +41,12 @@ export default function WikiSection() {
         Bulbapedia lấy tóm tắt chính xác và đưa vào prompt để AI không bịa sai nhân vật canon.
         Tư liệu tiếng Anh, AI vẫn kể tiếng Việt. Cần mạng; lỗi mạng tự bỏ qua.
       </small>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginTop: 8 }}>
-        <input type="checkbox" checked={cfg.enabled} onChange={(e) => setWikiEnabled(e.target.checked)} />
-        Bật tra cứu tự động
-      </label>
+      <PokemonToggle
+        checked={cfg.enabled}
+        onChange={(next) => setWikiEnabled(next)}
+        label="Bật tra cứu tự động"
+        hint={cfg.enabled ? 'Tư liệu canon đang bật.' : 'Đang tắt — app sẽ không tra Bulbapedia.'}
+      />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
         <button className="btn" onClick={handleTest} disabled={testing}>
           {testing ? 'Đang tra thử…' : 'Kiểm tra kết nối'}

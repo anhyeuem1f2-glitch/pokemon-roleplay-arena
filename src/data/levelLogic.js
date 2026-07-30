@@ -191,6 +191,32 @@ export const GYM_TEST_LEVEL = 15
 export const GYM_REAL_TEAM_MIN = 70
 export const GYM_REAL_TEAM_MAX = 80
 
+// Đợt 84: Liên đoàn là endgame thật, không dùng công thức trainer thường.
+// Mỗi Tứ Thiên Vương có đội 6 Pokémon theo ba nấc, mỗi nấc hai cá thể.
+// Champion cũng đủ 6 Pokémon nhưng dồn sát trần Lv100.
+export const ELITE_FOUR_TEAM_LEVELS = Object.freeze([85, 85, 90, 90, 95, 95])
+export const CHAMPION_TEAM_LEVELS = Object.freeze([98, 98, 99, 99, 100, 100])
+
+/**
+ * Level theo Ô trong đội hình Liên đoàn.
+ * @param {'elite'|'champion'} tier
+ * @param {number|null|undefined} slot vị trí 0..5; thiếu slot thì bốc trong bảng
+ * @param {() => number} rng
+ */
+export function leagueTeamLevel(tier, slot, rng = Math.random) {
+  const table = tier === 'champion'
+    ? CHAMPION_TEAM_LEVELS
+    : tier === 'elite'
+      ? ELITE_FOUR_TEAM_LEVELS
+      : null
+  if (!table) return null
+  if (Number.isFinite(Number(slot))) {
+    const safeSlot = Math.max(0, Math.floor(Number(slot))) % table.length
+    return table[safeSlot]
+  }
+  return table[Math.min(table.length - 1, Math.floor(rng() * table.length))]
+}
+
 /**
  * Level 1 Pokémon của trainer trong trận phát sinh từ chính văn.
  * @param {object} params
@@ -198,7 +224,10 @@ export const GYM_REAL_TEAM_MAX = 80
  * @param {{regionKey,areaKey}|null} params.location
  * @param {boolean} params.realTeam người chơi có đòi đội hình thật không
  */
-export function trainerBattleLevel({ tier, location, realTeam = false, rng = Math.random }) {
+export function trainerBattleLevel({ tier, location, realTeam = false, slot, rng = Math.random }) {
+  // Tứ Thiên Vương / Champion luôn dùng bảng endgame cố định. `realTeam`
+  // không nhân level thêm nữa, tránh vượt 100 hoặc lệch khỏi đội hình đã duyệt.
+  if (tier === 'elite' || tier === 'champion') return leagueTeamLevel(tier, slot, rng)
   if (tier === 'gym') {
     if (!realTeam) return GYM_TEST_LEVEL
     const span = GYM_REAL_TEAM_MAX - GYM_REAL_TEAM_MIN

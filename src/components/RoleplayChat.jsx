@@ -72,6 +72,25 @@ const OUTCOME_TEXT = {
   caught: 'NGƯỜI CHƠI BẮT ĐƯỢC POKÉMON hoang dã trong khu Safari (đã vào đội hình)',
 }
 
+const LEAGUE_TEAM_SIZE = 6
+
+// Tính vị trí kế tiếp trong đội 6 Pokémon của Tứ Thiên Vương/Champion.
+// Mỗi [[BATTLE]] đơn tiêu thụ 1 ô; đấu đôi tiêu thụ 2 ô. Sau đủ 6 ô tự
+// quay về 0, nên khi chuyển sang người tiếp theo trong chuỗi Elite Four,
+// đội hình lại bắt đầu đúng từ cặp level thấp nhất.
+function nextLeagueTeamSlot(messages, currentIndex, tier) {
+  if (tier !== 'elite' && tier !== 'champion') return null
+  let used = 0
+  for (let index = 0; index < currentIndex; index++) {
+    const message = messages[index]
+    if (!message?.battleStarted || message.trainerTier !== tier) continue
+    const count = Number(message.trainerTeamCount)
+      || (message.battleMode === 'double' ? Math.max(2, message.enemySnapshots?.length ?? 0) : 1)
+    used += count
+  }
+  return used % LEAGUE_TEAM_SIZE
+}
+
 function PokeballIcon({ size = 26 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" style={{ display: 'block' }}>
@@ -1815,10 +1834,28 @@ ${m.content}`
                     const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
                     const mentioned = detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
                     const speciesEntry = mentioned || pokedexSpecies[Math.floor(Math.random() * pokedexSpecies.length)]
+                    const leagueSlotBase = nextLeagueTeamSlot(messages, i, battleCtx.tier)
                     const levelFor = (entry, offset = 0) => {
-                      const base = battleCtx.isTrainer
-                        ? trainerBattleLevel({ tier: battleCtx.tier, location: playerLocation, realTeam: battleCtx.realTeam })
-                        : wildLevel({ location: playerLocation, entry }).level
+                      if (battleCtx.isTrainer) {
+                        // League dùng đúng bảng 6 ô: Elite 85/85/90/90/95/95,
+                        // Champion 98/98/99/99/100/100. Trainer thường giữ
+                        // logic cũ; Pokémon thứ hai trong đấu đôi chỉ nhỉnh +1.
+                        if (leagueSlotBase != null) {
+                          return trainerBattleLevel({
+                            tier: battleCtx.tier,
+                            location: playerLocation,
+                            realTeam: battleCtx.realTeam,
+                            slot: leagueSlotBase + offset,
+                          })
+                        }
+                        const base = trainerBattleLevel({
+                          tier: battleCtx.tier,
+                          location: playerLocation,
+                          realTeam: battleCtx.realTeam,
+                        })
+                        return Math.max(1, Math.min(100, base + offset))
+                      }
+                      const base = wildLevel({ location: playerLocation, entry }).level
                       return Math.max(1, Math.min(100, base + offset))
                     }
                     const decorateTrainer = (mon) => {
@@ -1845,6 +1882,8 @@ ${m.content}`
                       setEnemyMon(duo[0])
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
                         ...mm, battleStarted: true, battleMode: 'double', doubleReason: doubleCtx.reason,
+                        trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase,
+                        trainerTeamCount: doubleCtx.isDouble ? 2 : 1,
                         enemySnapshot: duo[0], enemySnapshots: duo,
                       } : mm))
                     } else {
@@ -1853,7 +1892,9 @@ ${m.content}`
                       ))
                       setEnemyMon(mon)
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
-                        ...mm, battleStarted: true, battleMode: 'single', enemySnapshot: mon,
+                        ...mm, battleStarted: true, battleMode: 'single',
+                        trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase, trainerTeamCount: 1,
+                        enemySnapshot: mon,
                       } : mm))
                     }
                   } else if (m.battleMode === 'double' && m.enemySnapshots?.length) {

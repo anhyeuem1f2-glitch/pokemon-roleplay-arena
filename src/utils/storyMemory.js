@@ -229,9 +229,13 @@ export async function recallRelevant({ embeddingConfig, rerankConfig, queryText,
 /** Dựng ghi chú ký ức chèn vào prompt (role user, kiểu note hệ thống quen thuộc của app). */
 export function buildMemoryNote(memories) {
   if (!memories?.length) return null
-  const lines = memories.map((m, i) => `${i + 1}. ${m.text.replace(/\n/g, ' — ')}`)
+  const lines = memories.map((m, i) => {
+    const turn = Number.isFinite(m.storyTurn) ? `lượt ${m.storyTurn}` : Number.isFinite(m.turn) ? `mốc ${m.turn}` : 'mốc cũ'
+    const chapter = Number.isFinite(m.chapter) ? `, chương ${m.chapter}` : ''
+    return `${i + 1}. [${turn}${chapter}] ${m.text.replace(/\n/g, ' — ')}`
+  })
   return [
-    '[Hệ thống — KÝ ỨC DÀI HẠN: dưới đây là các diễn biến CŨ trong truyện có liên quan tới tình huống hiện tại, được truy hồi tự động. Hãy dùng chúng để giữ mạch truyện, tên nhân vật, lời hứa, ân oán... NHẤT QUÁN. KHÔNG kể lại nguyên văn, không nhắc tới ghi chú này.]',
+    '[Hệ thống — BIÊN NIÊN SỬ DÀI HẠN: dưới đây là các diễn biến CŨ được truy hồi từ bản lưu chính xác, có thể cách hiện tại hàng nghìn lượt. Dữ kiện cụ thể trong bản lưu có ưu tiên cao hơn suy đoán/tóm tắt. Dùng để giữ tên, lời hứa, vật chứng, quan hệ và hệ quả NHẤT QUÁN; không kể lại nguyên văn, không nhắc tới ghi chú này.]',
     ...lines,
   ].join('\n')
 }

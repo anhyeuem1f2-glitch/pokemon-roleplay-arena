@@ -2420,3 +2420,16 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 
 **LIÊN ĐOÀN DÙNG BẢNG LEVEL CỐ ĐỊNH, KHÔNG CÒN RƠI VỀ CÔNG THỨC TRAINER THƯỜNG.** Mỗi Tứ Thiên Vương có đội 6 Pokémon theo thứ tự `Lv85, Lv85, Lv90, Lv90, Lv95, Lv95`; sau đủ sáu ô, người tiếp theo bắt đầu lại từ cặp Lv85. Champion có đúng `Lv98, Lv98, Lv99, Lv99, Lv100, Lv100`. App lưu `trainerTeamSlot` vào message để các marker battle nối tiếp lấy đúng ô; đấu đôi tiêu thụ hai ô cùng lúc. Quy tắc này ghi đè level canon thấp hơn trong dữ liệu tham khảo và không bị `realTeam` nhân vượt Lv100.
 
+## Cập nhật (đợt 85) — Nature tác động cả chỉ số lẫn hành vi nhập vai
+
+**NATURE VẪN GIỮ NGUYÊN CƠ CHẾ CHỈ SỐ.** Công thức ±10% Atk/Def/SpA/SpD/Speed theo 25 Nature không bị thay đổi. Regression mới kiểm tra trực tiếp Adamant vẫn tăng Attack và giảm Special Attack so với Hardy trên cùng một cá thể.
+
+**HỒ SƠ HÀNH VI NAY LÀ SYSTEM INSTRUCTION THẬT.** Cả 25 Nature có mô tả hành vi tương ứng và được gửi trong mọi lượt chính văn bằng `role: system`, không còn là một tin `user` tự gắn nhãn hệ thống. AI được yêu cầu thể hiện Nature qua phản ứng, tiếng kêu, thói quen, mức chủ động và cách nghe lời/bướng bỉnh; không chỉ gọi tên tính cách và không lặp một cử chỉ máy móc ở mọi đoạn.
+
+**NATURE VÀ FRIENDSHIP PHỐI HỢP THAY VÌ GHI ĐÈ NHAU.** Friendship quyết định mức tin tưởng/phối hợp nhưng không xoá khí chất nền: Pokémon Timid rất thân có thể cố vượt sợ hãi để bảo vệ người chơi; Pokémon Adamant gắn bó vẫn bướng theo cách thân thiết. Prompt cũng nhắc không tự thả cả đội khỏi Poké Ball chỉ để phô diễn tính cách.
+
+**KHÔNG BỎ SÓT POKÉMON ĐANG HOẠT ĐỘNG.** `buildPartyBehaviorNote()` hợp nhất `playerMon` với party theo `uid`, nên save cũ hoặc thời điểm hai React setter chưa đồng bộ vẫn gửi đúng Nature của cá thể đang xuất hiện. Pokémon có nickname được ghi cả nickname lẫn tên loài để chính văn không nhầm hai cá thể cùng loài.
+
+**HỘI THOẠI BATTLE/SAFARI CŨNG DÙNG NATURE.** Khi người chơi nói chuyện, thuyết phục hoặc dụ Pokémon, prompt trực tiếp nay nhận Nature của đối phương; phản ứng và kết quả thuyết phục phải xét cả tập tính loài, Nature, HP và hoàn cảnh. API chau chuốt văn phong nhận cùng hồ sơ để không vô tình trung hoà hoặc đảo ngược nét hành vi đã viết.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–85 đều PASS. `test-dot85.mjs` bao phủ đủ ánh xạ 25 Nature, tác động stat, hồ sơ hành vi, Friendship, active-mon fallback, khử trùng `uid`, system role, battle/Safari và bảo toàn qua API chau chuốt.

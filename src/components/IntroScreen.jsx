@@ -19,6 +19,7 @@ import { extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { clearMemory, rememberExchange } from '../utils/storyMemory.js'
+import { archiveExchange, clearArchive } from '../utils/storyArchive.js'
 import { addFact, clearNotebook, upsertNpc } from '../utils/storyNotebook.js'
 import { clearSummary } from '../utils/storySummary.js'
 import { resetDirectorState } from '../data/storyDirector.js'
@@ -121,7 +122,7 @@ function PickCard({ selected, title, desc, onClick, compact }) {
   )
 }
 
-export default function IntroScreen({ onOpenSettings, onOpenDev }) {
+export default function IntroScreen({ onOpenSettings }) {
   const {
     apiConfig, character, stylePreset, mainPreset, assistantPrefill,
     setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
@@ -324,6 +325,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setPokemonLife({ ...DEFAULT_POKEMON_LIFE })
     setTradeState({ ...DEFAULT_TRADE_STATE })
     clearMemory()
+    await clearArchive()
     clearNotebook()
     clearSummary()
     resetDirectorState()
@@ -442,6 +444,12 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
         }
       }
       const embCfg = memoryApiConfig?.embedding
+      archiveExchange(
+        `Mở đầu: ${finalName} (${identity.name}), xuất thân ${originArea?.name ?? originRegion?.name}, ngày ${d}/${m}/${y}.`,
+        openingText,
+        2,
+        1,
+      ).catch((archiveErr) => console.warn('[archive] ghi mở đầu lỗi (bỏ qua):', archiveErr.message))
       if (embCfg?.baseUrl && embCfg?.model) {
         rememberExchange(
           embCfg,
@@ -500,9 +508,6 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 <button className="btn intro-hero-btn intro-hero-btn--secondary" onClick={onOpenSettings}>
                   Cài đặt API
                 </button>
-                {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev') && (
-                  <button className="btn intro-hero-btn intro-hero-btn--secondary" onClick={onOpenDev}>Chế độ Dev</button>
-                )}
               </div>
             </div>
 

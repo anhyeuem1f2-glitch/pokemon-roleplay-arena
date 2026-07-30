@@ -7,6 +7,8 @@ import DevPage from './components/DevPage.jsx'
 import PlayerHUD from './components/PlayerHUD.jsx'
 import RightHUD from './components/RightHUD.jsx'
 import MoveLearnModal from './components/MoveLearnModal.jsx'
+import AdminModal from './components/AdminModal.jsx'
+import { isAdminShortcut } from './data/adminMode.js'
 
 function GearIcon() {
   return (
@@ -16,17 +18,6 @@ function GearIcon() {
     </svg>
   )
 }
-
-// ===== CỜ PUBLIC BETA (đợt 49) =====
-// Nút "Chế độ Dev" mặc định ẨN Ở MỌI NƠI (kể cả chạy local) — KHÔNG còn dựa
-// vào import.meta.env.PROD nữa (thực chiến: build trên Netlify không đảm
-// bảo biến env như kỳ vọng → nút vẫn lộ trên bản deploy). Cách duy nhất
-// mở Dev: thêm ?dev=1 vào URL (VD http://localhost:5173/?dev=1 hoặc
-// https://ten-site.netlify.app/?dev=1) — deterministic, môi trường nào
-// cũng vậy, người chơi thường không bao giờ thấy.
-const SHOW_DEV_MODE =
-  typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev')
-
 
 // ===== MOBILE (đợt 53) =====
 // Bố cục 3 cột (HUD trái + truyện + HUD phải) không vừa màn hình điện thoại.
@@ -46,23 +37,41 @@ function useIsMobile(breakpoint = 820) {
 }
 
 export default function App() {
-  const { apiConfig, gameStarted, setGameStarted } = useGame()
+  const { apiConfig, gameStarted, setGameStarted, adminMode } = useGame()
   const [showSettings, setShowSettings] = useState(false)
   const [showDev, setShowDev] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
   const isMobile = useIsMobile()
   // Trên mobile: mở/đóng từng HUD (mặc định đóng — chính văn là chính).
   const [mobilePanel, setMobilePanel] = useState(null) // null | 'left' | 'right'
   const configured = Boolean(apiConfig.baseUrl && apiConfig.model)
 
+  // Giao thức kín: không có nút, query URL hay gợi ý trên UI thường.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!isAdminShortcut(event)) return
+      event.preventDefault()
+      event.stopPropagation()
+      setAdminOpen(true)
+    }
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
+
+  const adminOverlay = adminOpen
+    ? <AdminModal onClose={() => setAdminOpen(false)} onOpenDev={() => setShowDev(true)} />
+    : null
+
   if (showSettings) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-deep)' }}>
         <SettingsPage onBack={() => setShowSettings(false)} />
+        {adminOverlay}
       </div>
     )
   }
 
-  if (showDev) {
+  if (showDev && adminMode) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-deep)' }}>
         {/* onEnterGame (đợt 45): SimulationTester setGameStarted(true) xong
@@ -70,13 +79,14 @@ export default function App() {
             không đóng thì người chơi kẹt lại ở màn Dev dù truyện đã sẵn sàng
             (bug "giả lập xong không vào màn chơi"). */}
         <DevPage onBack={() => setShowDev(false)} onEnterGame={() => setShowDev(false)} />
+        {adminOverlay}
       </div>
     )
   }
 
   if (!gameStarted) {
     // Màn hình mở đầu full-bleed, không có header chung để giữ cảm giác title screen.
-    return <IntroScreen onOpenSettings={() => setShowSettings(true)} onOpenDev={() => setShowDev(true)} />
+    return <><IntroScreen onOpenSettings={() => setShowSettings(true)} />{adminOverlay}</>
   }
 
   return (
@@ -104,11 +114,6 @@ export default function App() {
           <span className={`status-pill ${configured ? 'status-pill--ok' : ''}`}>
             {configured ? apiConfig.model : 'Chưa cấu hình API'}
           </span>
-          {SHOW_DEV_MODE && (
-            <button className="btn" onClick={() => setShowDev(true)}>
-              Chế độ Dev
-            </button>
-          )}
           <button
             className="btn"
             onClick={() => setShowSettings(true)}
@@ -121,6 +126,7 @@ export default function App() {
       </header>
 
       <MoveLearnModal />
+      {adminOverlay}
 
       {/* Mobile (đợt 53): 2 nút bật/tắt HUD thay cho 2 cột dọc. */}
       {isMobile && (

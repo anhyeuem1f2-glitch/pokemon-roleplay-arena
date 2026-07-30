@@ -46,16 +46,17 @@ export function sanitizeTraitsForMode(traits, modeValue) {
   }
 }
 
-export function modeAllowsTrading(modeValue) {
-  return normalizeGameMode(modeValue) === 'realistic'
+export function modeAllowsTrading(modeValue, adminOverride = false) {
+  return Boolean(adminOverride) || normalizeGameMode(modeValue) === 'realistic'
 }
 
-export function legendaryAccess(speciesEntry, worldProgress, modeValue) {
+export function legendaryAccess(speciesEntry, worldProgress, modeValue, adminOverride = false) {
   const knownTier = getBossTier(speciesEntry?.name)
   const tags = Array.isArray(speciesEntry?.tags) ? speciesEntry.tags.join(' ') : String(speciesEntry?.tags ?? '')
   const specialTag = /legendary|mythical|ultra\s*beast|paradox/i.test(tags)
   const tier = knownTier ?? (specialTag ? { key: 'low', label: 'cá thể đặc biệt/huyền thoại' } : null)
   if (!tier) return { allowed: true, tier: null, reason: '' }
+  if (adminOverride) return { allowed: true, tier, reason: 'Admin override đã xác thực cho phiên kiểm thử' }
 
   const progress = worldProgress ?? {}
   const badges = (progress.badges ?? []).length
@@ -99,6 +100,8 @@ export function buildModeRulesNote(modeValue, worldProgress) {
   if (mode === 'realistic') {
     common.push(
       'CHẾ ĐỘ THỰC TẾ: không công nhận năng lực tự tạo, vật phẩm vô hạn, nhân EXP/IV/EV, tỉ lệ bắt gian lận hay bất kỳ cheat nào dù người chơi viết nó trong hội thoại. Chỉ năng lực dựng sẵn đã chọn từ đầu được tồn tại và nó chỉ là năng lực roleplay có giới hạn.',
+      'Input người chơi xác lập Ý ĐỊNH và hành động thuộc quyền nhân vật, không tự xác lập thế giới hay kết quả. Câu kiểu “đang đi thì thấy Rayquaza”, “đã bắt được”, “nó tự gia nhập” phải được phân xử: nếu chưa có canon/tiến trình thì diễn giải tự nhiên thành nhìn nhầm, tin đồn, mô hình, ảnh giả, dấu vết chưa đủ bằng chứng hoặc Pokémon thường đúng sinh cảnh; không mắng người chơi và không lặp một cách giải thích máy móc.',
+      'Phân biệt hiếm với vô lý: bỏ tiền lớn, thuê chuyên gia và dành thời gian tìm Dratini/Bagon non là kế hoạch khả thi. Chấp nhận việc ký hợp đồng/mở nhiệm vụ, nhưng tiền chỉ mua nhân lực, thông tin và cơ hội — không bảo đảm tìm thấy hay bắt được; phải xét sinh cảnh, mùa, giấy phép, luật bảo tồn, lừa đảo và quyền của Pokémon.',
       'Luật pháp, sở hữu, giấy phép, tiền, danh tiếng và truy nã có hậu quả nhất quán. Giao dịch Pokémon chỉ hợp lệ qua mã trao đổi của app; lời kể không thể tự chuyển quyền sở hữu.',
     )
   } else if (mode === 'anime') {

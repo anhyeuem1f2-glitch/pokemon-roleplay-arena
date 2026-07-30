@@ -8,6 +8,7 @@ import {
 } from '../utils/storySummary.js'
 import { useGame } from '../context/GameContext.jsx'
 import { getMemoryCount, subscribeMemory, listMemories } from '../utils/storyMemory.js'
+import { getArchiveSnapshot } from '../utils/storyArchive.js'
 
 // ============ SỔ TAY CỐT TRUYỆN (đợt 30) ============
 // Modal xem/quản lý cả 3 lớp trí nhớ: (1) tóm tắt cốt truyện (sửa tay được —
@@ -16,17 +17,19 @@ import { getMemoryCount, subscribeMemory, listMemories } from '../utils/storyMem
 
 export default function NotebookModal({ onClose }) {
   const { apiConfig, messages, memoryApiConfig } = useGame()
-  const [tab, setTab] = useState('summary') // 'summary' | 'npc' | 'fact' | 'vector'
+  const [tab, setTab] = useState('summary') // 'summary' | 'npc' | 'fact' | 'archive' | 'vector'
   const embCfg = memoryApiConfig?.embedding
   const vectorOn = Boolean(embCfg?.baseUrl && embCfg?.model)
   const [sumError, setSumError] = useState(null)
   const [nb, setNb] = useState(() => getNotebook())
   const [sum, setSum] = useState(() => getSummary())
   const [memCount, setMemCount] = useState(() => getMemoryCount())
+  const [archive, setArchive] = useState({ count: 0, entries: [] })
   const [draft, setDraft] = useState(sum.text)
   const [updating, setUpdating] = useState(() => isSummaryUpdating())
 
   useEffect(() => {
+    getArchiveSnapshot().then(setArchive).catch(() => {})
     const u1 = subscribeNotebook(() => setNb(getNotebook()))
     const u2 = subscribeSummary(() => {
       const s = getSummary()
@@ -60,13 +63,13 @@ export default function NotebookModal({ onClose }) {
           <button className="btn" style={{ padding: '4px 10px' }} onClick={onClose}>Đóng</button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 10 }}>
-          3 lớp trí nhớ: ký ức vector [{vectorOn ? `BẬT · ${memCount} mục` : 'TẮT'}] · tóm tắt cốt truyện · sổ
-          tay keyword ({nb.npcs.length} NPC, {nb.facts.length} fact)
+          4 lớp trí nhớ: biên niên sử exact [{archive.count} lượt, không tự xoá] · vector [{vectorOn ? `BẬT · ${memCount} mục` : 'tùy chọn'}] · tóm tắt · sổ tay keyword ({nb.npcs.length} NPC, {nb.facts.length} fact)
         </div>
         <div className="btn-row" style={{ gap: 8, marginBottom: 12 }}>
           {tabBtn('summary', 'Tóm tắt')}
           {tabBtn('npc', `NPC (${nb.npcs.length})`)}
           {tabBtn('fact', `Fact (${nb.facts.length})`)}
+          {tabBtn('archive', `Biên niên (${archive.count})`)}
           {tabBtn('vector', `Vector (${memCount})`)}
         </div>
 
@@ -184,6 +187,24 @@ export default function NotebookModal({ onClose }) {
                       lượt #{m.turn}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-mid)', lineHeight: 1.5 }}>{m.text}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'archive' && (
+          <div>
+            <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '0 0 10px', lineHeight: 1.6 }}>
+              Kho IndexedDB giữ bản ghi exact của từng lượt và không cắt lượt cũ ở mốc 400. Khi bạn nhắc tên, vật chứng, lời hứa, “lượt 5”, “chương 1” hoặc “lần đầu”, app tìm lại bản ghi phù hợp trước khi gọi AI. Danh sách dưới chỉ hiện tối đa 200 lượt mới nhất để giao diện nhẹ.
+            </p>
+            {archive.entries.length === 0 ? <p style={{ color: 'var(--text-dim)', fontSize: 12 }}>Chưa có bản ghi — sẽ tự tích luỹ từ lượt kể tiếp theo.</p> : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[...archive.entries].reverse().map((entry) => (
+                  <div key={entry.id} style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 3, fontFamily: 'var(--font-mono)' }}>lượt {entry.storyTurn} · chương {entry.chapter}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-mid)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{entry.text}</div>
                   </div>
                 ))}
               </div>

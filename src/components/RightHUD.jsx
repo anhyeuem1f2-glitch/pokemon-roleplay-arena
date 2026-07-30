@@ -20,7 +20,7 @@ import { modeAllowsTrading } from '../data/gameModes.js'
 
 export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const [saveOpen, setSaveOpen] = useState(false)
-  const { playerLocation, setPlayerLocation, storyDate, pokedexRecords, pokedexSpecies, worldProgress, pokemonLife, storyTone,
+  const { adminMode, playerLocation, setPlayerLocation, storyDate, pokedexRecords, pokedexSpecies, worldProgress, pokemonLife, storyTone,
   } = useGame()
   const [mapOpen, setMapOpen] = useState(false)
   const [notebookOpen, setNotebookOpen] = useState(false)
@@ -130,8 +130,8 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
         ⛺ Đời sống · {pokemonLife.eggs.length} trứng
       </button>
 
-      {modeAllowsTrading(storyTone) && <button className="btn" style={{ width: '100%', borderColor: 'var(--amber)' }} onClick={() => setTradeOpen(true)}>
-        ⇄ Trao đổi (Thực tế)
+      {modeAllowsTrading(storyTone, adminMode) && <button className="btn" style={{ width: '100%', borderColor: 'var(--amber)' }} onClick={() => setTradeOpen(true)}>
+        {adminMode && !modeAllowsTrading(storyTone) ? '⇄ Trao đổi (Admin test)' : '⇄ Trao đổi (Thực tế)'}
       </button>}
 
       <div style={{ flex: 1 }} />

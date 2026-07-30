@@ -4,20 +4,20 @@ import { acceptTradePacket, decodeTradePacket, encodeTradePacket, makeTradeOffer
 import { modeAllowsTrading } from '../data/gameModes.js'
 
 export default function TradeModal({ onClose }) {
-  const { storyTone, trainerId, trainerCode, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, tradeState, setTradeState } = useGame()
+  const { adminMode, storyTone, trainerId, trainerCode, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, tradeState, setTradeState } = useGame()
   const owned = useMemo(() => [...party, ...pcBox].filter((mon, index, all) => all.findIndex((x) => x.uid === mon.uid) === index), [party, pcBox])
   const [selectedId, setSelectedId] = useState(owned[0]?.uid ?? '')
   const [recipientCode, setRecipientCode] = useState('')
   const [packetText, setPacketText] = useState('')
   const [receiptText, setReceiptText] = useState('')
   const [notice, setNotice] = useState('')
-  const allowed = modeAllowsTrading(storyTone)
+  const allowed = modeAllowsTrading(storyTone, adminMode)
 
   function createOffer() {
     try {
       const mon = owned.find((item) => item.uid === selectedId)
       if (!mon) throw new Error('Hãy chọn Pokémon cần gửi.')
-      const offer = makeTradeOffer(mon, trainerId, recipientCode, storyTone)
+      const offer = makeTradeOffer(mon, trainerId, recipientCode, storyTone, adminMode)
       setTradeState((cur) => ({ ...cur, escrow: [...cur.escrow, offer] }))
       setParty((cur) => cur.filter((item) => item.uid !== mon.uid))
       setPcBox((cur) => cur.filter((item) => item.uid !== mon.uid))
@@ -30,7 +30,7 @@ export default function TradeModal({ onClose }) {
   function receive() {
     try {
       const packet = decodeTradePacket(packetText)
-      const result = acceptTradePacket(packet, trainerId, trainerCode, tradeState, owned, storyTone)
+      const result = acceptTradePacket(packet, trainerId, trainerCode, tradeState, owned, storyTone, adminMode)
       if (party.length < 6) {
         setParty((cur) => [...cur, result.pokemon])
         setPlayerMon((cur) => cur ?? result.pokemon)
@@ -54,6 +54,7 @@ export default function TradeModal({ onClose }) {
       <div onClick={(event) => event.stopPropagation()} className="panel" style={{ width: 'min(860px,97vw)', maxHeight: '93vh', overflowY: 'auto', borderRadius: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><div style={{ color: 'var(--amber)', fontSize: 10, fontWeight: 800 }}>MULTIPLAYER THỬ NGHIỆM</div><h2 className="page-title" style={{ margin: 0 }}>Trao đổi Pokémon</h2></div><button className="btn" onClick={onClose}>✕ Đóng</button></div>
         {!allowed ? <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--amber)', borderRadius: 10 }}>Tính năng bị khoá: chỉ chế độ Thực tế mới được chuyển quyền sở hữu Pokémon.</div> : <>
+          {adminMode && modeAllowsTrading(storyTone) === false && <div style={{ marginTop: 10, color: 'var(--amber)', fontSize: 11 }}>Admin override: đang kiểm thử trao đổi ngoài chế độ Thực tế.</div>}
           <div style={{ marginTop: 12, padding: 10, border: '1px solid var(--line)', borderRadius: 9, color: 'var(--text-mid)', fontSize: 11.5 }}>Mã trainer công khai: <b style={{ color: 'var(--mint)', fontFamily: 'var(--font-mono)' }}>{trainerCode}</b>. Đây là thử nghiệm ngang hàng bằng gói JSON; muốn chống sao chép tuyệt đối cần máy chủ trung tâm.</div>
           {notice && <div style={{ marginTop: 10, color: 'var(--amber)' }}>{notice}</div>}
           <Panel title="1. Tạo đề nghị gửi">

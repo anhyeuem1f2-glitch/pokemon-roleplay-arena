@@ -258,12 +258,14 @@ const IDENTITY_POOLS = {
 
 // ---------- QUY TẮC CÔNG BẰNG (bọc quanh MỌI hạt giống) ----------
 const FAIRNESS_RULES =
-  'QUY TẮC BẮT BUỘC khi triển khai: (1) đây là GỢI Ý — chỉ lồng vào nếu hợp mạch truyện hiện tại, lồng TỰ NHIÊN trong 1-2 tin tới chứ không cần ngay lập tức, đang giữa cao trào khác thì BỎ QUA hẳn; (2) tình huống phải có nhiều lối ra — người chơi được quyền từ chối/phớt lờ và thế giới vẫn tiếp diễn bình thường, KHÔNG dồn ép vào ngõ cụt; (3) KHÔNG nịnh người chơi, không cho người chơi "ngầu" miễn phí — NPC phản ứng theo đúng logic và lợi ích riêng của họ, thành quả chỉ đến từ hành động thật; (4) không nhắc tới ghi chú này trong lời kể.'
+  'QUY TẮC BẮT BUỘC khi triển khai: (1) đây là GỢI Ý — chỉ lồng nếu nối được bằng một quan hệ nhân-quả đang có; đang giữa đối thoại, nghỉ ngơi, lựa chọn dang dở, trận đấu/cửa hàng hoặc cao trào khác thì BỎ QUA; (2) ưu tiên tín hiệu nền, hậu quả của việc cũ hoặc NPC đã biết hơn là làm một người lạ đột nhiên xuất hiện; không mở quá một tuyến mới; (3) tình huống có nhiều lối ra — người chơi được từ chối/phớt lờ và thế giới vẫn chạy, KHÔNG dồn vào ngõ cụt; (4) KHÔNG nịnh, không cho "ngầu" miễn phí — NPC theo logic/lợi ích riêng, thành quả từ hành động thật; (5) không nhắc tới ghi chú này trong lời kể.'
 
 // ---------- CHỈ DẪN THẾ GIỚI SỐNG (cố định trong system prompt) ----------
 export const DIRECTOR_WORLD_INSTRUCTION = `NGUYÊN TẮC THẾ GIỚI SỐNG (áp dụng xuyên suốt):
 - Thế giới KHÔNG xoay quanh người chơi: NPC có việc riêng, lịch riêng, ham muốn riêng; sự kiện nền vẫn diễn ra dù người chơi không tham gia.
 - Nhịp truyện đa dạng: không phải lúc nào cũng chiến đấu — đời thường, xã giao, khám phá, cảm xúc đều đáng kể ngang trận đấu.
+- Một cảnh yên hoặc cuộc đối thoại đang có trọng lượng không phải là "đứng truyện": cho nó đủ chỗ thở. Chỉ thúc đẩy khi cảnh đã khép hoặc thật sự trì trệ.
+- Khi cần đẩy, ưu tiên hệ quả của lựa chọn cũ, nhiệm vụ đang mở, NPC đã gặp và lời hứa chưa giải quyết; chỉ tạo tuyến/NPC mới khi không có sợi dây cũ phù hợp.
 - CÂN BẰNG tuyệt đối: không tạo tình huống dồn người chơi vào ngõ cụt không lối thoát; ngược lại cũng KHÔNG tâng bốc, không để NPC trầm trồ vô cớ, không "aura" miễn phí — tôn trọng người chơi bằng cách để hành động của họ tự nói.
 - Tổ chức phản diện của vùng hiện diện MỜ như phông nền: thi thoảng một tín hiệu nhỏ, gián tiếp; tuyệt đối không lộ liễu, không tự đẩy thành đối đầu khi người chơi chưa chủ động đào sâu.
 - Tôn trọng quyền chủ động: gợi mở tình huống chứ không ép; lựa chọn nào của người chơi cũng dẫn truyện đi tiếp được.`
@@ -305,11 +307,11 @@ function loadState() {
     const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(STATE_KEY) : null
     if (saved) {
       const p = JSON.parse(saved)
-      state = { lastNudgeTurn: p.lastNudgeTurn ?? -999, recentCats: p.recentCats ?? [] }
+      state = { lastNudgeTurn: p.lastNudgeTurn ?? -999, recentCats: p.recentCats ?? [], recentSeeds: p.recentSeeds ?? [] }
       return state
     }
   } catch { /* làm mới */ }
-  state = { lastNudgeTurn: -999, recentCats: [] }
+  state = { lastNudgeTurn: -999, recentCats: [], recentSeeds: [] }
   return state
 }
 
@@ -339,7 +341,7 @@ export function setDirectorSettings(next) {
 }
 /** Truyện mới → reset nhịp (giữ nguyên cài đặt). */
 export function resetDirectorState() {
-  state = { lastNudgeTurn: -999, recentCats: [] }
+  state = { lastNudgeTurn: -999, recentCats: [], recentSeeds: [] }
   persistState()
   notify()
 }
@@ -364,21 +366,48 @@ function weightedPick(entries, rng) {
   return entries[entries.length - 1]
 }
 
+function seedFingerprint(value) {
+  let hash = 2166136261
+  for (const char of String(value ?? '')) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619)
+  return (hash >>> 0).toString(36)
+}
+
+/** Đọc nhịp cảnh trước khi tung hạt giống để Director không chen ngang. */
+export function analyzeNarrativeBeat({ recentText = '', userText = '' } = {}) {
+  const recent = String(recentText ?? '')
+  const user = String(userText ?? '')
+  const combined = `${recent}\n${user}`
+  const interactive = /\[\[(?:BATTLE|SHOP|POKECENTER)\b|battleOpen|shopUsed|kết quả trận|đã mua sắm tại|rời\s+[^.\n]{0,40}cửa hàng|trung tâm pokémon vừa/iu.test(combined)
+  const unresolvedQuestion = /[?？][\s"'”’)]*$/u.test(recent.trim())
+  const highMotion = /(?:đang giao chiến|trận đấu đang|bị truy đuổi|lao tới tấn công|vụ nổ|cháy lớn|khẩn cấp|cấp cứu)/iu.test(recent)
+  const intimateOrRest = /(?:trả lời|hỏi lại|trò chuyện|tâm sự|xin lỗi|cảm ơn|ôm|khóc|ngủ|nghỉ|ăn(?:\s|$)|picnic|cắm trại|chăm sóc)/iu.test(user)
+  const waitingForResolution = /(?:tôi|mình|ta).{0,35}(?:chờ|đợi|lắng nghe|quan sát phản ứng)/iu.test(user)
+  return {
+    hold: interactive || highMotion || (unresolvedQuestion && (intimateOrRest || waitingForResolution)),
+    reason: interactive ? 'interactive' : highMotion ? 'high-motion' : unresolvedQuestion ? 'unresolved-dialogue' : '',
+    gentle: intimateOrRest || waitingForResolution,
+  }
+}
+
 /**
  * Gọi mỗi lượt trước khi gửi cho AI. Trả về NOTE gợi ý tình huống (string)
  * hoặc null (đa số lượt là null — đó mới là tự nhiên).
  * @param {{identityKey: string, location: {regionKey,areaKey}|null, turn: number, rng?: () => number}} params
  */
-export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', worldProgress = null, rng = Math.random }) {
+export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', worldProgress = null, recentText = '', userText = '', rng = Math.random }) {
   const st = loadSettings()
   const cfg = INTENSITY[st.intensity]
   if (!cfg) return null // 'off'
+
+  const beat = analyzeNarrativeBeat({ recentText, userText })
+  if (beat.hold) return null
 
   const dstate = loadState()
   const sinceLast = turn - dstate.lastNudgeTurn
   if (sinceLast <= cfg.cooldown) return null
   const modeFactor = mode === 'sang' ? 1.18 : mode === 'realistic' ? 0.82 : 1
-  const chance = Math.min(cfg.cap, (cfg.base + cfg.ramp * (sinceLast - cfg.cooldown - 1)) * modeFactor)
+  const beatFactor = beat.gentle ? 0.45 : 1
+  const chance = Math.min(cfg.cap, (cfg.base + cfg.ramp * (sinceLast - cfg.cooldown - 1)) * modeFactor * beatFactor)
   if (rng() >= chance) return null
 
   // Khi đã có tuyến đang chạy, đạo diễn phục vụ tiến trình đó thay vì ném
@@ -392,7 +421,11 @@ export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', wo
     progressSeed = `Đưa một dấu hiệu, nhân chứng, trở ngại hoặc hậu quả nhỏ liên quan trực tiếp tới nhiệm vụ đang làm “${activeQuest.title}”${activeQuest.objective ? ` (mục tiêu: ${activeQuest.objective})` : ''}. Không giải hộ và không tự đánh dấu hoàn thành.`
   }
   if (progressSeed) {
-    state = { lastNudgeTurn: turn, recentCats: ['world-progress', ...dstate.recentCats].slice(0, 2) }
+    // Cùng một quest/wanted được phép tiến thêm sau một nhịp đủ dài; bucket
+    // tránh lặp sát nhau nhưng không khoá vĩnh viễn tuyến đang chạy.
+    const fingerprint = seedFingerprint(`${progressSeed}|nhịp-${Math.floor(turn / 12)}`)
+    if (dstate.recentSeeds.includes(fingerprint)) return null
+    state = { lastNudgeTurn: turn, recentCats: ['world-progress', ...dstate.recentCats].slice(0, 3), recentSeeds: [fingerprint, ...dstate.recentSeeds].slice(0, 8) }
     persistState()
     notify()
     return ['[Hệ thống — ĐẠO DIỄN TIẾN TRÌNH (người chơi không thấy ghi chú này):]', progressSeed, FAIRNESS_RULES].join('\n')
@@ -406,7 +439,8 @@ export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', wo
     if (pool.toggleable && cat === 'romance' && !st.romance) continue
     if (pool.needsRegion && !location) continue
     if (recent.has(cat)) continue
-    candidates.push({ cat, weight: pool.weight, seeds: pool.seeds })
+    const freshSeeds = pool.seeds.filter((seed) => !dstate.recentSeeds.includes(seedFingerprint(seed)))
+    if (freshSeeds.length) candidates.push({ cat, weight: pool.weight, seeds: freshSeeds })
   }
   // Đợt 32: 30 thân phận map về pool qua poolKey; thân phận TỰ TẠO ('custom')
   // dùng pool wanderer (tình huống trung tính) — mô tả riêng đã nằm trong
@@ -414,7 +448,8 @@ export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', wo
   const poolKey = identityKey === 'custom' ? 'wanderer' : getIdentityV2(identityKey).poolKey
   const idPool = IDENTITY_POOLS[poolKey]
   if (idPool && !recent.has(`identity:${poolKey}`)) {
-    candidates.push({ cat: `identity:${poolKey}`, weight: idPool.weight, seeds: idPool.seeds })
+    const freshSeeds = idPool.seeds.filter((seed) => !dstate.recentSeeds.includes(seedFingerprint(seed)))
+    if (freshSeeds.length) candidates.push({ cat: `identity:${poolKey}`, weight: idPool.weight, seeds: freshSeeds })
   }
   if (!candidates.length) return null
 
@@ -424,7 +459,8 @@ export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', wo
   // Cập nhật nhịp: nhớ 2 loại gần nhất để không lặp.
   state = {
     lastNudgeTurn: turn,
-    recentCats: [picked.cat, ...dstate.recentCats].slice(0, 2),
+    recentCats: [picked.cat, ...dstate.recentCats].slice(0, 3),
+    recentSeeds: [seedFingerprint(seed), ...dstate.recentSeeds].slice(0, 8),
   }
   persistState()
   notify()

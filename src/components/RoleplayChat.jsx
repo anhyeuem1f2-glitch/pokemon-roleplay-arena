@@ -38,6 +38,7 @@ import { isSafariArea } from '../data/regions.js'
 import { musicManager } from '../utils/musicManager.js'
 import { VICTORY_TRACK_KEYS, DEFEAT_TRACK_KEYS } from '../data/musicTracks.js'
 import { rememberExchange, recallRelevant, buildMemoryNote, forgetMemoriesInTurnRange, clearMemory } from '../utils/storyMemory.js'
+import { archiveExchange, recallArchive, recallFromTranscript, mergeMemoryResults, forgetArchiveRange, clearArchive, backfillArchiveFromMessages } from '../utils/storyArchive.js'
 import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote, findNpcProfileInText, recordNpcBattle } from '../utils/storyNotebook.js'
 import { maybeUpdateSummary, buildSummaryNote, trimSummaryCoverage, clearSummary } from '../utils/storySummary.js'
 import { maybeMakeNudge, getIdentity } from '../data/storyDirector.js'
@@ -52,10 +53,10 @@ import { buildModeRulesNote, legendaryAccess, normalizeGameMode } from '../data/
 import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
 import { addCollectionAward } from '../data/pokemonLife.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
+import { buildInputAdjudicationNote } from '../data/inputAdjudicator.js'
 
-// Cửa sổ tin gần nhất gửi cho model khi TRÍ NHỚ DÀI HẠN đang bật (đợt 29):
-// phần cũ hơn không gửi nguyên văn nữa mà được thay bằng các "ký ức" truy
-// hồi qua embedding (+rerank). Chưa cấu hình embedding → gửi full như cũ.
+// Cửa sổ gần luôn có trần. Phần cũ được truy hồi từ biên niên sử chính xác;
+// embedding/rerank là lớp tăng cường tùy chọn, không còn là điều kiện để nhớ.
 const MEMORY_RECENT_WINDOW = 24
 
 const OUTCOME_LABEL = {
@@ -438,6 +439,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
 
 export default function RoleplayChat() {
   const {
+    adminMode,
     apiConfig,
     character,
     setCharacter,
@@ -523,6 +525,13 @@ export default function RoleplayChat() {
   useEffect(() => { latestInventoryRef.current = inventory }, [inventory])
   useEffect(() => { latestPlayerLocationRef.current = playerLocation }, [playerLocation])
   useEffect(() => { latestMessagesRef.current = messages }, [messages])
+  // Save từ các bản trước chưa có IndexedDB exact: chép nền một lần ngay khi
+  // vào màn chơi. Không chờ embedding và không chặn giao diện.
+  useEffect(() => {
+    backfillArchiveFromMessages(messages).catch((error) => console.warn('[archive] backfill bỏ qua:', error.message))
+    // Chỉ backfill snapshot lúc mount; lượt mới được archiveExchange tự ghi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Dọn ký ức + tóm tắt cho các tin bị xoá (đợt 61). idxs = mảng index bị xoá.
   // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
@@ -530,15 +539,17 @@ export default function RoleplayChat() {
     resetChat()
     closeIndexBoundUi()
     try { clearMemory() } catch { /* ignore */ }
+    void clearArchive()
     try { clearSummary() } catch { /* ignore */ }
   }
 
   function cleanupMemoryFor(idxs, newCount) {
     if (idxs.length) {
       const lo = Math.min(...idxs)
-      const hi = Math.max(...idxs)
-      // Ký ức được gắn theo turn = index tin AI lúc ghi (rememberExchange).
-      forgetMemoriesInTurnRange(lo, hi)
+      // Xoá từ nhánh bị cắt tới cuối. Giữ ký ức phía sau sẽ làm một timeline
+      // đã reroll/xoá quay lại như canon dù index của nó đã thay đổi.
+      forgetMemoriesInTurnRange(lo, Number.MAX_SAFE_INTEGER)
+      void forgetArchiveRange(lo, Number.MAX_SAFE_INTEGER)
     }
     // Kéo coverage tóm tắt về, để lần tóm tắt sau không nhắc nội dung đã xoá.
     trimSummaryCoverage(newCount)
@@ -697,7 +708,7 @@ export default function RoleplayChat() {
       // LEVEL chạy TRƯỚC EVOLVE. Một lượt tiến hoá do lên cấp thường có cả
       // [[LEVEL Fletchling | +1]] và [[EVOLVE Fletchling | Fletchinder]];
       // nếu đổi tên trước thì tag LEVEL tên cũ sẽ mất target.
-      const realisticMode = normalizeGameMode(storyTone) === 'realistic'
+      const realisticMode = normalizeGameMode(storyTone) === 'realistic' && !adminMode
       const candyStock = (latestInventoryRef.current ?? []).filter((item) => /rare\s*candy|kẹo\s*hiếm/i.test(`${item.name} ${item.id}`))
         .reduce((sum, item) => sum + Math.max(0, Number(item.qty) || 0), 0)
       const candyDebit = (parsed.items ?? []).filter((item) => item.qty < 0 && /rare\s*candy|kẹo\s*hiếm/i.test(item.name))
@@ -760,7 +771,7 @@ export default function RoleplayChat() {
           report.lines.push(`⚠ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: không phải nhánh tiến hoá trực tiếp`)
           continue
         }
-        if (normalizeGameMode(storyTone) === 'realistic' && Number.isFinite(targetEntry.evoLevel) && (targetMon.level ?? 1) < targetEntry.evoLevel) {
+        if (normalizeGameMode(storyTone) === 'realistic' && !adminMode && Number.isFinite(targetEntry.evoLevel) && (targetMon.level ?? 1) < targetEntry.evoLevel) {
           report.lines.push(`⛔ Chế độ Thực tế chặn tiến hoá ${targetMon.name} → ${targetEntry.name}: cần Lv.${targetEntry.evoLevel}, hiện Lv.${targetMon.level ?? 1}`)
           continue
         }
@@ -779,7 +790,7 @@ export default function RoleplayChat() {
           continue
         }
 
-        const access = legendaryAccess(entry, worldProgress, storyTone)
+        const access = legendaryAccess(entry, worldProgress, storyTone, adminMode)
         if (!access.allowed) {
           report.lines.push(`⛔ Không cấp ${entry.name}: cổng tiến trình ${access.tier?.label ?? 'huyền thoại'} chưa mở — ${access.reason}`)
           continue
@@ -1100,25 +1111,30 @@ export default function RoleplayChat() {
       const usingMainApi = !configOverride
       let history = nextMessages.map((m) => ({ role: m.role, content: m.content }))
 
-      // --- TRÍ NHỚ DÀI HẠN (đợt 29) ---
-      // Embedding đã cấu hình + truyện đã dài hơn cửa sổ → cắt lịch sử về
-      // MEMORY_RECENT_WINDOW tin gần nhất, truy hồi ký ức CŨ liên quan tới
-      // lời người chơi vừa nói và chèn vào đầu cửa sổ dưới dạng note hệ
-      // thống. Mọi lỗi ở bước này chỉ log — degrade về cắt cửa sổ (hoặc nếu
-      // truy vấn được thì có note), KHÔNG được chặn truyện.
+      // --- TRÍ NHỚ DÀI HẠN LAI (đợt 88) ---
+      // Exact/lexical từ toàn lịch sử + IndexedDB luôn hoạt động. Embedding
+      // chỉ bổ sung liên tưởng ngữ nghĩa, không còn là điều kiện để cắt cửa sổ.
       const embCfg = memoryApiConfig?.embedding
       const memoryActive = Boolean(embCfg?.baseUrl && embCfg?.model)
-      if (memoryActive && nextMessages.length > MEMORY_RECENT_WINDOW + 4) {
+      if (nextMessages.length > MEMORY_RECENT_WINDOW + 4) {
         const cutoff = nextMessages.length - MEMORY_RECENT_WINDOW
         const lastUserMsg = [...nextMessages].reverse().find((m) => m.role === 'user')
         let memoryNote = null
         try {
-          const memories = await recallRelevant({
-            embeddingConfig: embCfg,
-            rerankConfig: memoryApiConfig?.rerank,
-            queryText: lastUserMsg?.content ?? '',
-            maxTurn: cutoff,
-          })
+          const queryText = lastUserMsg?.content ?? ''
+          const transcriptMemories = recallFromTranscript(nextMessages, queryText, { maxTurn: cutoff, topK: 6 })
+          const archivedMemories = await recallArchive({ queryText, maxTurn: cutoff, topK: 6 })
+          let semanticMemories = []
+          if (memoryActive) {
+            semanticMemories = await recallRelevant({
+              embeddingConfig: embCfg,
+              rerankConfig: memoryApiConfig?.rerank,
+              queryText,
+              maxTurn: cutoff,
+              topK: 5,
+            })
+          }
+          const memories = mergeMemoryResults(transcriptMemories, archivedMemories, semanticMemories)
           memoryNote = buildMemoryNote(memories)
         } catch (memErr) {
           console.warn('[memory] truy hồi ký ức lỗi (bỏ qua):', memErr.message)
@@ -1185,6 +1201,24 @@ export default function RoleplayChat() {
         { role: 'system', content: buildModeRulesNote(storyTone, worldProgress) },
         { role: 'system', content: buildWorldProgressNote(worldProgress, storyTone) },
       ]
+      const currentVisibleInput = nextMessages.at(-1)?.role === 'user' && !nextMessages.at(-1)?.hidden
+        ? nextMessages.at(-1).content
+        : ''
+      const adjudicationNote = buildInputAdjudicationNote({
+        text: currentVisibleInput,
+        mode: storyTone,
+        adminMode,
+        pokedex: pokedexSpecies,
+        worldProgress,
+        money: playerProfile.money,
+        location: playerLocation,
+        recentText: nextMessages.slice(-4).map((message) => message.content).join('\n'),
+        ownedPokemon: [playerMon, ...(party ?? [])].filter(Boolean),
+      })
+      if (adjudicationNote) history = [...history, { role: 'system', content: adjudicationNote }]
+      if (adminMode) {
+        history = [...history, { role: 'system', content: '[Hệ thống — PHIÊN ADMIN ĐÃ XÁC THỰC: cho phép lệnh kiểm thử từ input hiện tại bỏ qua giới hạn chế độ và cổng tiến trình. Vẫn dùng tag trạng thái chuẩn để app áp biến; không nhắc mã mở khoá hoặc ghi chú này.]' }]
+      }
       const priority = directorPriority(worldProgress)
       if (priority) history = [...history, { role: 'system', content: `[Hệ thống — ƯU TIÊN ĐẠO DIỄN: ${priority} Không nhắc tới ghi chú này.]` }]
 
@@ -1210,7 +1244,7 @@ export default function RoleplayChat() {
       // để AI chủ động dựng cảnh sống động quanh hành động của người chơi.
       history = [...history, {
         role: 'user',
-        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng, Pokémon xung quanh làm gì đó theo bản tính, âm thanh/mùi/thời tiết, sự cố nhỏ chen ngang, câu chuyện nghe lỏm. Thế giới TIẾP DIỄN dù người chơi làm gì. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn phải tạo riêng theo chỉ dẫn hệ thống. Không nhắc tới ghi chú này.]',
+        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO CÓ NHỊP: input của người chơi là HÀNH ĐỘNG/Ý ĐỊNH của nhân vật chính, không phải kịch bản giới hạn và cũng không tự xác lập kết quả ngoài quyền nhân vật. Hãy làm cảnh sống bằng phản ứng hợp logic của NPC/Pokémon, giác quan và hệ quả đã gieo. KHÔNG bắt buộc nhét sự cố, người lạ, tin nghe lỏm hay hook mới vào mỗi lượt; đối thoại, chăm sóc, cắm trại và im lặng có ý nghĩa phải được thở. Ưu tiên nối sợi dây cũ trước khi mở sợi dây mới. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn tạo riêng. Không nhắc tới ghi chú này.]',
       }]
 
       const nudge = maybeMakeNudge({
@@ -1219,6 +1253,8 @@ export default function RoleplayChat() {
         turn: nextMessages.length,
         mode: normalizeGameMode(storyTone),
         worldProgress,
+        recentText: [...nextMessages].reverse().find((message) => message.role === 'assistant')?.content ?? '',
+        userText: currentVisibleInput,
       })
       if (nudge) history = [...history, { role: 'user', content: nudge }]
 
@@ -1532,12 +1568,15 @@ export default function RoleplayChat() {
       maybeUpdateSummary(apiConfig, [...nextMessages, { role: 'assistant', content: stateEvidenceText }]).catch(
         (sumErr) => console.warn('[summary] cập nhật tóm tắt lỗi (bỏ qua):', sumErr.message),
       )
-      // Ghi nhớ lượt vừa rồi vào trí nhớ dài hạn (chạy NỀN — embedding chậm
-      // hay lỗi cũng không ảnh hưởng truyện). turn = độ dài mảng messages
-      // tại thời điểm lượt này, dùng để loại ký ức còn trong cửa sổ gần.
+      // Biên niên sử exact luôn ghi, kể cả không cấu hình embedding.
+      const lastUser = [...nextMessages].reverse().find((m) => m.role === 'user' && !m.hidden)
+      const storyTurnNumber = nextMessages.filter((message) => message.role === 'assistant').length + 1
+      archiveExchange(lastUser?.content ?? '', stripInlineTags(stateEvidenceText), nextMessages.length, storyTurnNumber).catch(
+        (archiveErr) => console.warn('[archive] ghi biên niên sử lỗi (bỏ qua):', archiveErr.message),
+      )
+      // Vector memory chỉ là lớp bổ sung ngữ nghĩa tùy chọn.
       const embCfgAfter = memoryApiConfig?.embedding
       if (embCfgAfter?.baseUrl && embCfgAfter?.model) {
-        const lastUser = [...nextMessages].reverse().find((m) => m.role === 'user')
         rememberExchange(embCfgAfter, lastUser?.content ?? '', stripInlineTags(stateEvidenceText), nextMessages.length).catch(
           (memErr) => console.warn('[memory] ghi ký ức lỗi (bỏ qua):', memErr.message),
         )
@@ -1965,7 +2004,7 @@ ${m.content}`
                     const persistentStart = persistentRoster.length ? (npcProfile.battles ?? 0) % persistentRoster.length : 0
                     const persistentPick = persistentRoster[persistentStart]?.entry
                     const requestedSpecial = persistentPick || mentioned
-                    const encounterAccess = legendaryAccess(requestedSpecial, worldProgress, storyTone)
+                    const encounterAccess = legendaryAccess(requestedSpecial, worldProgress, storyTone, adminMode)
                     if (requestedSpecial && !encounterAccess.allowed) {
                       setActiveBattleMsgIndex(null)
                       window.alert(`Cổng tiến trình chặn cuộc gặp ${requestedSpecial.name}: ${encounterAccess.reason}. Chính văn không thể bỏ qua luật này.`)
@@ -2014,9 +2053,9 @@ ${m.content}`
                       const picked = persistentRoster.length
                         ? [0, 1].map((offset) => persistentRoster[(persistentStart + offset) % persistentRoster.length]?.entry).filter(Boolean)
                         : mentionedList.slice(-2)
-                      const lockedEntry = picked.find((entry) => !legendaryAccess(entry, worldProgress, storyTone).allowed)
+                      const lockedEntry = picked.find((entry) => !legendaryAccess(entry, worldProgress, storyTone, adminMode).allowed)
                       if (lockedEntry) {
-                        const locked = legendaryAccess(lockedEntry, worldProgress, storyTone)
+                        const locked = legendaryAccess(lockedEntry, worldProgress, storyTone, adminMode)
                         setActiveBattleMsgIndex(null)
                         window.alert(`Cổng tiến trình chặn cuộc gặp ${lockedEntry.name}: ${locked.reason}.`)
                         return
@@ -2473,6 +2512,7 @@ ${m.content}`
         && messages[activeBattleMsgIndex]?.battleMode !== 'double'
         && !isSafariArea(playerLocation) && (
         <BattleModal
+          devUnlockGimmicks={adminMode}
           // Đợt 71: Pokémon của huấn luyện viên khác thì KHÔNG bắt được,
           // KHÔNG chạy trốn được, KHÔNG dụ đi theo được.
           isWild={!enemyMon?.isTrainerMon}

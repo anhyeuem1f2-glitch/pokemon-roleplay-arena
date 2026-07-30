@@ -18,8 +18,8 @@ function checksum(text) {
   return value.toString(36).toUpperCase()
 }
 
-export function makeTradeOffer(mon, senderTrainerId, recipientTrainerCode, mode) {
-  if (!modeAllowsTrading(mode)) throw new Error('Trao đổi chỉ hoạt động trong chế độ Thực tế.')
+export function makeTradeOffer(mon, senderTrainerId, recipientTrainerCode, mode, adminOverride = false) {
+  if (!modeAllowsTrading(mode, adminOverride)) throw new Error('Trao đổi chỉ hoạt động trong chế độ Thực tế (hoặc phiên Admin).')
   if (!mon?.uid || !senderTrainerId) throw new Error('Thiếu mã cố định của người gửi hoặc Pokémon.')
   if (mon.currentTrainerId && mon.currentTrainerId !== senderTrainerId) throw new Error('Trainer này không phải chủ sở hữu hiện tại của cá thể.')
   const payload = {
@@ -46,8 +46,8 @@ export function decodeTradePacket(text) {
   return packet
 }
 
-export function acceptTradePacket(packet, receiverTrainerId, receiverTrainerCode, tradeState, ownedMons, mode) {
-  if (!modeAllowsTrading(mode)) throw new Error('Trao đổi chỉ hoạt động trong chế độ Thực tế.')
+export function acceptTradePacket(packet, receiverTrainerId, receiverTrainerCode, tradeState, ownedMons, mode, adminOverride = false) {
+  if (!modeAllowsTrading(mode, adminOverride)) throw new Error('Trao đổi chỉ hoạt động trong chế độ Thực tế (hoặc phiên Admin).')
   const state = normalizeTradeState(tradeState)
   if (packet.senderTrainerId === receiverTrainerId) throw new Error('Không thể nhận gói do chính mã trainer này tạo.')
   if (packet.pokemon.currentTrainerId && packet.pokemon.currentTrainerId !== packet.senderTrainerId) throw new Error('Gói không chứng minh người gửi là chủ sở hữu hiện tại.')

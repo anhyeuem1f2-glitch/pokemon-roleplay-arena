@@ -16,6 +16,7 @@ import { createStableId, ensurePokemonIdentity, publicTrainerCode } from '../dat
 import { DEFAULT_WORLD_PROGRESS, normalizeWorldProgress } from '../data/worldProgress.js'
 import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.js'
 import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
+import { verifyAdminCode } from '../data/adminMode.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -26,6 +27,24 @@ function storedGameMode() {
 }
 
 export function GameProvider({ children }) {
+  // Admin Mode chỉ sống trong SESSION hiện tại: không chèn vào save, không
+  // theo người chơi sang máy khác và không có URL/query công khai để bật.
+  const [adminMode, setAdminModeState] = useState(() => {
+    try { return sessionStorage.getItem('trainer-arena:admin-session') === '1' } catch { return false }
+  })
+  const unlockAdmin = useCallback((code) => {
+    const allowed = verifyAdminCode(code)
+    if (allowed) {
+      setAdminModeState(true)
+      try { sessionStorage.setItem('trainer-arena:admin-session', '1') } catch { /* ignore */ }
+    }
+    return allowed
+  }, [])
+  const lockAdmin = useCallback(() => {
+    setAdminModeState(false)
+    try { sessionStorage.removeItem('trainer-arena:admin-session') } catch { /* ignore */ }
+  }, [])
+
   // --- Cấu hình API (OpenAI-compatible) ---
   const [apiConfig, setApiConfigState] = useState(() => {
     try {
@@ -854,6 +873,9 @@ export function GameProvider({ children }) {
   }, [movesDb, movesDbStatus, playerMon?.types, pokedexSpecies, setEnemyMon, setMessages])
 
   const value = {
+    adminMode,
+    unlockAdmin,
+    lockAdmin,
     apiConfig,
     setApiConfig,
     character,

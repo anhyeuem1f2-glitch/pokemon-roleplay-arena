@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
@@ -137,6 +137,25 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const [showHomage, setShowHomage] = useState(!introSeen)
   const [homageDimmed, setHomageDimmed] = useState(false)
   const [titlePhase, setTitlePhase] = useState(introSeen ? 'settled' : 'intro')
+  const titleIntroHideTimerRef = useRef(null)
+  const titleIntroSafetyTimerRef = useRef(null)
+
+  const finishTitleIntro = useCallback((options = {}) => {
+    const immediate = Boolean(options.immediate)
+    if (showMenu && !showHomage) return
+    if (typeof window !== 'undefined') {
+      if (titleIntroHideTimerRef.current) window.clearTimeout(titleIntroHideTimerRef.current)
+      if (titleIntroSafetyTimerRef.current) window.clearTimeout(titleIntroSafetyTimerRef.current)
+    }
+    setShowMenu(true)
+    setHomageDimmed(true)
+    setTitlePhase('reveal')
+    const delay = immediate ? 150 : 260
+    titleIntroHideTimerRef.current = window.setTimeout(() => {
+      setShowHomage(false)
+      setTitlePhase('settled')
+    }, delay)
+  }, [showHomage, showMenu])
 
   useEffect(() => {
     if (stage !== 'title') return undefined
@@ -153,23 +172,17 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     setHomageDimmed(false)
     setTitlePhase('intro')
     if (typeof window !== 'undefined') window.sessionStorage.setItem(TITLE_INTRO_SESSION_KEY, '1')
-    const timers = [
-      window.setTimeout(() => musicManager.playJingle(['intro']), 120),
-      window.setTimeout(() => setShowMenu(true), 2600),
-      window.setTimeout(() => { setHomageDimmed(true); setTitlePhase('reveal') }, 3600),
-      window.setTimeout(() => { setShowHomage(false); setTitlePhase('settled') }, 7200),
-    ]
-    return () => timers.forEach((t) => window.clearTimeout(t))
-  }, [stage, messages.length])
+    const jingleTimer = window.setTimeout(() => musicManager.playJingle(['intro']), 120)
+    titleIntroSafetyTimerRef.current = window.setTimeout(() => finishTitleIntro(), 11000)
+    return () => {
+      window.clearTimeout(jingleTimer)
+      if (titleIntroHideTimerRef.current) window.clearTimeout(titleIntroHideTimerRef.current)
+      if (titleIntroSafetyTimerRef.current) window.clearTimeout(titleIntroSafetyTimerRef.current)
+    }
+  }, [finishTitleIntro, stage])
 
   function skipTitleIntro() {
-    setShowMenu(true)
-    setHomageDimmed(true)
-    setTitlePhase('reveal')
-    window.setTimeout(() => {
-      setShowHomage(false)
-      setTitlePhase('settled')
-    }, 320)
+    finishTitleIntro({ immediate: true })
   }
 
   // Hồ sơ
@@ -425,7 +438,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   if (stage === 'title') {
     return (
       <div className={`intro-bg ${showMenu ? 'intro-bg--revealed' : ''}`}>
-        {showHomage && <RetroBattleIntro active={!homageDimmed} dimmed={homageDimmed} />}
+        {showHomage && <RetroBattleIntro active={!homageDimmed} dimmed={homageDimmed} onComplete={finishTitleIntro} />}
         {showHomage && (
           <button className="intro-skip" onClick={skipTitleIntro}>
             Bỏ qua intro

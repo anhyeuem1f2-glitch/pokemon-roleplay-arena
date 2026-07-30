@@ -1768,35 +1768,35 @@ input[type='checkbox']:disabled { cursor:not-allowed; filter:grayscale(1); opaci
     padding: 10px;
   }
 }
-@media (max-width: 640px) {
-  
 .retro-intro {
   position: fixed;
   inset: 0;
   z-index: 30;
   display: grid;
   place-items: center;
-  padding: 28px;
+  padding: 16px;
   background: radial-gradient(circle at 50% 12%, #efe7c7 0, #e7dfbb 42%, #d8cfaa 100%);
   opacity: 0;
-  transition: opacity 420ms ease, filter 420ms ease;
+  transition: opacity 260ms ease, filter 260ms ease;
 }
 .retro-intro--active { opacity: 1; }
-.retro-intro--dimmed { opacity: 0; filter: blur(5px) brightness(1.12); }
+.retro-intro--dimmed { opacity: 0; filter: brightness(1.18); }
 .retro-intro__shell {
-  width: min(1020px, calc(100vw - 84px));
-  border-radius: 26px;
-  padding: 14px;
-  background: linear-gradient(180deg, rgba(18,18,18,.97) 0%, rgba(6,6,6,.97) 100%);
-  box-shadow: 0 24px 60px rgba(0,0,0,.22), inset 0 0 0 3px rgba(255,255,255,.18);
+  width: min(calc(100vw - 32px), calc((100vh - 32px) * 10 / 9));
+  height: min(calc(100vh - 32px), calc((100vw - 32px) * 9 / 10));
+  border-radius: 22px;
+  padding: 12px;
+  background: linear-gradient(180deg, rgba(18,18,18,.985) 0%, rgba(6,6,6,.985) 100%);
+  box-shadow: 0 24px 60px rgba(0,0,0,.22), inset 0 0 0 2px rgba(255,255,255,.16);
 }
 .retro-intro__screen {
   position: relative;
   overflow: hidden;
-  border-radius: 18px;
-  aspect-ratio: 4 / 3;
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
   background: #000;
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,.06);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
 }
 .retro-intro__media {
   display: block;
@@ -1804,7 +1804,7 @@ input[type='checkbox']:disabled { cursor:not-allowed; filter:grayscale(1); opaci
   height: 100%;
   object-fit: contain;
   image-rendering: pixelated;
-  filter: grayscale(1) contrast(1.06);
+  filter: grayscale(1) contrast(1.05);
   background: #000;
 }
 .retro-intro__scanlines {

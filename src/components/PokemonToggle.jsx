@@ -8,26 +8,20 @@ export default function PokemonToggle({ checked, onChange, label, hint, disabled
       aria-checked={checked}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
-      className={`pokeball-toggle ${checked ? 'is-on' : 'is-off'} ${compact ? 'pokeball-toggle--compact' : ''}`}
-      style={{ opacity: disabled ? 0.5 : 1 }}
+      className={`ui-toggle ${checked ? 'ui-toggle--on' : 'ui-toggle--off'} ${compact ? 'ui-toggle--compact' : ''}`}
     >
-      <span className="pokeball-toggle__ball" aria-hidden="true">
-        <span className="pokeball-toggle__shell pokeball-toggle__shell--top" />
-        <span className="pokeball-toggle__shell pokeball-toggle__shell--bottom" />
-        <span className="pokeball-toggle__band" />
-        <span className="pokeball-toggle__core">
-          <span className="pokeball-toggle__core-inner" />
-        </span>
+      <span className="ui-toggle__track" aria-hidden="true">
+        <span className="ui-toggle__thumb" />
       </span>
       {(label || hint) && (
-        <span className="pokeball-toggle__copy">
-          <span className="pokeball-toggle__head">
-            {label && <span className="pokeball-toggle__label">{label}</span>}
-            <span className={`pokeball-toggle__state ${checked ? 'pokeball-toggle__state--on' : 'pokeball-toggle__state--off'}`}>
-              {checked ? 'BẬT' : 'TẮT'}
+        <span className="ui-toggle__copy">
+          <span className="ui-toggle__head">
+            {label && <span className="ui-toggle__label">{label}</span>}
+            <span className={`ui-toggle__state ${checked ? 'ui-toggle__state--on' : 'ui-toggle__state--off'}`}>
+              {checked ? 'Bật' : 'Tắt'}
             </span>
           </span>
-          {hint && <span className="pokeball-toggle__hint">{hint}</span>}
+          {hint && <span className="ui-toggle__hint">{hint}</span>}
         </span>
       )}
     </button>

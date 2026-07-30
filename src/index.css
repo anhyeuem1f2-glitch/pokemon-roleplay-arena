@@ -1769,13 +1769,172 @@ input[type='checkbox']:disabled { cursor:not-allowed; filter:grayscale(1); opaci
   }
 }
 @media (max-width: 640px) {
+  
+.retro-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: radial-gradient(circle at 50% 12%, #efe7c7 0, #e7dfbb 42%, #d8cfaa 100%);
+  opacity: 0;
+  transition: opacity 420ms ease, filter 420ms ease;
+}
+.retro-intro--active { opacity: 1; }
+.retro-intro--dimmed { opacity: 0; filter: blur(5px) brightness(1.12); }
+.retro-intro__shell {
+  width: min(1020px, calc(100vw - 84px));
+  border-radius: 26px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(18,18,18,.97) 0%, rgba(6,6,6,.97) 100%);
+  box-shadow: 0 24px 60px rgba(0,0,0,.22), inset 0 0 0 3px rgba(255,255,255,.18);
+}
+.retro-intro__screen {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  aspect-ratio: 4 / 3;
+  background: #000;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.06);
+}
+.retro-intro__media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  filter: grayscale(1) contrast(1.06);
+  background: #000;
+}
+.retro-intro__scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.03) 0 2px, rgba(0,0,0,0) 2px 4px);
+  mix-blend-mode: multiply;
+}
+
+/* toggle bình thường */
+.ui-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-toggle:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.ui-toggle__track {
+  position: relative;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 30px;
+  border-radius: 999px;
+  background: #5d6872;
+  border: 1px solid rgba(255,255,255,.14);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.28);
+  transition: background .2s ease, box-shadow .2s ease;
+}
+.ui-toggle__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #f8fafb 0%, #d6dde4 100%);
+  box-shadow: 0 2px 6px rgba(0,0,0,.32);
+  transition: transform .22s ease;
+}
+.ui-toggle--on .ui-toggle__track {
+  background: linear-gradient(90deg, #2b7a67 0%, #48c6a0 100%);
+}
+.ui-toggle--on .ui-toggle__thumb {
+  transform: translateX(22px);
+}
+.ui-toggle__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ui-toggle__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ui-toggle__label {
+  color: var(--text-hi);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.ui-toggle__state {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: 5px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.10);
+}
+.ui-toggle__state--on {
+  color: #8fe3c7;
+  background: rgba(127,224,196,.08);
+}
+.ui-toggle__state--off {
+  color: #afbac4;
+  background: rgba(255,255,255,.04);
+}
+.ui-toggle__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.ui-toggle--compact .ui-toggle__track {
+  transform: scale(.92);
+  transform-origin: left center;
+}
+.ui-toggle:focus-visible {
+  outline: 2px solid rgba(127,224,196,.52);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+/* xóa hẳn mảng css pokeball-toggle cũ nếu đâu đó còn render */
+.pokeball-toggle,
+.pokeball-toggle__ball,
+.pokeball-toggle__shell,
+.pokeball-toggle__band,
+.pokeball-toggle__core,
+.pokeball-toggle__core-inner,
+.pokeball-toggle__copy,
+.pokeball-toggle__head,
+.pokeball-toggle__state {
+  all: unset;
+}
+
+@media (max-width: 900px) {
+  .retro-intro__shell {
+    width: min(100%, calc(100vw - 40px));
+    padding: 10px;
+  }
+}
+@media (max-width: 640px) {
   .retro-intro {
-    padding: 18px;
+    padding: 16px;
   }
   .retro-intro__shell {
-    width: calc(100vw - 28px);
-  }
-  .retro-intro__screen {
-    aspect-ratio: 1.08 / 1;
+    width: calc(100vw - 24px);
   }
 }

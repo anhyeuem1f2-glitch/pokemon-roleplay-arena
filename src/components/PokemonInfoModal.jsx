@@ -3,6 +3,8 @@ import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import HealthBar from './HealthBar.jsx'
 import { describeNature, expProgress, MAX_LEVEL } from '../data/pokemonSpecies.js'
+import { abilityLabel } from '../data/pokemonAbilities.js'
+import { describeFriendship, friendshipTier, normalizeFriendship } from '../data/pokemonFriendship.js'
 
 const STAT_LABELS = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ' }
 
@@ -56,6 +58,25 @@ export default function PokemonInfoModal({ mon, onClose, hungerMon = null }) {
           {mon.status ? ` · trạng thái: ${mon.status}` : ''}
           {mon.nature ? ` · ${describeNature(mon.nature)}` : ''}
         </div>
+
+        {(() => {
+          const bonded = normalizeFriendship(mon)
+          const tier = friendshipTier(bonded.friendship)
+          return (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 10 }}>
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 9.5, color: 'var(--text-dim)', letterSpacing: '.08em' }}>ABILITY</div>
+                <div style={{ fontSize: 12.5, fontWeight: 750, marginTop: 2 }}>{abilityLabel(mon)}</div>
+                {mon.abilityHidden && <div style={{ fontSize: 9.5, color: 'var(--violet)' }}>Ability ẩn</div>}
+              </div>
+              <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: '8px 10px' }}>
+                <div style={{ fontSize: 9.5, color: 'var(--text-dim)', letterSpacing: '.08em' }}>ĐỘ THÂN MẬT</div>
+                <div style={{ fontSize: 12.5, fontWeight: 750, marginTop: 2 }}>{describeFriendship(bonded)}</div>
+                <div style={{ fontSize: 9.5, color: 'var(--text-dim)', marginTop: 2 }}>{tier.note}</div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Thanh KINH NGHIỆM (đợt 65) — người chơi phải thấy được tiến độ
             lên cấp, trước đây không có hệ EXP nào cả. */}

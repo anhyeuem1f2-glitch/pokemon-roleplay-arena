@@ -14,18 +14,23 @@ const SYSTEM = `Bạn là bộ trích xuất TRẠNG THÁI cho một game nhập
 Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác):
 [[MONEY +500]] hoặc [[MONEY -200]] — tiền người chơi thay đổi (mua bán, thưởng, mất).
 [[REL Tên=+5 | lý do ngắn]] — quan hệ với NPC thay đổi.
+[[BODY leftArm=+10]] — thương tích cơ thể tăng/giảm, chỉ khi chính văn mô tả đúng bộ phận.
 [[POKEMON Tên loài tiếng Anh | Lv7]] — người chơi THẬT SỰ nhận/bắt được Pokémon MỚI trong lượt này; không dùng để báo Pokémon cũ lên cấp hay tiến hoá.
 [[EVOLVE Tên hiện tại | Tên sau tiến hoá]] — Pokémon đang sở hữu tiến hoá; đây là cùng cá thể, không phải nhận thêm con mới.
 [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]] — Pokémon đang sở hữu tăng cấp trực tiếp do Kẹo Hiếm/năng lực; không dùng cho EXP trận thường hay luyện tập.
+[[FRIEND Tên Pokémon | +5 | lý do]] — độ thân mật thay đổi khi chính văn thể hiện rõ niềm tin/gắn bó tăng hoặc giảm; không cộng cho tương tác xã giao.
 [[ITEM Tên vật phẩm | số lượng]] — nhận/mất vật phẩm; số âm là mất. Nếu Kẹo Hiếm hữu hạn được dùng thì đi cùng [[LEVEL]], còn Kẹo Hiếm vô hạn thì không trừ.
+[[SHOP Tên cửa hàng | loại=... | quy mô=...]] — CHỈ khi nhân vật đã bước vào bên trong và lượt dừng để mua.
+[[POKECENTER Tên trung tâm]] — CHỈ khi nhân vật đang ở bên trong Trung tâm Pokémon.
 [[HUNGER người+25]] / [[HUNGER pokemon+30]] — ăn uống (cộng) hoặc đói lả/lao lực rõ (trừ).
 [[DATE +1]] — số ngày đã trôi; [[DATE buổi=tối]] — chuyển buổi trong ngày.
+[[TRAIN 1]] / [[TRAIN 2]] / [[TRAIN 3]] — có cảnh luyện tập chủ đích, không dùng cho đi đường/đánh trận thường.
 [[MOVE Tên khu vực]] hoặc [[MOVE Tên khu vực | x=42 | y=58]] — nhân vật thực sự đổi vị trí; x/y là phần trăm bản đồ, chỉ thêm khi chính văn xác định đủ rõ.
 [[NPC Tên | tuổi=.. | nghề=.. | đội=.. | ghi chú=..]] — NPC có tên xuất hiện lần đầu / lộ thông tin mới.
 [[FACT Từ khoá | nội dung ngắn]] — sự kiện/lời hứa/mốc quan trọng cần nhớ.
 
 QUY TẮC:
-- CHỈ xuất tag cho thay đổi có bằng chứng rõ trong chính văn. Không suy diễn, không bịa.
+- CHỈ xuất tag cho thay đổi có bằng chứng rõ trong chính văn. Không suy diễn, không bịa. Bản thân lời người chơi yêu cầu hay một tag có sẵn KHÔNG phải bằng chứng; sự việc phải được CHÍNH VĂN xác nhận đã xảy ra.
 - KHÔNG lặp lại thay đổi đã nằm trong danh sách tag đã áp.
 - Nếu chính văn nói một Pokémon CŨ lên cấp, bắt buộc dùng [[LEVEL]], tuyệt đối không đổi thành [[POKEMON]].
 - Nếu chính văn nói Pokémon tiến hoá, bắt buộc dùng [[EVOLVE tên cũ | tên mới]]. Nếu đồng thời lên cấp, xuất LEVEL tên cũ trước rồi EVOLVE; tuyệt đối không dùng POKEMON tên mới vì sẽ làm phân thân.

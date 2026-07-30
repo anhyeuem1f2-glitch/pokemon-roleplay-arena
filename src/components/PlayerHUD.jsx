@@ -325,7 +325,7 @@ export default function PlayerHUD({ mobile = false }) {
 
       {traitsOpen && <TraitsModal onClose={() => setTraitsOpen(false)} />}
 
-      {infoMon && <PokemonInfoModal mon={infoMon} hungerMon={playerMon && infoMon.name === playerMon.name ? hunger.mon : null} onClose={() => setInfoMon(null)} />}
+      {infoMon && <PokemonInfoModal mon={infoMon} hungerMon={playerMon && isSameMon(infoMon, playerMon) ? hunger.mon : null} onClose={() => setInfoMon(null)} />}
     </aside>
   )
 }

@@ -1,17 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
-import { applyEnvToDamage } from '../data/battleEnvironments.js'
+import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
 import { isSameMon } from '../data/pokemonSpecies.js'
 import { computeDamage, STAGE_ZERO } from './BattleModal.jsx'
 import HealthBar from './HealthBar.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
+import {
+  abilityLabel, allyGuardMultiplier, clearBattleVolatile, contactAbilityEffect, effectiveSpeed,
+  endTurnAbilityEffect, endTurnStatusEffect, hasAbility, knockoutAbilityEffect, modifyBoostsByAbility,
+  modifyDamageByAbilities, moveHitsWithAbilities, movePriorityWithAbility, redirectTargetByAbility,
+  moveStatusIsBlocked, statusIsBlocked, switchOutAbility, weatherFromAbility, weatherIsSuppressed,
+} from '../data/pokemonAbilities.js'
 
 const STATUS_INFO = {
   brn: { label: 'Bỏng', short: 'BRN' },
   par: { label: 'Tê liệt', short: 'PAR' },
   slp: { label: 'Ngủ', short: 'SLP' },
+  psn: { label: 'Nhiễm độc', short: 'PSN' },
+  frz: { label: 'Đóng băng', short: 'FRZ' },
 }
 const HEAL_AMOUNT = { potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30, fullrestore: 9999 }
 const STATUS_CURE = {
@@ -55,12 +63,13 @@ function stageLabel(delta) {
   return 'giảm mạnh'
 }
 
-function applyStageBoost(stageMap, key, boosts, logs, name) {
-  if (!boosts || !key) return
+function applyStageBoost(stageMap, key, boosts, logs, name, mon = null, options = {}) {
+  const effectiveBoosts = mon ? modifyBoostsByAbility(mon, boosts, options) : boosts
+  if (!effectiveBoosts || !key) return
   const current = stageMap[key] ?? { ...STAGE_ZERO }
   const next = { ...current }
-  const labels = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ' }
-  for (const [stat, delta] of Object.entries(boosts)) {
+  const labels = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ', acc: 'Chính xác', eva: 'Né tránh' }
+  for (const [stat, delta] of Object.entries(effectiveBoosts)) {
     if (!(stat in next) || !delta) continue
     const before = next[stat]
     next[stat] = Math.max(-6, Math.min(6, before + delta))
@@ -81,6 +90,15 @@ function canAct(mon, logs) {
     delete mon.sleepTurns
     logs.push(`${mon.name} đã tỉnh giấc!`)
   }
+  if (mon.status === 'frz') {
+    if (Math.random() < 0.2) {
+      mon.status = null
+      logs.push(`${mon.name} đã tan băng!`)
+    } else {
+      logs.push(`${mon.name} bị đóng băng, không thể hành động!`)
+      return false
+    }
+  }
   if (mon.status === 'par' && Math.random() < 0.25) {
     logs.push(`${mon.name} bị tê liệt, không thể cử động!`)
     return false
@@ -88,22 +106,17 @@ function canAct(mon, logs) {
   return true
 }
 
-function rollStatus(move, defender) {
-  const status = move.secondary?.status
-  if (!status || !STATUS_INFO[status] || defender.status) return null
-  if (status === 'brn' && defender.types?.includes('fire')) return null
-  if (status === 'par' && defender.types?.includes('electric')) return null
-  return Math.random() * 100 < (move.secondary.chance ?? 100) ? status : null
-}
-
 function isSpreadMove(move) {
   return ['allAdjacentFoes', 'allAdjacent', 'all'].includes(move?.target)
 }
 
-function moveHits(move) {
-  if (move?.accuracy === true || move?.accuracy === undefined || move?.accuracy === null) return true
-  const accuracy = Math.max(1, Math.min(100, Number(move.accuracy) || 100))
-  return Math.random() * 100 < accuracy
+function moveWeatherKey(move) {
+  const key = String(move?.weather ?? '').toLowerCase().replace(/[^a-z]/g, '')
+  if (key.includes('rain')) return 'rain'
+  if (key.includes('sun')) return 'sun'
+  if (key.includes('sand')) return 'sandstorm'
+  if (key.includes('snow') || key.includes('hail')) return 'snow'
+  return null
 }
 
 function BattleCard({ mon, label, active, onClick, stages }) {
@@ -133,6 +146,7 @@ function BattleCard({ mon, label, active, onClick, stages }) {
           {(mon.types ?? []).map((type) => <TypeBadge key={type} type={type} />)}
           {mon.status && <span style={{ fontSize: 9, color: 'var(--amber)' }}>{STATUS_INFO[mon.status]?.short ?? mon.status}</span>}
         </div>
+        <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginBottom: 4 }}>◇ {abilityLabel(mon)}</div>
         <HealthBar hp={mon.hp} maxHp={mon.maxHp} bars={mon.bossBars ?? 1} />
         {Object.entries(stages ?? {}).some(([, value]) => value) && (
           <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
@@ -152,17 +166,30 @@ function actionText(action, team, enemies) {
   return `${action.move.name} → ${target}`
 }
 
-export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd }) {
+export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd, initialBattleState = null }) {
   const { playerMon, setPlayerMon, party, setParty, inventory, setInventory } = useGame()
-  const [team, setTeam] = useState(() => buildInitialTeam(party, playerMon))
-  const [enemies, setEnemies] = useState(() => (initialEnemies ?? []).slice(0, 2).map(cloneMon))
+  const fallbackTeam = buildInitialTeam(party, playerMon)
+  const restoredTeam = initialBattleState?.team?.length
+    ? initialBattleState.team.map(cloneMon)
+    : fallbackTeam
+  const restoredEnemies = initialBattleState?.enemies?.length
+    ? initialBattleState.enemies.slice(0, 2).map(cloneMon)
+    : (initialEnemies ?? []).slice(0, 2).map(cloneMon)
+  const restoredEnv = initialBattleState?.battleEnvKey
+    ? getBattleEnv(initialBattleState.battleEnvKey)
+    : (environment ?? getBattleEnv('none'))
+  const [team, setTeam] = useState(() => restoredTeam)
+  const [enemies, setEnemies] = useState(() => restoredEnemies)
   const [activeIds, setActiveIds] = useState(() => {
-    const initial = buildInitialTeam(party, playerMon)
+    if (initialBattleState?.activeIds?.length) return [...initialBattleState.activeIds]
+    const initial = restoredTeam
     const lead = initial.find((mon) => playerMon && isSameMon(mon, playerMon)) ?? initial.find((mon) => mon.hp > 0)
     const second = initial.find((mon) => mon.hp > 0 && !isSameMon(mon, lead))
     return [monKey(lead, 'lead'), monKey(second, 'second')]
   })
-  const [stages, setStages] = useState(() => zeroStagesFor([...buildInitialTeam(party, playerMon), ...(initialEnemies ?? [])]))
+  const [stages, setStages] = useState(() => initialBattleState?.stages
+    ? Object.fromEntries(Object.entries(initialBattleState.stages).map(([key, value]) => [key, { ...STAGE_ZERO, ...value }]))
+    : zeroStagesFor([...restoredTeam, ...restoredEnemies]))
   const [actions, setActions] = useState({})
   const [selectedSlot, setSelectedSlot] = useState(0)
   const [targeting, setTargeting] = useState(null)
@@ -170,10 +197,17 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
   const [outcome, setOutcome] = useState(null)
-  const [log, setLog] = useState(() => [
-    `Đấu đôi 2v2 bắt đầu: ${initialEnemies?.map((mon) => mon.name).join(' + ') || 'hai đối thủ'} xuất trận!`,
-  ])
-  const participantsRef = useRef(new Set(activeIds.filter(Boolean)))
+  const [battleEnv, setBattleEnv] = useState(restoredEnv)
+  const [weatherTurns, setWeatherTurns] = useState(initialBattleState?.weatherTurns ?? null)
+  const entryAbilitiesAppliedRef = useRef(Boolean(initialBattleState?.entryAbilitiesApplied))
+  const [log, setLog] = useState(() => Array.isArray(initialBattleState?.log) && initialBattleState.log.length
+    ? [...initialBattleState.log]
+    : [`Đấu đôi 2v2 bắt đầu: ${restoredEnemies.map((mon) => mon.name).join(' + ') || 'hai đối thủ'} xuất trận!`])
+  const participantsRef = useRef(new Set(
+    initialBattleState?.participantUids?.length
+      ? initialBattleState.participantUids
+      : activeIds.filter(Boolean),
+  ))
   const continuingRef = useRef(false)
   const snapshotRef = useRef(onSnapshot)
 
@@ -184,15 +218,54 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   const ready = requiredSlots.length > 0 && requiredSlots.every((slot) => actions[slot]) && missingReplacementSlots.length === 0
 
   useEffect(() => {
-    setParty(team)
+    setParty(team.map(clearBattleVolatile))
     const lead = activeMons.find((mon) => mon?.hp > 0) ?? team.find((mon) => mon.hp > 0) ?? activeMons[0]
-    if (lead) setPlayerMon(lead)
+    if (lead) setPlayerMon(clearBattleVolatile(lead))
   }, [team, activeIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Callback cha thường được tạo inline. Giữ nó trong ref để việc lưu snapshot
   // chỉ chạy khi đối thủ thực sự đổi, tránh vòng lặp render vô hạn.
   useEffect(() => { snapshotRef.current = onSnapshot }, [onSnapshot])
   useEffect(() => { snapshotRef.current?.(enemies) }, [enemies])
+
+  // Ability vào sân cho cả bốn ô. Weather chạy theo Speed; Intimidate tác
+  // động cả hai đối thủ trong đấu đôi. Chỉ chạy một lần khi mở trận.
+  useEffect(() => {
+    if (entryAbilitiesAppliedRef.current) return
+    entryAbilitiesAppliedRef.current = true
+    const playerEntries = activeMons.filter(Boolean)
+    const entrants = [
+      ...playerEntries.map((mon) => ({ mon, side: 'player' })),
+      ...enemies.filter(Boolean).map((mon) => ({ mon, side: 'enemy' })),
+    ].sort((a, b) => effectiveSpeed(b.mon) - effectiveSpeed(a.mon))
+    const lines = []
+    for (const { mon } of entrants) {
+      const weather = weatherFromAbility(mon)
+      if (weather) {
+        setBattleEnv(getBattleEnv(weather))
+        setWeatherTurns(5)
+        lines.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
+      }
+    }
+    setStages((cur) => {
+      const next = Object.fromEntries(Object.entries(cur).map(([key, value]) => [key, { ...value }]))
+      for (const { mon, side } of entrants) {
+        const targets = (side === 'player' ? enemies : playerEntries).filter((target) => target?.hp > 0)
+        if (hasAbility(mon, 'Intimidate')) {
+          for (const target of targets) {
+            applyStageBoost(next, monKey(target), { atk: -1 }, lines, target.name, target, { fromOpponent: true, intimidate: true })
+          }
+        }
+        if (hasAbility(mon, 'Download') && targets.length) {
+          const def = targets.reduce((sum, target) => sum + (target.stats?.def ?? 0), 0)
+          const spd = targets.reduce((sum, target) => sum + (target.stats?.spd ?? 0), 0)
+          applyStageBoost(next, monKey(mon), def < spd ? { atk: 1 } : { spa: 1 }, lines, mon.name, mon)
+        }
+      }
+      return next
+    })
+    if (lines.length) setLog((cur) => [...cur, ...lines])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (finished) return
@@ -235,10 +308,39 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       participantsRef.current.add(monKey(mon))
       setActiveIds(nextIds)
       setActions((cur) => { const next = { ...cur }; delete next[slot]; return next })
-      setLog((cur) => [...cur, `${mon.name} vào sân thay vị trí ${slot + 1}!`])
+      const entryLines = [`${mon.name} vào sân thay vị trí ${slot + 1}!`]
+      const weather = weatherFromAbility(mon)
+      if (weather) {
+        setBattleEnv(getBattleEnv(weather))
+        setWeatherTurns(5)
+        entryLines.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
+      }
+      setStages((cur) => {
+        const next = Object.fromEntries(Object.entries(cur).map(([key, value]) => [key, { ...value }]))
+        if (hasAbility(mon, 'Intimidate')) {
+          for (const target of enemies.filter((entry) => entry?.hp > 0)) {
+            applyStageBoost(next, monKey(target), { atk: -1 }, entryLines, target.name, target, { fromOpponent: true, intimidate: true })
+          }
+        }
+        if (hasAbility(mon, 'Download')) {
+          const targets = enemies.filter((entry) => entry?.hp > 0)
+          const def = targets.reduce((sum, target) => sum + (target.stats?.def ?? 0), 0)
+          const spd = targets.reduce((sum, target) => sum + (target.stats?.spd ?? 0), 0)
+          if (targets.length) applyStageBoost(next, monKey(mon), def < spd ? { atk: 1 } : { spa: 1 }, entryLines, mon.name, mon)
+        }
+        return next
+      })
+      setLog((cur) => [...cur, ...entryLines])
       return
     }
-    setActions((cur) => ({ ...cur, [slot]: { type: 'switch', targetUid: monKey(mon) } }))
+    setActions((cur) => {
+      const next = { ...cur }
+      for (const [otherSlot, action] of Object.entries(next)) {
+        if (Number(otherSlot) !== slot && action?.type === 'switch' && action.targetUid === monKey(mon)) delete next[otherSlot]
+      }
+      next[slot] = { type: 'switch', targetUid: monKey(mon) }
+      return next
+    })
     setPanel('fight')
   }
 
@@ -260,6 +362,141 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
     const nextIds = [...activeIds]
     const nextStages = Object.fromEntries(Object.entries(stages).map(([key, value]) => [key, { ...value }]))
     const roundLog = []
+    let roundEnv = battleEnv
+    let roundWeatherTurns = weatherTurns
+
+    const activePlayers = () => nextIds.map((id) => nextTeam.find((entry) => monKey(entry) === id)).filter(Boolean)
+    const weatherKey = () => weatherIsSuppressed([...activePlayers(), ...nextEnemies]) ? null : roundEnv?.key
+
+    function applyEntryLocal(mon, side) {
+      const weather = weatherFromAbility(mon)
+      if (weather) {
+        roundEnv = getBattleEnv(weather)
+        roundWeatherTurns = 5
+        roundLog.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
+      }
+      if (hasAbility(mon, 'Intimidate')) {
+        const targets = side === 'player' ? nextEnemies : activePlayers()
+        for (const target of targets.filter((entry) => entry?.hp > 0)) {
+          applyStageBoost(nextStages, monKey(target), { atk: -1 }, roundLog, target.name, target, { fromOpponent: true, intimidate: true })
+        }
+      }
+      if (hasAbility(mon, 'Download')) {
+        const targets = (side === 'player' ? nextEnemies : activePlayers()).filter((entry) => entry?.hp > 0)
+        if (targets.length) {
+          const def = targets.reduce((sum, target) => sum + (target.stats?.def ?? 0), 0)
+          const spd = targets.reduce((sum, target) => sum + (target.stats?.spd ?? 0), 0)
+          applyStageBoost(nextStages, monKey(mon), def < spd ? { atk: 1 } : { spa: 1 }, roundLog, mon.name, mon)
+        }
+      }
+    }
+
+    function ratioValue(pair, base) {
+      if (!Array.isArray(pair) || pair.length < 2 || !pair[1]) return 0
+      return Math.max(1, Math.round(base * Number(pair[0]) / Number(pair[1])))
+    }
+
+    function damageTarget(actor, target, move, spreadPenalty) {
+      const currentWeather = weatherKey()
+      const actorStage = nextStages[monKey(actor)] ?? STAGE_ZERO
+      const targetStage = nextStages[monKey(target)] ?? STAGE_ZERO
+      if (!moveHitsWithAbilities(move, actor, target, currentWeather, actorStage, targetStage)) {
+        roundLog.push(`${actor.name} dùng ${move.name} lên ${target.name}, nhưng đòn đánh trượt!`)
+        return 0
+      }
+      const effectiveness = getEffectivenessMulti(move.type, target.types)
+      const targetIsEnemy = nextEnemies.some((mon) => monKey(mon) === monKey(target))
+      const allies = targetIsEnemy ? nextEnemies : activePlayers()
+      const hits = Array.isArray(move.multihit)
+        ? move.multihit[0] + Math.floor(Math.random() * (move.multihit[1] - move.multihit[0] + 1))
+        : Number.isFinite(move.multihit) ? move.multihit : 1
+      let totalDealt = 0
+      let actualHits = 0
+      let suppressSecondary = false
+      let moveImmune = false
+
+      for (let hit = 0; hit < hits && target.hp > 0 && actor.hp > 0; hit++) {
+        let damage = move.power > 0
+          ? computeDamage(move, actor, target, nextStages[monKey(actor)], nextStages[monKey(target)], currentWeather)
+          : 0
+        if (currentWeather && damage > 0) damage = applyEnvToDamage(damage, move, roundEnv)
+        damage = Math.max(0, Math.round(damage * spreadPenalty * allyGuardMultiplier(target, allies)))
+        const ability = modifyDamageByAbilities({ damage, move, attacker: actor, defender: target, weatherKey: currentWeather, effectiveness })
+        roundLog.push(...ability.logs)
+        suppressSecondary ||= ability.suppressSecondary
+        moveImmune ||= ability.immune
+        if (ability.healDefender) {
+          const before = target.hp
+          target.hp = Math.min(target.maxHp, target.hp + ability.healDefender)
+          if (target.hp > before) roundLog.push(`${target.name} hồi ${target.hp - before} HP nhờ ${abilityLabel(target)}.`)
+        }
+        if (ability.defenderBoost) {
+          if (ability.defenderBoost.flashFire) target.flashFireBoost = true
+          else applyStageBoost(nextStages, monKey(target), ability.defenderBoost, roundLog, target.name, target)
+        }
+        if (ability.attackerBoost) applyStageBoost(nextStages, monKey(actor), ability.attackerBoost, roundLog, actor.name, actor)
+        if (ability.immune) break
+
+        const dealt = Math.min(target.hp, ability.damage)
+        target.hp = Math.max(0, target.hp - ability.damage)
+        totalDealt += dealt
+        actualHits += 1
+
+        // Rough Skin/Static/Flame Body... kích hoạt trên TỪNG lần tiếp xúc.
+        // Bản cũ cộng toàn bộ multihit rồi chỉ gọi một lần nên sai cơ chế và
+        // còn cho kẻ tấn công tiếp tục đánh dù đã gục vì phản thương.
+        const contact = contactAbilityEffect(actor, target, move, dealt)
+        if (contact) {
+          if (contact.recoil && !hasAbility(actor, 'Magic Guard')) actor.hp = Math.max(0, actor.hp - contact.recoil)
+          if (contact.status && !statusIsBlocked(actor, contact.status, currentWeather)) actor.status = contact.status
+          roundLog.push(contact.log)
+        }
+      }
+
+      roundLog.push(totalDealt > 0
+        ? `${actor.name} dùng ${move.name} lên ${target.name}, gây ${totalDealt} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`
+        : `${actor.name} dùng ${move.name} lên ${target.name}.`)
+      if (totalDealt > 0 && effectiveness > 1) roundLog.push('Hiệu quả tốt!')
+      else if (totalDealt > 0 && effectiveness > 0 && effectiveness < 1) roundLog.push('Hiệu quả không tốt...')
+      else if (effectiveness === 0) roundLog.push('Không có tác dụng.')
+
+      if (target.hp > 0) {
+        if (!moveImmune) {
+          if (move.boosts && move.target !== 'self') applyStageBoost(nextStages, monKey(target), move.boosts, roundLog, target.name, target, { fromOpponent: true })
+          const secondaryTriggered = !suppressSecondary && move.secondary
+            && Math.random() * 100 < (move.secondary.chance ?? 100)
+          if (secondaryTriggered && move.secondary?.boosts) {
+            applyStageBoost(nextStages, monKey(target), move.secondary.boosts, roundLog, target.name, target, { fromOpponent: true })
+          }
+          const status = move.status ?? (secondaryTriggered ? move.secondary?.status : null)
+          if (status && STATUS_INFO[status] && !moveStatusIsBlocked(move, target, status, currentWeather)) {
+            target.status = status
+            if (status === 'slp') target.sleepTurns = 1 + Math.floor(Math.random() * 3)
+            roundLog.push(`${target.name} bị ${STATUS_INFO[status].label.toLowerCase()}!`)
+          }
+        }
+      } else {
+        roundLog.push(`${target.name} đã gục!`)
+        const knockout = knockoutAbilityEffect(actor)
+        if (knockout && actor.hp > 0) {
+          applyStageBoost(nextStages, monKey(actor), knockout.boosts, roundLog, actor.name, actor)
+          roundLog.push(knockout.log)
+        }
+      }
+
+      if (totalDealt > 0 && move.drain && actor.hp > 0) {
+        const heal = ratioValue(move.drain, totalDealt)
+        const before = actor.hp
+        actor.hp = Math.min(actor.maxHp, actor.hp + heal)
+        if (actor.hp > before) roundLog.push(`${actor.name} hút lại ${actor.hp - before} HP.`)
+      }
+      if (totalDealt > 0 && move.recoil && actor.hp > 0 && !hasAbility(actor, 'Rock Head', 'Magic Guard')) {
+        const recoil = ratioValue(move.recoil, totalDealt)
+        actor.hp = Math.max(0, actor.hp - recoil)
+        roundLog.push(`${actor.name} chịu ${recoil} sát thương phản lực.`)
+      }
+      return totalDealt
+    }
 
     const enemyActions = nextEnemies.map((enemy, enemyIndex) => {
       if (!enemy || enemy.hp <= 0) return null
@@ -269,18 +506,26 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const usableMoves = (enemy.moves ?? []).filter(Boolean)
       if (!usableMoves.length) return null
       const move = usableMoves[Math.floor(Math.random() * usableMoves.length)]
-      return { side: 'enemy', actorIndex: enemyIndex, targetSlot, move, priority: Number(move.priority ?? 0), speed: enemy.stats?.spe ?? enemy.level }
+      return {
+        side: 'enemy', actorIndex: enemyIndex, targetSlot, move,
+        priority: movePriorityWithAbility(move, enemy),
+        speed: effectiveSpeed(enemy, nextStages[monKey(enemy)], weatherKey()),
+      }
     }).filter(Boolean)
 
     const playerActions = requiredSlots.map((slot) => {
       const action = actions[slot]
       const actor = nextTeam.find((mon) => monKey(mon) === nextIds[slot])
       if (!action || !actor) return null
-      const priority = action.type === 'switch' ? 7 : action.type === 'item' ? 6 : Number(action.move?.priority ?? 0)
-      return { ...action, side: 'player', actorSlot: slot, actorUid: monKey(actor), priority, speed: actor.stats?.spe ?? actor.level }
+      const priority = action.type === 'switch' ? 7 : action.type === 'item' ? 6 : movePriorityWithAbility(action.move, actor)
+      return {
+        ...action, side: 'player', actorSlot: slot, actorUid: monKey(actor), priority,
+        speed: effectiveSpeed(actor, nextStages[monKey(actor)], weatherKey()),
+      }
     }).filter(Boolean)
 
     const queue = [...playerActions, ...enemyActions].sort((a, b) => b.priority - a.priority || b.speed - a.speed || Math.random() - 0.5)
+    const consumedThisRound = new Map()
 
     for (const action of queue) {
       if (action.side === 'player') {
@@ -289,22 +534,41 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (action.type === 'switch') {
           const target = nextTeam.find((mon) => monKey(mon) === action.targetUid)
           if (!target || target.hp <= 0 || nextIds.includes(monKey(target))) continue
+          const withdrawn = switchOutAbility(actor)
+          const at = nextTeam.findIndex((mon) => monKey(mon) === monKey(actor))
+          if (at >= 0) nextTeam[at] = withdrawn
           roundLog.push(`Bạn thu ${actor.name} về và tung ${target.name} vào vị trí ${action.actorSlot + 1}!`)
           nextIds[action.actorSlot] = monKey(target)
           participantsRef.current.add(monKey(target))
+          applyEntryLocal(target, 'player')
           continue
         }
         if (action.type === 'item') {
           const target = nextTeam.find((mon) => monKey(mon) === nextIds[action.targetSlot])
           if (!target || target.hp <= 0) continue
           const heal = HEAL_AMOUNT[action.item.id]
-          if (heal !== undefined) {
+          const cures = STATUS_CURE[action.item.id]
+          const canHeal = heal !== undefined && target.hp < target.maxHp
+          const canCure = Boolean(cures?.includes(target.status))
+          // Không tiêu hao vật phẩm và không mất lượt nếu món đó hoàn toàn
+          // không có tác dụng lên mục tiêu hiện tại.
+          if (!canHeal && !canCure) {
+            roundLog.push(`${action.item.name} không có tác dụng lên ${target.name}; vật phẩm không bị trừ.`)
+            continue
+          }
+          const reserved = consumedThisRound.get(action.item.id) ?? 0
+          const available = action.item.infinite ? Infinity : Number(action.item.qty ?? 1)
+          if (reserved >= available) {
+            roundLog.push(`${action.item.name} không còn đủ để dùng lần thứ ${reserved + 1} trong cùng lượt.`)
+            continue
+          }
+          consumedThisRound.set(action.item.id, reserved + 1)
+          if (canHeal) {
             const before = target.hp
             target.hp = Math.min(target.maxHp, target.hp + heal)
             roundLog.push(`Dùng ${action.item.name} cho ${target.name}: hồi ${target.hp - before} HP.`)
           }
-          const cures = STATUS_CURE[action.item.id]
-          if (cures?.includes(target.status)) {
+          if (canCure) {
             target.status = null
             delete target.sleepTurns
             roundLog.push(`${target.name} đã khỏi trạng thái xấu.`)
@@ -314,87 +578,116 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         }
         if (!canAct(actor, roundLog)) continue
         const move = action.move
-        if (!moveHits(move)) {
-          roundLog.push(`${actor.name} dùng ${move.name}, nhưng đòn đánh trượt!`)
-          continue
+        const playerWeather = moveWeatherKey(move)
+        if (playerWeather) {
+          roundEnv = getBattleEnv(playerWeather)
+          roundWeatherTurns = 5
+          roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
           roundLog.push(`${actor.name} dùng ${move.name}.`)
-          applyStageBoost(nextStages, monKey(actor), move.boosts ?? move.self?.boosts, roundLog, actor.name)
+          if (move.heal) {
+            const before = actor.hp
+            actor.hp = Math.min(actor.maxHp, actor.hp + ratioValue(move.heal, actor.maxHp))
+            if (actor.hp > before) roundLog.push(`${actor.name} hồi ${actor.hp - before} HP.`)
+          }
+          applyStageBoost(nextStages, monKey(actor), move.boosts, roundLog, actor.name, actor)
+          if (move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
+            applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
+          }
+          const selfStatus = move.status ?? move.self?.status
+          if (selfStatus && !moveStatusIsBlocked(move, actor, selfStatus, weatherKey())) {
+            actor.status = selfStatus
+            if (selfStatus === 'slp') actor.sleepTurns = 1 + Math.floor(Math.random() * 3)
+            roundLog.push(`${actor.name} bị ${STATUS_INFO[selfStatus]?.label?.toLowerCase() ?? selfStatus}.`)
+          }
           continue
         }
-        let targetIndexes = isSpreadMove(move)
+        const originalTarget = nextEnemies[action.targetIndex]?.hp > 0
+          ? nextEnemies[action.targetIndex] : nextEnemies.find((enemy) => enemy.hp > 0)
+        const redirectedTarget = redirectTargetByAbility(move, nextEnemies, originalTarget)
+        const targetIndexes = isSpreadMove(move)
           ? nextEnemies.map((enemy, index) => enemy.hp > 0 ? index : -1).filter((index) => index >= 0)
-          : [nextEnemies[action.targetIndex]?.hp > 0 ? action.targetIndex : nextEnemies.findIndex((enemy) => enemy.hp > 0)].filter((index) => index >= 0)
+          : [nextEnemies.findIndex((enemy) => enemy === redirectedTarget)].filter((index) => index >= 0)
         const spreadPenalty = targetIndexes.length > 1 ? 0.75 : 1
         for (const targetIndex of targetIndexes) {
           const target = nextEnemies[targetIndex]
-          if (!target || target.hp <= 0) continue
-          const damage = move.power > 0 ? Math.max(1, Math.round(applyEnvToDamage(computeDamage(move, actor, target, nextStages[monKey(actor)], nextStages[monKey(target)]), move, environment) * spreadPenalty)) : 0
-          target.hp = Math.max(0, target.hp - damage)
-          roundLog.push(damage > 0 ? `${actor.name} dùng ${move.name} lên ${target.name}, gây ${damage} sát thương.` : `${actor.name} dùng ${move.name} lên ${target.name}.`)
-          const eff = getEffectivenessMulti(move.type, target.types)
-          if (damage > 0 && eff > 1) roundLog.push('Hiệu quả tốt!')
-          else if (damage > 0 && eff > 0 && eff < 1) roundLog.push('Hiệu quả không tốt...')
-          else if (damage > 0 && eff === 0) roundLog.push('Không có tác dụng.')
-          if (target.hp > 0) {
-            if (move.boosts && move.target !== 'self') applyStageBoost(nextStages, monKey(target), move.boosts, roundLog, target.name)
-            if (move.secondary?.boosts && Math.random() * 100 < (move.secondary.chance ?? 100)) applyStageBoost(nextStages, monKey(target), move.secondary.boosts, roundLog, target.name)
-            const status = rollStatus(move, target)
-            if (status) {
-              target.status = status
-              if (status === 'slp') target.sleepTurns = 1 + Math.floor(Math.random() * 3)
-              roundLog.push(`${target.name} bị ${STATUS_INFO[status].label.toLowerCase()}!`)
-            }
-          } else roundLog.push(`${target.name} đã gục!`)
+          if (target?.hp > 0) damageTarget(actor, target, move, spreadPenalty)
         }
-        if (move.self?.boosts) applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name)
+        if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
+          applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
+        }
       } else {
         const actor = nextEnemies[action.actorIndex]
         if (!actor || actor.hp <= 0 || !canAct(actor, roundLog)) continue
         const move = action.move
-        if (!moveHits(move)) {
-          roundLog.push(`${actor.name} dùng ${move.name}, nhưng đòn đánh trượt!`)
-          continue
+        const enemyWeather = moveWeatherKey(move)
+        if (enemyWeather) {
+          roundEnv = getBattleEnv(enemyWeather)
+          roundWeatherTurns = 5
+          roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
           roundLog.push(`${actor.name} dùng ${move.name}.`)
-          applyStageBoost(nextStages, monKey(actor), move.boosts ?? move.self?.boosts, roundLog, actor.name)
+          if (move.heal) {
+            const before = actor.hp
+            actor.hp = Math.min(actor.maxHp, actor.hp + ratioValue(move.heal, actor.maxHp))
+            if (actor.hp > before) roundLog.push(`${actor.name} hồi ${actor.hp - before} HP.`)
+          }
+          applyStageBoost(nextStages, monKey(actor), move.boosts, roundLog, actor.name, actor)
+          if (move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
+            applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
+          }
+          const selfStatus = move.status ?? move.self?.status
+          if (selfStatus && !moveStatusIsBlocked(move, actor, selfStatus, weatherKey())) {
+            actor.status = selfStatus
+            if (selfStatus === 'slp') actor.sleepTurns = 1 + Math.floor(Math.random() * 3)
+            roundLog.push(`${actor.name} bị ${STATUS_INFO[selfStatus]?.label?.toLowerCase() ?? selfStatus}.`)
+          }
           continue
         }
-        const target = nextTeam.find((mon) => monKey(mon) === nextIds[action.targetSlot])
-        if (!target || target.hp <= 0) continue
-        const targets = isSpreadMove(move)
-          ? nextIds.map((id) => nextTeam.find((mon) => monKey(mon) === id)).filter((mon) => mon?.hp > 0)
-          : [target]
+        const originalTarget = nextTeam.find((mon) => monKey(mon) === nextIds[action.targetSlot])
+        if (!originalTarget || originalTarget.hp <= 0) continue
+        const activeTargets = nextIds.map((id) => nextTeam.find((mon) => monKey(mon) === id)).filter((mon) => mon?.hp > 0)
+        const target = redirectTargetByAbility(move, activeTargets, originalTarget)
+        const targets = isSpreadMove(move) ? activeTargets : [target]
         const spreadPenalty = targets.length > 1 ? 0.75 : 1
-        for (const playerTarget of targets) {
-          const damage = move.power > 0 ? Math.max(1, Math.round(applyEnvToDamage(computeDamage(move, actor, playerTarget, nextStages[monKey(actor)], nextStages[monKey(playerTarget)]), move, environment) * spreadPenalty)) : 0
-          playerTarget.hp = Math.max(0, playerTarget.hp - damage)
-          roundLog.push(damage > 0 ? `${actor.name} dùng ${move.name} lên ${playerTarget.name}, gây ${damage} sát thương.` : `${actor.name} dùng ${move.name}.`)
-          if (playerTarget.hp > 0) {
-            const status = rollStatus(move, playerTarget)
-            if (status) {
-              playerTarget.status = status
-              if (status === 'slp') playerTarget.sleepTurns = 1 + Math.floor(Math.random() * 3)
-              roundLog.push(`${playerTarget.name} bị ${STATUS_INFO[status].label.toLowerCase()}!`)
-            }
-          } else roundLog.push(`${playerTarget.name} đã gục!`)
+        for (const playerTarget of targets) damageTarget(actor, playerTarget, move, spreadPenalty)
+        if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
+          applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
         }
       }
     }
 
-    for (const mon of [...nextTeam.filter((entry) => nextIds.includes(monKey(entry))), ...nextEnemies]) {
-      if (mon?.status !== 'brn' || mon.hp <= 0) continue
-      const tick = Math.max(1, Math.round(mon.maxHp / 16))
-      mon.hp = Math.max(0, mon.hp - tick)
-      roundLog.push(`${mon.name} bị bỏng, mất ${tick} HP.`)
+    const activeEndMons = [...activePlayers(), ...nextEnemies]
+    for (const mon of activeEndMons) {
+      const statusEnd = endTurnStatusEffect(mon)
+      Object.assign(mon, statusEnd.mon)
+      roundLog.push(...statusEnd.logs)
+    }
+    const effectiveEndWeather = weatherIsSuppressed(activeEndMons) ? null : roundEnv?.key
+    for (const mon of activeEndMons) {
+      const result = endTurnAbilityEffect(mon, effectiveEndWeather)
+      Object.assign(mon, result.mon)
+      if (result.boosts) applyStageBoost(nextStages, monKey(mon), result.boosts, roundLog, mon.name, mon)
+      roundLog.push(...result.logs)
+    }
+
+    if (roundWeatherTurns !== null) {
+      roundWeatherTurns -= 1
+      if (roundWeatherTurns <= 0) {
+        roundEnv = environment ?? getBattleEnv('none')
+        roundWeatherTurns = null
+        roundLog.push('Hiệu ứng thời tiết đã tan.')
+      }
     }
 
     setTeam(nextTeam)
     setEnemies(nextEnemies)
     setActiveIds(nextIds)
     setStages(nextStages)
+    setBattleEnv(roundEnv)
+    setWeatherTurns(roundWeatherTurns)
     setActions({})
     setTargeting(null)
     setLog((cur) => [...cur, ...roundLog])
@@ -407,8 +700,22 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
     continuingRef.current = true
     const lead = activeIds.find((id) => team.find((mon) => monKey(mon) === id)?.hp > 0) ?? activeIds[0]
     onBattleEnd(outcome ?? 'lose', {
-      mode: 'double', enemies, team, participantUids: [...participantsRef.current], leadUid: lead,
+      mode: 'double', enemies: enemies.map(clearBattleVolatile), team: team.map(clearBattleVolatile), participantUids: [...participantsRef.current], leadUid: lead,
     })
+  }
+
+  function buildBattleRuntime() {
+    return {
+      enemies: enemies.map(cloneMon),
+      team: team.map(cloneMon),
+      activeIds: [...activeIds],
+      stages: Object.fromEntries(Object.entries(stages).map(([key, value]) => [key, { ...value }])),
+      log: [...log],
+      battleEnvKey: battleEnv?.key ?? 'none',
+      weatherTurns,
+      entryAbilitiesApplied: entryAbilitiesAppliedRef.current,
+      participantUids: [...participantsRef.current],
+    }
   }
 
   const selectedMon = activeMons[selectedSlot]
@@ -421,10 +728,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             <h2 className="page-title" style={{ margin: 0 }}>Đấu đôi 2v2 <span style={{ color: 'var(--amber)', fontSize: 11 }}>BETA</span></h2>
             <div style={{ color: 'var(--text-dim)', fontSize: 10.5, marginTop: 3 }}>Battle Club / yêu cầu Chủ Gym · cơ chế đặc biệt tạm khoá trong giai đoạn thử nghiệm</div>
           </div>
-          {!finished && <button className="btn" onClick={() => onClose?.(enemies)}>✕ Ẩn (trận vẫn tiếp diễn)</button>}
+          {!finished && <button className="btn" onClick={() => onClose?.(buildBattleRuntime())}>✕ Ẩn (trận vẫn tiếp diễn)</button>}
         </div>
 
-        {environment && environment.key !== 'none' && <div style={{ fontSize: 10.5, color: 'var(--text-mid)', border: '1px dashed var(--line)', borderRadius: 8, padding: '5px 9px', marginBottom: 9 }}>{environment.label} — {environment.desc}</div>}
+        {battleEnv && battleEnv.key !== 'none' && <div style={{ fontSize: 10.5, color: 'var(--text-mid)', border: '1px dashed var(--line)', borderRadius: 8, padding: '5px 9px', marginBottom: 9 }}>{battleEnv.label} — {battleEnv.desc}{weatherTurns !== null ? ` · còn ${weatherTurns} lượt` : ''}</div>}
 
         <div style={{ padding: 10, borderRadius: 12, border: '1px solid var(--line)', background: 'linear-gradient(180deg,#182532 0 49%,#24372b 49% 100%)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8, marginBottom: 14 }}>

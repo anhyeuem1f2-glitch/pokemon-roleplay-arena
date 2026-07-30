@@ -3,6 +3,8 @@
 // species = slug khớp sprite Pokémon Showdown (ani/{species}.gif, ani-back/...).
 import { getBossTier } from './bossTiers.js'
 import { getEffectivenessMulti } from './pokemonTypes.js'
+import { resolveAbilityForEntry } from './pokemonAbilities.js'
+import { DEFAULT_FRIENDSHIP, friendshipTier, normalizeFriendship } from './pokemonFriendship.js'
 
 export const POKEMON_SPECIES = [
   { name: 'Bulbasaur', species: 'bulbasaur', types: ['grass', 'poison'] },
@@ -433,6 +435,8 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
   // theo độ trâu thật của nó) — fallback công thức cũ (30+level*2) cho loài
   // không có baseStats (VD 151 loài tĩnh dự phòng khi chưa tải được pokedex).
   const maxHp = stats ? stats.hp : 30 + level * 2
+  const uid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const ability = resolveAbilityForEntry(speciesEntry, null, uid)
   return {
     name: speciesEntry.name,
     species: speciesEntry.species,
@@ -448,7 +452,14 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     // MÃ ĐỊNH DANH cá thể (đợt 69): trước đây đồng bộ playerMon ↔ party khớp
     // theo TÊN, nên 2 con cùng loài (hoặc tên đổi) là lệch nhau — người chơi
     // báo "🧬 bảo lên Lv.8 mà HUD vẫn Lv.6". uid không đổi trọn đời cá thể.
-    uid: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    uid,
+    // Ability + độ thân mật là biến CỦA CÁ THỂ, persist qua save/tiến hoá.
+    ability: ability.name,
+    abilitySlot: ability.slot,
+    abilityHidden: ability.hidden,
+    friendship: Number.isFinite(speciesEntry.baseFriendship)
+      ? speciesEntry.baseFriendship
+      : DEFAULT_FRIENDSHIP,
     baseStats: speciesEntry.baseStats ?? null,
     // Đợt 71: LƯU cờ này lên chính đối tượng mon. Trước đây `isTrainerMon`
     // chỉ là tham số dùng nội bộ cho pickMoves rồi bị vứt đi — nên
@@ -471,8 +482,8 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
  * @param {{hpBars:number,label:string}} tier từ getBossTier()/BOSS_TIERS
  * @param {object} [movesDb]
  */
-export function buildBossMon(speciesEntry, level, tier, movesDb = null, opponentTypes = null) {
-  const base = buildWildMon(speciesEntry, level, movesDb, opponentTypes, false)
+export function buildBossMon(speciesEntry, level, tier, movesDb = null, opponentTypes = null, isTrainerMon = false) {
+  const base = buildWildMon(speciesEntry, level, movesDb, opponentTypes, isTrainerMon)
   const hpMultiplier = 1 + 0.5 * (tier.hpBars - 1)
   const maxHp = Math.round(base.maxHp * hpMultiplier)
   return {
@@ -494,7 +505,7 @@ export function buildMonSmart(speciesEntry, level, movesDb = null, opponentTypes
   const tier = getBossTier(speciesEntry.name)
   if (!tier) return buildWildMon(speciesEntry, level, movesDb, opponentTypes, isTrainerMon)
   const cappedLevel = Math.min(level, tier.maxLevel)
-  return buildBossMon(speciesEntry, cappedLevel, tier, movesDb, opponentTypes)
+  return buildBossMon(speciesEntry, cappedLevel, tier, movesDb, opponentTypes, isTrainerMon)
 }
 
 function evolutionId(value) {
@@ -531,13 +542,21 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     Boolean(mon.isTrainerMon),
   )
   const wasFainted = (mon.hp ?? 1) <= 0
+  const evolvedAbility = resolveAbilityForEntry(
+    targetEntry,
+    mon.abilitySlot,
+    mon.uid ?? `${targetEntry.species}-${level}`,
+  )
   const seed = {
-    ...mon,
+    ...normalizeFriendship(mon),
     name: targetEntry.name,
     species: targetEntry.species,
     spriteId: targetEntry.spriteId ?? targetEntry.species,
     types: [...(targetEntry.types ?? generated.types ?? mon.types ?? [])],
     baseStats: targetEntry.baseStats ?? generated.baseStats ?? mon.baseStats ?? null,
+    ability: evolvedAbility.name,
+    abilitySlot: evolvedAbility.slot,
+    abilityHidden: evolvedAbility.hidden,
     // Tiến hoá không được tự xoá bộ chiêu người chơi đang dùng. Chỉ lấy
     // moveset sinh tự động nếu save cũ thật sự chưa có chiêu nào.
     moves: mon.moves?.length ? mon.moves : generated.moves,
@@ -689,6 +708,10 @@ export function describeMonForPrompt(mon) {
   parts.push(')')
   let line = parts.join('')
   if (mon.nature) line += ` — tính cách ${mon.nature}${beh ? `: ${beh}` : ''}`
+  if (mon.ability) line += ` — Ability ${mon.ability}`
+  const friendship = normalizeFriendship(mon)
+  const bond = friendshipTier(friendship.friendship)
+  line += ` — độ thân mật ${friendship.friendship}/255 (${bond.label}: ${bond.note})`
   return line
 }
 
@@ -697,7 +720,7 @@ export function buildPartyBehaviorNote(party, activeMon) {
   const list = (party ?? []).filter((m) => m?.name)
   if (!list.length) return null
   const lines = list.map((m) => {
-    const tag = activeMon && m.name === activeMon.name ? ' [đang ra trận]' : ''
+    const tag = activeMon && isSameMon(m, activeMon) ? ' [đang ra trận]' : ''
     return `- ${describeMonForPrompt(m)}${tag}`
   })
   return [

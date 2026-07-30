@@ -13,6 +13,7 @@
 //   [[SHOP Tiệm PokéMart Cerulean]]      — người chơi ĐÃ bước vào bên trong
 //       cửa hàng và có thể mua sắm → app hiện nút mở giao diện giỏ hàng.
 //   [[EVOLVE Froakie | Frogadier]]       — cùng cá thể tiến hoá, không sinh con mới.
+//   [[FRIEND Froakie | +5 | tin tưởng hơn]] — độ thân mật cá thể 0-255.
 
 export const BODY_PART_KEYS = ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
 
@@ -23,6 +24,7 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - CHỈ khi nhân vật đã THỰC SỰ BƯỚC VÀO BÊN TRONG cửa hàng, đang đứng trước quầy/kệ và lượt kể dừng để người chơi chọn mua: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật. Đi tới một thành phố, đi ngang/nhìn thấy cửa hàng, nhắc tên trung tâm mua sắm, hoặc chỉ nói “sẵn tiện mua sau” thì TUYỆT ĐỐI KHÔNG dùng SHOP. Chính văn phải nói rõ nhân vật đã vào trong; đừng tự liệt kê hàng, chỉ tả không khí rồi dừng.
 - Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. KHÔNG dùng POKEMON cho tiến hoá. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
 - Pokémon đang sở hữu TIẾN HOÁ thành loài khác: [[EVOLVE Tên hiện tại | Tên sau tiến hoá]]. Đây là CÙNG MỘT CÁ THỂ: app giữ uid/IV/EV/nature/EXP và thay hình ảnh/chỉ số loài; tuyệt đối không dùng [[POKEMON loài mới]] vì sẽ tạo bản sao. Nếu tiến hoá xảy ra đúng lúc lên cấp, khai cả [[LEVEL tên cũ | +1]] rồi [[EVOLVE tên cũ | tên mới]].
+- Độ THÂN MẬT của một Pokémon đang sở hữu thay đổi RÕ RÀNG vì hành động trong chính văn: [[FRIEND Tên Pokémon | +5 | lý do ngắn]] hoặc số âm khi niềm tin bị tổn thương. Chỉ dùng khi truyện thực sự thể hiện Pokémon được chăm sóc, được cứu, được khen/tặng món yêu thích, cùng vượt khó, bị bỏ rơi/ngược đãi hoặc mất niềm tin; KHÔNG cộng chỉ vì đi bộ, nói chuyện xã giao hay xuất hiện cùng nhau. Mỗi lượt thường trong ±1-10, sự kiện rất lớn tối đa ±30; app kẹp tổng 0-255.
 - Nhân vật NHẬN ĐƯỢC hoặc MẤT ĐI vật phẩm (được tặng, nhặt được, dùng hết, bị lấy mất): [[ITEM Tên vật phẩm | số lượng]] — số lượng âm là mất đi, bỏ trống là 1. VD: [[ITEM Potion | 2]], [[ITEM Kẹo Hiếm]], [[ITEM Poké Ball | -1]]. CHỈ dùng khi truyện THỰC SỰ trao/lấy đồ; đừng tự phát đồ cho người chơi vô cớ. Nếu NĂNG LỰC ĐẶC BIỆT của người chơi (mục SIÊU NĂNG LỰC ĐẶC BIỆT ở trên) nói rằng họ có sẵn hay tạo ra được một loại vật phẩm nào đó, thì hãy DÙNG TAG NÀY để biến điều đó thành thật trong túi đồ, thay vì chỉ kể suông rồi để số liệu đứng yên.
 - Pokémon TĂNG CẤP TRỰC TIẾP vì Kẹo Hiếm hoặc một năng lực đặc biệt (không phải EXP trận/luyện tập): [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]]. Dùng +N khi tăng N cấp, dùng LvN khi truyện chốt cấp đích. Nếu dùng Kẹo Hiếm hữu hạn thì khai thêm [[ITEM Kẹo Hiếm | -1]]; nếu năng lực ghi Kẹo Hiếm vô hạn thì KHÔNG trừ. TUYỆT ĐỐI không dùng [[POKEMON]] để báo một Pokémon cũ lên cấp, và không dùng [[LEVEL]] sau trận thường hay [[TRAIN]] vì app đã tự tính EXP.
 - Nhân vật BƯỚC VÀO TRUNG TÂM POKÉMON (Pokémon Center — nơi y tá Joy chữa trị): [[POKECENTER Tên trung tâm]] — hệ thống sẽ hiện 2 nút cho người chơi tự bấm: CHỮA TRỊ và MÁY PC. Vì vậy trong lời kể ĐỪNG tự ý viết rằng Pokémon đã được chữa xong hay đã đổi đội hình — chỉ tả cảnh bước vào, y tá chào hỏi, rồi DỪNG LẠI để người chơi chọn. Khi nhân vật rời đi thì kể rõ là đã rời khỏi trung tâm.\n- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]]; nếu biết vị trí cụ thể trên bản đồ thì thêm toạ độ phần trăm [[MOVE Tên khu vực | x=42 | y=58]] (x: trái→phải 0-100, y: trên→dưới 0-100). VD [[MOVE Cerulean City | x=66 | y=24]]. Chỉ tag khi THỰC SỰ đổi chỗ; không bịa x/y khi văn bản không đủ rõ.
@@ -46,6 +48,7 @@ const EVOLVE_RE = /\[\[\s*(?:EVOLVE|EVOLUTION|TIẾN\s*(?:H[ÓO]A|HO[ÁA])|TIEN\
 // lạm dụng [[POKEMON Froakie | Lv11]], app hiểu là nhận con mới rồi bỏ qua vì
 // trùng loài — lời kể lên cấp nhưng biến đứng yên.
 const LEVEL_RE = /\[\[\s*(?:LEVEL|LV|CẤP|CAP)\s+([^\]|]+?)\s*\|\s*(?:Lv\.?\s*)?([+-]?\d+)\s*\]\]/gi
+const FRIEND_RE = /\[\[\s*(?:FRIEND|FRIENDSHIP|BOND|THÂN\s*MẬT|THAN\s*MAT)\s+([^\]|]+?)\s*\|\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi
 const DATE_ADV_RE = /\[\[\s*DATE\s*\+\s*(\d+)\s*\]\]/gi
 // Đợt 67: buổi luyện tập có chủ đích → EXP cho Pokémon. cường độ 1-3.
 const TRAIN_RE = /\[\[\s*TRAIN(?:\s+([^\]]*))?\s*\]\]/gi
@@ -74,8 +77,9 @@ const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
  * Regex không neo dòng: model thực tế thường nhét tag giữa câu.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
+  const moneyEntries = []
   const rel = []
   const body = []
   const shops = []
@@ -84,6 +88,7 @@ export function parseStoryStateTags(text) {
   const pokemons = []
   const levels = []
   const evolutions = []
+  const friendships = []
   const hunger = []
   const moves = []
   const moveDirectives = []
@@ -93,7 +98,13 @@ export function parseStoryStateTags(text) {
   let pokecenter = null
   const items = []
 
-  for (const m of text.matchAll(MONEY_RE)) money += parseInt(m[1], 10)
+  for (const m of text.matchAll(MONEY_RE)) {
+    const value = parseInt(m[1], 10)
+    if (Number.isFinite(value) && value !== 0) {
+      moneyEntries.push(value)
+      money += value
+    }
+  }
   for (const m of text.matchAll(REL_RE)) {
     rel.push({ name: m[1].trim(), delta: parseInt(m[2], 10), note: (m[3] ?? '').trim() || null })
   }
@@ -160,6 +171,12 @@ export function parseStoryStateTags(text) {
       })
     }
   }
+  for (const m of text.matchAll(FRIEND_RE)) {
+    const delta = Math.max(-30, Math.min(30, parseInt(m[2], 10)))
+    if (Number.isFinite(delta) && delta !== 0) friendships.push({
+      target: m[1].trim(), delta, note: (m[3] ?? '').trim() || null,
+    })
+  }
   for (const m of text.matchAll(DATE_ADV_RE)) dateAdvance += parseInt(m[1], 10)
   for (const m of text.matchAll(TRAIN_RE)) {
     const n = parseInt((m[1] ?? '').trim(), 10)
@@ -207,6 +224,7 @@ export function parseStoryStateTags(text) {
     .replace(POKEMON_RE, '')
     .replace(EVOLVE_RE, '')
     .replace(LEVEL_RE, '')
+    .replace(FRIEND_RE, '')
     .replace(DATE_ADV_RE, '')
     .replace(TRAIN_RE, '')
     .replace(DATE_PART_RE, '')
@@ -221,7 +239,7 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, rel, body, shops, npcs, facts, pokemons, levels, evolutions, hunger, moves, moveDirectives, items, dateAdvance,
+  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, hunger, moves, moveDirectives, items, dateAdvance,
     training, datePart, pokecenter, cleaned }
 }
 
@@ -242,7 +260,11 @@ export function parseStoryStateTags(text) {
 //     nâng lên nhận functional updater (đợt 45).
 export function applyStoryState(parsed, { setPlayerProfile, setRelationships, setBodyStatus }) {
   if (parsed.money !== 0) {
-    setPlayerProfile((cur) => ({ ...cur, money: Math.max(0, Number(cur.money) + parsed.money) }))
+    setPlayerProfile((cur) => {
+      const current = Number(cur?.money)
+      const safeCurrent = Number.isFinite(current) ? current : 0
+      return { ...(cur ?? {}), money: Math.max(0, safeCurrent + Number(parsed.money || 0)) }
+    })
   }
   if (parsed.rel.length > 0) {
     setRelationships((cur) => {
@@ -254,7 +276,7 @@ export function applyStoryState(parsed, { setPlayerProfile, setRelationships, se
         if (idx >= 0) {
           next[idx] = {
             ...next[idx],
-            affinity: Math.max(-100, Math.min(100, next[idx].affinity + delta)),
+            affinity: Math.max(-100, Math.min(100, (Number(next[idx].affinity) || 0) + delta)),
             note: r.note ?? next[idx].note,
           }
         } else {

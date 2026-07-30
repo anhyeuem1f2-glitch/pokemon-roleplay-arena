@@ -4,17 +4,23 @@ import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
-import { buildWildMon, isSameMon, syncMonInParty } from '../data/pokemonSpecies.js'
+import { buildWildMon, isSameMon, recomputeMonStats, syncMonInParty } from '../data/pokemonSpecies.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
 import { musicManager } from '../utils/musicManager.js'
 import { resolveBattleTrackKeys, resolveLowHpTrackKeys, LOW_HP_RATIO } from '../data/musicTracks.js'
 import { TYPE_COLORS } from '../data/pokemonTypes.js'
-import { applyEnvToDamage } from '../data/battleEnvironments.js'
+import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import BagPanel from './BagPanel.jsx'
+import {
+  abilityLabel, clearBattleVolatile, contactAbilityEffect, effectiveSpeed, endTurnAbilityEffect,
+  endTurnStatusEffect, hasAbility, knockoutAbilityEffect, modifyBoostsByAbility, modifyDamageByAbilities,
+  moveHitsWithAbilities, movePriorityWithAbility, resolveAbilityForEntry, statusIsBlocked, switchOutAbility,
+  moveStatusIsBlocked, weatherDefenseMultiplier, weatherFromAbility, weatherIsSuppressed,
+} from '../data/pokemonAbilities.js'
 
 // Hiệu ứng trạng thái — đợt đầu tiên (bỏng/tê liệt/ngủ), sẽ bổ sung dần theo
 // yêu cầu (VD độc, đóng băng, giảm/tăng chỉ số theo giai đoạn...).
@@ -22,11 +28,22 @@ const STATUS_INFO = {
   brn: { label: 'Bỏng', short: 'BRN', color: 'var(--coral)' },
   par: { label: 'Tê liệt', short: 'PAR', color: 'var(--amber)' },
   slp: { label: 'Ngủ', short: 'SLP', color: 'var(--text-dim)' },
+  psn: { label: 'Nhiễm độc', short: 'PSN', color: '#a86de0' },
+  frz: { label: 'Đóng băng', short: 'FRZ', color: '#79d8ef' },
+}
+
+function moveWeatherKey(move) {
+  const key = String(move?.weather ?? '').toLowerCase().replace(/[^a-z]/g, '')
+  if (key.includes('rain')) return 'rain'
+  if (key.includes('sun')) return 'sun'
+  if (key.includes('sand')) return 'sandstorm'
+  if (key.includes('snow') || key.includes('hail')) return 'snow'
+  return null
 }
 
 // Công thức sát thương RÚT GỌN cho bản demo giao diện.
-// TODO (mở rộng sau): crit, item, ability, thứ tự hành động theo Speed...
-// theo đúng công thức Pokémon gốc.
+// Đợt 77 đã bổ sung thứ tự theo Speed/priority, accuracy, Ability, thời tiết,
+// drain/recoil/multihit và trạng thái. Crit/PP/item cầm vẫn là phần mở rộng sau.
 // Công thức sát thương — ưu tiên dùng ĐÚNG Atk/Def hoặc SpAtk/SpDef thật của
 // từng loài (khi đã có baseStats thật từ Showdown) theo tinh thần công thức
 // gốc của game Pokémon: dame phụ thuộc đúng loại chiêu (Physical dùng
@@ -36,16 +53,19 @@ const STATUS_INFO = {
 // Đúng game gốc: mỗi chỉ số có bậc -6..+6, hệ số = (2+bậc)/2 khi dương,
 // 2/(2-bậc) khi âm (VD +2 = x2, -1 = x0.67). Bậc tăng/giảm từ hiệu ứng phụ
 // của chiêu (secondary.boosts lên đối thủ, self.boosts lên chính mình).
-export const STAGE_ZERO = { atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }
-const STAGE_STAT_LABELS = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ' }
+export const STAGE_ZERO = { atk: 0, def: 0, spa: 0, spd: 0, spe: 0, acc: 0, eva: 0 }
+const STAGE_STAT_LABELS = { atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ', acc: 'Chính xác', eva: 'Né tránh' }
 
 export function stageMult(stage) {
   return stage >= 0 ? (2 + stage) / 2 : 2 / (2 - stage)
 }
 
-export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO) {
+export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO, weatherKey = null) {
   if (move.power <= 0) return 0
   const eff = getEffectivenessMulti(move.type, defender.types)
+  // Miễn nhiễm hệ phải gây đúng 0 sát thương. Bản cũ Math.max(1, ...) làm
+  // chiêu hệ Đất vẫn rút 1 HP của Flying/Ghost miễn nhiễm.
+  if (eff === 0) return 0
   // STAB có xét TERASTAL (đợt 30, đúng cơ chế Gen 9): tera trùng hệ GỐC →
   // x2.0 cho hệ đó; hệ gốc còn lại vẫn giữ STAB 1.5 dù types hiện tại đã đổi.
   let stab = 1
@@ -61,14 +81,18 @@ export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, 
   const randomFactor = (85 + Math.floor(Math.random() * 16)) / 100
   const levelFactor = (2 * attacker.level) / 5 + 2
   // Bỏng giảm 1 nửa sát thương chiêu Vật Lý gây ra — đúng cơ chế game gốc.
-  const burnPenalty = attacker.status === 'brn' && move.category !== 'Special' ? 0.5 : 1
+  const burnPenalty = attacker.status === 'brn' && move.category !== 'Special' && !hasAbility(attacker, 'Guts') ? 0.5 : 1
   const isSpecial = move.category === 'Special'
-  const atkStageMult = stageMult(atkStages[isSpecial ? 'spa' : 'atk'] ?? 0)
-  const defStageMult = stageMult(defStages[isSpecial ? 'spd' : 'def'] ?? 0)
+  // Unaware bỏ qua bậc tấn công của đối thủ khi phòng thủ, hoặc bỏ qua bậc
+  // phòng thủ của đối thủ khi chính Pokémon Unaware tấn công.
+  const atkStage = hasAbility(defender, 'Unaware') ? 0 : (atkStages[isSpecial ? 'spa' : 'atk'] ?? 0)
+  const defStage = hasAbility(attacker, 'Unaware') ? 0 : (defStages[isSpecial ? 'spd' : 'def'] ?? 0)
+  const atkStageMult = stageMult(atkStage)
+  const defStageMult = stageMult(defStage)
 
   if (attacker.stats && defender.stats) {
     const atkStat = (isSpecial ? attacker.stats.spa : attacker.stats.atk) * burnPenalty * atkStageMult
-    const defStat = (isSpecial ? defender.stats.spd : defender.stats.def) * defStageMult
+    const defStat = (isSpecial ? defender.stats.spd : defender.stats.def) * defStageMult * weatherDefenseMultiplier(defender, move, weatherKey)
     const base = (levelFactor * move.power * (atkStat / defStat)) / 50 + 2
     return Math.max(1, Math.round(base * stab * eff * randomFactor))
   }
@@ -76,7 +100,7 @@ export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, 
   // Fallback khi 1 trong 2 bên không có baseStats thật (VD loài dự phòng
   // trong danh sách 151 tĩnh) — dùng tỉ lệ chênh lệch level thay cho Atk/Def.
   const base = (levelFactor * move.power * burnPenalty) / 50 + 2
-  const levelRatio = (attacker.level / defender.level) * (atkStageMult / defStageMult)
+  const levelRatio = (attacker.level / defender.level) * (atkStageMult / (defStageMult * weatherDefenseMultiplier(defender, move, weatherKey)))
   return Math.max(1, Math.round(base * levelRatio * stab * eff * randomFactor))
 }
 
@@ -94,7 +118,7 @@ function effLabel(mult) {
 function StageChips({ stages }) {
   const entries = Object.entries(stages ?? {}).filter(([, v]) => v !== 0)
   if (entries.length === 0) return null
-  const short = { atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe' }
+  const short = { atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe', acc: 'Acc', eva: 'Eva' }
   return (
     <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 3 }}>
       {entries.map(([k, v]) => (
@@ -159,6 +183,9 @@ function StatusCard({ mon, align, stages }) {
             {STATUS_INFO[mon.status].short}
           </span>
         )}
+        <span title="Ability" style={{ fontFamily: 'var(--font-mono)', fontSize: 8.5, color: 'var(--text-dim)' }}>
+          ◇ {abilityLabel(mon)}
+        </span>
       </div>
       <HealthBar hp={mon.hp} maxHp={mon.maxHp} bars={mon.bossBars ?? 1} />
       <StageChips stages={stages} />
@@ -343,9 +370,31 @@ function hasGimmickItem(inventory, kind) {
   })
 }
 
-export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false }) {
+
+/** Pokémon thu phục phải trở về chỉ số cá thể bình thường. Boss hoang dã có
+ * nhiều thanh HP chỉ là cơ chế của TRẬN, không được mang lượng HP nhân bội
+ * vào đội/PC sau khi bắt hoặc cảm hoá. */
+function normalizeAcquiredMon(mon) {
+  if (!mon) return mon
+  const stripped = { ...mon, hp: mon.maxHp, status: null }
+  delete stripped.bossBars
+  delete stripped.bossTier
+  delete stripped.bossPhase
+  delete stripped.isTrainerMon
+  delete stripped.sleepTurns
+  delete stripped.flashFireBoost
+  const normalized = recomputeMonStats(stripped)
+  return { ...normalized, hp: normalized.maxHp, status: null, isTrainerMon: false }
+}
+
+export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null }) {
   const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox } = useGame()
-  const [log, setLog] = useState([`Một ${enemyMon.name} hoang dã xuất hiện!`])
+  const restoredEnv = initialBattleState?.battleEnvKey
+    ? getBattleEnv(initialBattleState.battleEnvKey)
+    : (environment ?? getBattleEnv('none'))
+  const [log, setLog] = useState(() => Array.isArray(initialBattleState?.log) && initialBattleState.log.length
+    ? [...initialBattleState.log]
+    : [isWild ? `Một ${enemyMon.name} hoang dã xuất hiện!` : `${enemyMon.name} của huấn luyện viên đối thủ xuất trận!`])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
   // 'main' | 'fight' | 'bag' | 'party' | 'talk'
@@ -355,18 +404,37 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   // chạy). null = kết thúc thường (thắng/thua/tự chạy).
   const [endReason, setEndReason] = useState(null)
   const [talkInput, setTalkInput] = useState('')
-  // Bậc chỉ số 2 bên (-6..+6). LƯU Ý: reset khi đóng/mở lại modal (Ẩn) —
-  // chấp nhận trong bản này, ghi rõ ở README.
-  const [pStages, setPStages] = useState({ ...STAGE_ZERO })
-  const [eStages, setEStages] = useState({ ...STAGE_ZERO })
+  // Bậc chỉ số và thời tiết là state của TRẬN, không phải của modal. Vì modal
+  // có thể bị Ẩn rồi mở lại, phải khôi phục chúng từ message thay vì reset.
+  const [pStages, setPStages] = useState(() => ({ ...STAGE_ZERO, ...(initialBattleState?.pStages ?? {}) }))
+  const [eStages, setEStages] = useState(() => ({ ...STAGE_ZERO, ...(initialBattleState?.eStages ?? {}) }))
+  const [battleEnv, setBattleEnv] = useState(restoredEnv)
+  // null = thời tiết của chính văn kéo dài hết trận; số = thời tiết do Ability.
+  const [weatherTurns, setWeatherTurns] = useState(initialBattleState?.weatherTurns ?? null)
+  const battleEnvRef = useRef(restoredEnv)
+  const entryAbilitiesAppliedRef = useRef(Boolean(initialBattleState?.entryAbilitiesApplied))
+  const participantKey = (mon) => mon?.uid ?? `${mon?.name ?? ''}-${mon?.level ?? ''}`
+  const participantsRef = useRef(new Set(
+    initialBattleState?.participantUids?.length
+      ? initialBattleState.participantUids
+      : (playerMon ? [participantKey(playerMon)] : []),
+  ))
+  useEffect(() => { battleEnvRef.current = battleEnv }, [battleEnv])
 
   // ============ CƠ CHẾ ĐẶC BIỆT (đợt 30): Mega / Z / Dynamax / Tera ============
   const [gimmickOpen, setGimmickOpen] = useState(false)
-  const [gimmickUsed, setGimmickUsed] = useState(null) // 'mega'|'zmove'|'dynamax'|'tera' — 1 cơ chế/trận
+  const [gimmickUsed, setGimmickUsed] = useState(initialBattleState?.gimmickUsed ?? null) // 'mega'|'zmove'|'dynamax'|'tera' — 1 cơ chế/trận
   const [zArmed, setZArmed] = useState(false) // đã bấm Z → chọn 1 trong 4 chiêu để phóng bản Z
-  const [dynaTurnsLeft, setDynaTurnsLeft] = useState(0)
+  const [dynaTurnsLeft, setDynaTurnsLeft] = useState(initialBattleState?.dynaTurnsLeft ?? 0)
   const [megaPickOpen, setMegaPickOpen] = useState(false) // loài có 2 mega (X/Y) → hỏi chọn
-  const preGimmickRef = useRef(null) // bản gốc playerMon trước khi biến hình — để trả về khi hết trận
+  const preGimmickRef = useRef(initialBattleState?.preGimmick ? { ...initialBattleState.preGimmick } : null) // bản gốc playerMon trước khi biến hình — để trả về khi hết trận
+
+  // Khi Ẩn giữa Mega/Dynamax/Tera, context đã được trả về dạng gốc để HUD
+  // không bị kẹt. Mở lại trận thì phục hồi đúng dạng đang chiến đấu trước đó.
+  useEffect(() => {
+    if (initialBattleState?.playerBattleMon) setPlayerMon({ ...initialBattleState.playerBattleMon })
+    if (initialBattleState?.enemy) setEnemyMon({ ...initialBattleState.enemy })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ===== NHẠC "SẮP GỤC" (đợt 71) =====
   // Chủ dự án thêm file low hp.mp3: chỉ bật khi Pokémon đang ra trận tụt
@@ -415,14 +483,25 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   // 4 chiêu + trạng thái. Kéo dài hết trận.
   function doMega(megaEntry) {
     backupOnce()
-    const built = buildWildMon(megaEntry, playerMon.level, movesDb)
-    setPlayerMon({
-      ...built,
-      hp: Math.min(playerMon.hp, built.maxHp),
-      moves: playerMon.moves,
-      status: playerMon.status,
-      sleepTurns: playerMon.sleepTurns,
+    // Mega là CÙNG CÁ THỂ: giữ uid/IV/EV/Nature/EXP/thân mật và tính lại
+    // stats bằng baseStats của forme Mega. Bản cũ gọi buildWildMon trực tiếp
+    // nên random lại cả cá thể, làm Ability/IV/uid trong trận bị lệch.
+    const megaAbility = resolveAbilityForEntry(megaEntry, playerMon.abilitySlot, playerMon.uid)
+    const transformed = recomputeMonStats({
+      ...playerMon,
+      name: megaEntry.name,
+      species: megaEntry.species,
+      spriteId: megaEntry.spriteId ?? megaEntry.species,
+      types: [...(megaEntry.types ?? playerMon.types)],
+      baseStats: megaEntry.baseStats ?? playerMon.baseStats,
+      ability: megaAbility.name,
+      abilitySlot: megaAbility.slot,
+      abilityHidden: megaAbility.hidden,
+      maxHp: playerMon.maxHp,
+      hp: playerMon.hp,
     })
+    setPlayerMon(transformed)
+    applyEntryAbility(transformed, 'player')
     setGimmickUsed('mega')
     setGimmickOpen(false)
     setMegaPickOpen(false)
@@ -498,28 +577,6 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     preGimmickRef.current = null
   }
 
-  // Áp boosts của chiêu lên 1 bên: dương = tăng bậc, âm = giảm; kẹp ±6; log
-  // theo đúng văn game gốc (tăng/tăng mạnh/giảm/giảm mạnh; kịch bậc thì báo).
-  function applyBoosts(boosts, side, targetName) {
-    if (!boosts) return
-    const setter = side === 'player' ? setPStages : setEStages
-    setter((prev) => {
-      const next = { ...prev }
-      for (const [stat, delta] of Object.entries(boosts)) {
-        if (!(stat in next) || !delta) continue
-        const before = next[stat]
-        next[stat] = Math.max(-6, Math.min(6, before + delta))
-        const label = STAGE_STAT_LABELS[stat] ?? stat
-        if (next[stat] === before) {
-          pushLog(`${label} của ${targetName} không thể ${delta > 0 ? 'tăng' : 'giảm'} thêm nữa!`)
-        } else {
-          const word = delta >= 2 ? 'tăng mạnh' : delta === 1 ? 'tăng' : delta === -1 ? 'giảm' : 'giảm mạnh'
-          pushLog(`${label} của ${targetName} ${word}! (bậc ${next[stat] > 0 ? '+' : ''}${next[stat]})`)
-        }
-      }
-      return next
-    })
-  }
   // Chặn bấm "Tiếp tục câu chuyện" nhiều lần liên tiếp (tránh gửi trùng kết quả).
   const continuingRef = useRef(false)
 
@@ -554,9 +611,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   //
   // Nay mọi chỗ con ra trận gục đều đi qua đúng hàm này.
   /** @returns {boolean} true nếu TOÀN ĐỘI đã gục (thua thật). */
-  function reportActiveFainted(monName) {
+  function reportActiveFainted(monName, faintedMon = playerMon) {
+    // Khi đổi Pokémon rồi bị đánh trả ngay, `playerMon` trong closure vẫn có
+    // thể là con vừa rút về. Phải loại đúng cá thể vừa gục theo uid, nếu không
+    // bản party cũ của nó bị đếm nhầm là một dự bị còn khoẻ.
     const backups = (party ?? []).filter(
-      (pm) => pm && !isSameMon(pm, playerMon) && (pm.hp ?? 0) > 0,
+      (pm) => pm && !isSameMon(pm, faintedMon) && (pm.hp ?? 0) > 0,
     )
     if (backups.length === 0) {
       pushLog(`${monName} đã gục ngã! Toàn đội đã gục — bạn thua...`)
@@ -567,47 +627,116 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     return false
   }
 
-  // Random xem chiêu có gây trạng thái phụ không (dựa theo % thật của move.secondary).
-  // Có xét miễn nhiễm theo hệ đúng game gốc: hệ Lửa không bị bỏng, hệ Điện
-  // không bị tê liệt (quy tắc Gen 6+).
-  function rollStatus(move, defender) {
-    const status = move.secondary?.status
-    if (!status || !STATUS_INFO[status]) return null
-    if (status === 'brn' && defender.types.includes('fire')) return null
-    if (status === 'par' && defender.types.includes('electric')) return null
-    const chance = move.secondary.chance ?? 100
-    return Math.random() * 100 < chance ? status : null
+  function boostLocal(stageMap, boosts, targetName, lines, targetMon = null, options = {}) {
+    const effectiveBoosts = targetMon ? modifyBoostsByAbility(targetMon, boosts, options) : boosts
+    if (!effectiveBoosts) return
+    for (const [stat, delta] of Object.entries(effectiveBoosts)) {
+      if (!(stat in stageMap) || !delta) continue
+      const before = stageMap[stat]
+      stageMap[stat] = Math.max(-6, Math.min(6, before + delta))
+      const label = STAGE_STAT_LABELS[stat] ?? stat
+      if (stageMap[stat] === before) {
+        lines.push(`${label} của ${targetName} không thể ${delta > 0 ? 'tăng' : 'giảm'} thêm nữa!`)
+      } else {
+        const word = delta >= 2 ? 'tăng mạnh' : delta === 1 ? 'tăng' : delta === -1 ? 'giảm' : 'giảm mạnh'
+        lines.push(`${label} của ${targetName} ${word}! (bậc ${stageMap[stat] > 0 ? '+' : ''}${stageMap[stat]})`)
+      }
+    }
   }
 
-  // Kiểm tra 1 bên có hành động được lượt này không (ngủ/tê liệt) — trả về
-  // false nếu bị chặn hành động, đồng thời tự cập nhật state (đếm ngược ngủ,
-  // random tê liệt) và ghi log.
-  function checkCanAct(mon, setMon, label) {
+  function statusBlocked(mon, status, weatherKey, move = null) {
+    return move ? moveStatusIsBlocked(move, mon, status, weatherKey) : statusIsBlocked(mon, status, weatherKey)
+  }
+
+  function applyStatusLocal(mon, status, weatherKey, lines, move = null) {
+    if (!STATUS_INFO[status] || statusBlocked(mon, status, weatherKey, move)) return false
+    mon.status = status
+    if (status === 'slp') mon.sleepTurns = 1 + Math.floor(Math.random() * 3)
+    lines.push(`${mon.name} bị ${STATUS_INFO[status].label.toLowerCase()}!`)
+    return true
+  }
+
+  function canActLocal(mon, lines) {
     if (mon.status === 'slp') {
       const turnsLeft = (mon.sleepTurns ?? 1) - 1
       if (turnsLeft > 0) {
-        setMon((m) => ({ ...m, sleepTurns: turnsLeft }))
-        pushLog(`${label} đang ngủ say, không thể hành động.`)
+        mon.sleepTurns = turnsLeft
+        lines.push(`${mon.name} đang ngủ say, không thể hành động.`)
         return false
       }
-      setMon((m) => ({ ...m, status: null, sleepTurns: undefined }))
-      pushLog(`${label} đã tỉnh giấc!`)
-      return true
+      mon.status = null
+      delete mon.sleepTurns
+      lines.push(`${mon.name} đã tỉnh giấc!`)
+    }
+    if (mon.status === 'frz') {
+      if (Math.random() < 0.2) {
+        mon.status = null
+        lines.push(`${mon.name} đã tan băng!`)
+      } else {
+        lines.push(`${mon.name} bị đóng băng, không thể hành động!`)
+        return false
+      }
     }
     if (mon.status === 'par' && Math.random() < 0.25) {
-      pushLog(`${label} bị tê liệt, không thể cử động!`)
+      lines.push(`${mon.name} bị tê liệt, không thể cử động!`)
       return false
     }
     return true
   }
+
+  function ratioValue(pair, base) {
+    if (!Array.isArray(pair) || pair.length < 2 || !pair[1]) return 0
+    return Math.max(1, Math.round(base * Number(pair[0]) / Number(pair[1])))
+  }
+
+  function applyEntryAbility(mon, side) {
+    if (!mon) return
+    const weather = weatherFromAbility(mon)
+    if (weather) {
+      const weatherEnv = getBattleEnv(weather)
+      battleEnvRef.current = weatherEnv
+      setBattleEnv(weatherEnv)
+      setWeatherTurns(5)
+      pushLog(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
+    }
+    if (hasAbility(mon, 'Intimidate')) {
+      const setter = side === 'player' ? setEStages : setPStages
+      const target = side === 'player' ? enemyMon : playerMon
+      const boosts = modifyBoostsByAbility(target, { atk: -1 }, { fromOpponent: true, intimidate: true })
+      if (boosts?.atk) {
+        setter((cur) => ({ ...cur, atk: Math.max(-6, Math.min(6, (cur.atk ?? 0) + boosts.atk)) }))
+        pushLog(`Intimidate của ${mon.name} làm giảm Tấn công của ${target.name}!`)
+      } else pushLog(`${abilityLabel(target)} giúp ${target.name} không bị Intimidate ảnh hưởng.`)
+    }
+    if (hasAbility(mon, 'Download')) {
+      const target = side === 'player' ? enemyMon : playerMon
+      const setter = side === 'player' ? setPStages : setEStages
+      // Download: nếu Def < SpDef thì tăng Atk; hoà hoặc Def cao hơn thì tăng SpA.
+      const stat = (target.stats?.def ?? 0) < (target.stats?.spd ?? 0) ? 'atk' : 'spa'
+      const boosts = modifyBoostsByAbility(mon, { [stat]: 1 })
+      setter((cur) => ({ ...cur, [stat]: Math.max(-6, Math.min(6, (cur[stat] ?? 0) + (boosts?.[stat] ?? 0))) }))
+      pushLog(`Download của ${mon.name} thay đổi ${stat === 'atk' ? 'Tấn công' : 'TC đặc biệt'}!`)
+    }
+  }
+
+  // Ability vào sân kích hoạt đúng một lần khi mở trận. Nếu cả hai cùng gọi
+  // thời tiết, bên nhanh hơn kích hoạt trước và bên chậm hơn quyết định thời
+  // tiết cuối cùng, giống thứ tự Ability khi cùng vào sân trong game gốc.
+  useEffect(() => {
+    if (entryAbilitiesAppliedRef.current || !playerMon || !enemyMon) return
+    entryAbilitiesAppliedRef.current = true
+    const entrants = [
+      { mon: playerMon, side: 'player' },
+      { mon: enemyMon, side: 'enemy' },
+    ].sort((a, b) => effectiveSpeed(b.mon) - effectiveSpeed(a.mon))
+    for (const entrant of entrants) applyEntryAbility(entrant.mon, entrant.side)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleMove(move) {
     if (busy || battleOver || finished) return
     setBusy(true)
     setMenu('main')
 
-    // Dynamax kéo dài 3 LƯỢT HÀNH ĐỘNG của phe mình (đợt 30) — trừ bộ đếm
-    // ngay đầu lượt, hết đếm thì trở về kích thước thường ở CUỐI lượt này.
     let dynaEnds = false
     if (playerMon.dyna && gimmickUsed === 'dynamax') {
       const left = dynaTurnsLeft - 1
@@ -615,146 +744,192 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       if (left <= 0) dynaEnds = true
     }
 
-    let enemyHpNow = enemyMon.hp
-    let playerHpNow = playerMon.hp
-    // Theo dõi trạng thái địch CỤC BỘ trong lượt này — state React (enemyMon)
-    // là closure cũ, trạng thái vừa gây ra trong cùng lượt sẽ KHÔNG kịp phản
-    // ánh vào enemyMon.status nếu chỉ đọc từ state (bug cũ: địch vừa bị ru
-    // ngủ vẫn hành động ngay lượt đó).
-    let enemyStatusNow = enemyMon.status
-    let enemyJustStatused = null
+    const p = { ...playerMon, stats: playerMon.stats ? { ...playerMon.stats } : playerMon.stats }
+    const e = { ...enemyMon, stats: enemyMon.stats ? { ...enemyMon.stats } : enemyMon.stats }
+    const pStageNow = { ...pStages }
+    const eStageNow = { ...eStages }
+    const lines = []
+    let turnEnv = battleEnv
+    let turnWeatherTurns = weatherTurns
+    const enemyMove = (e.moves ?? [])[Math.floor(Math.random() * Math.max(1, e.moves?.length ?? 0))]
+    const weatherKey = () => weatherIsSuppressed([p, e]) ? null : turnEnv?.key
 
-    const playerCanAct = checkCanAct(playerMon, setPlayerMon, playerMon.name)
-    if (playerCanAct) {
-      const dmgToEnemy = applyEnvToDamage(computeDamage(move, playerMon, enemyMon, pStages, eStages), move, environment)
-      const effMult = getEffectivenessMulti(move.type, enemyMon.types)
-      enemyHpNow = Math.max(0, enemyMon.hp - dmgToEnemy)
-      setEnemyMon((m) => ({ ...m, hp: enemyHpNow }))
+    function executeMove(actor, defender, chosenMove, actorStages, defenderStages, actorSide) {
+      if (!chosenMove || actor.hp <= 0 || defender.hp <= 0) return
+      if (!canActLocal(actor, lines)) return
+      const currentWeather = weatherKey()
+      if (!moveHitsWithAbilities(chosenMove, actor, defender, currentWeather, actorStages, defenderStages)) {
+        lines.push(`${actor.name} dùng ${chosenMove.name}, nhưng đòn đánh trượt!`)
+        return
+      }
 
-      if (move.power <= 0) {
-        pushLog(`${playerMon.name} dùng ${move.name}.`)
+      const moveWeather = moveWeatherKey(chosenMove)
+      if (moveWeather) {
+        turnEnv = getBattleEnv(moveWeather)
+        turnWeatherTurns = 5
+        lines.push(`${actor.name} dùng ${chosenMove.name} và làm thay đổi thời tiết!`)
+      }
+
+      const selfTarget = chosenMove.target === 'self'
+      if (selfTarget) {
+        lines.push(`${actor.name} dùng ${chosenMove.name}.`)
+        if (chosenMove.heal) {
+          const healed = ratioValue(chosenMove.heal, actor.maxHp)
+          const before = actor.hp
+          actor.hp = Math.min(actor.maxHp, actor.hp + healed)
+          if (actor.hp > before) lines.push(`${actor.name} hồi ${actor.hp - before} HP.`)
+        }
+        boostLocal(actorStages, chosenMove.boosts, actor.name, lines, actor)
+        if (chosenMove.self?.boosts && Math.random() * 100 < (chosenMove.self.chance ?? 100)) {
+          boostLocal(actorStages, chosenMove.self.boosts, actor.name, lines, actor)
+        }
+        if (chosenMove.status ?? chosenMove.self?.status) applyStatusLocal(actor, chosenMove.status ?? chosenMove.self?.status, currentWeather, lines, chosenMove)
+        return
+      }
+
+      const hits = Array.isArray(chosenMove.multihit)
+        ? chosenMove.multihit[0] + Math.floor(Math.random() * (chosenMove.multihit[1] - chosenMove.multihit[0] + 1))
+        : Number.isFinite(chosenMove.multihit) ? chosenMove.multihit : 1
+      let totalDamage = 0
+      let suppressSecondary = false
+      let moveImmune = false
+      let actualHits = 0
+      const effectiveness = getEffectivenessMulti(chosenMove.type, defender.types)
+
+      for (let hit = 0; hit < hits && defender.hp > 0; hit++) {
+        let damage = computeDamage(chosenMove, actor, defender, actorStages, defenderStages, currentWeather)
+        if (currentWeather) damage = applyEnvToDamage(damage, chosenMove, turnEnv)
+        const abilityResult = modifyDamageByAbilities({
+          damage, move: chosenMove, attacker: actor, defender,
+          weatherKey: currentWeather, effectiveness,
+        })
+        lines.push(...abilityResult.logs)
+        suppressSecondary ||= abilityResult.suppressSecondary
+        moveImmune ||= abilityResult.immune
+        if (abilityResult.healDefender) {
+          const before = defender.hp
+          defender.hp = Math.min(defender.maxHp, defender.hp + abilityResult.healDefender)
+          if (defender.hp > before) lines.push(`${defender.name} hồi ${defender.hp - before} HP nhờ ${abilityLabel(defender)}.`)
+        }
+        if (abilityResult.defenderBoost) {
+          if (abilityResult.defenderBoost.flashFire) defender.flashFireBoost = true
+          else boostLocal(defenderStages, abilityResult.defenderBoost, defender.name, lines, defender, { fromOpponent: false })
+        }
+        if (abilityResult.attackerBoost) boostLocal(actorStages, abilityResult.attackerBoost, actor.name, lines, actor)
+        const dealt = Math.min(defender.hp, abilityResult.damage)
+        defender.hp = Math.max(0, defender.hp - abilityResult.damage)
+        totalDamage += dealt
+        if (!abilityResult.immune) actualHits += 1
+        // Rough Skin/Iron Barbs/Static... kích hoạt theo TỪNG lần tiếp xúc.
+        // Bản cũ chỉ gọi một lần sau cả chuỗi multihit nên chiêu 5 hit bị
+        // giảm phản lực sai và có thể tiếp tục đánh dù chính kẻ tấn công đã gục.
+        const contact = contactAbilityEffect(actor, defender, chosenMove, dealt)
+        if (contact) {
+          if (contact.recoil && !hasAbility(actor, 'Magic Guard')) actor.hp = Math.max(0, actor.hp - contact.recoil)
+          if (contact.status && !statusBlocked(actor, contact.status, currentWeather)) actor.status = contact.status
+          lines.push(contact.log)
+        }
+        if (abilityResult.immune || actor.hp <= 0) break
+      }
+
+      if (chosenMove.power > 0) {
+        lines.push(`${actor.name} dùng ${chosenMove.name}! Gây ${totalDamage} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
+        const label = effLabel(effectiveness)
+        if (label) lines.push(label)
       } else {
-        pushLog(`${playerMon.name} dùng ${move.name}! Gây ${dmgToEnemy} sát thương.`)
-        const label = effLabel(effMult)
-        if (label) pushLog(label)
+        lines.push(`${actor.name} dùng ${chosenMove.name}.`)
       }
 
-      // Hiệu ứng bậc chỉ số của chiêu (đợt 27): self.boosts áp lên CHÍNH MÌNH
-      // (VD chiêu tự tăng công), secondary.boosts áp lên ĐỐI THỦ theo % chance
-      // (VD chiêu giảm phòng thủ địch).
-      if (move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
-        applyBoosts(move.self.boosts, 'player', playerMon.name)
+      if (chosenMove.boosts && !moveImmune) boostLocal(chosenMove.target === 'self' ? actorStages : defenderStages, chosenMove.boosts, chosenMove.target === 'self' ? actor.name : defender.name, lines, chosenMove.target === 'self' ? actor : defender, { fromOpponent: chosenMove.target !== 'self' })
+      if (actor.hp > 0 && chosenMove.self?.boosts && Math.random() * 100 < (chosenMove.self.chance ?? 100)) {
+        boostLocal(actorStages, chosenMove.self.boosts, actor.name, lines, actor)
       }
-      // Boosts TOP-LEVEL (đợt 35 — Growl/String Shot/Swords Dance...): áp
-      // 100%, đích theo move.target ('self' → chính mình, còn lại → đối thủ).
-      if (move.boosts) {
-        if (move.target === 'self') applyBoosts(move.boosts, 'player', playerMon.name)
-        else if (enemyHpNow > 0) applyBoosts(move.boosts, 'enemy', enemyMon.name)
+      const secondaryTriggered = defender.hp > 0 && !moveImmune && !suppressSecondary && chosenMove.secondary
+        && Math.random() * 100 < (chosenMove.secondary.chance ?? 100)
+      if (secondaryTriggered && chosenMove.secondary?.boosts) {
+        boostLocal(defenderStages, chosenMove.secondary.boosts, defender.name, lines, defender, { fromOpponent: true })
       }
-      if (enemyHpNow > 0 && move.secondary?.boosts && Math.random() * 100 < (move.secondary.chance ?? 100)) {
-        applyBoosts(move.secondary.boosts, 'enemy', enemyMon.name)
+
+      if (defender.hp > 0 && !moveImmune) {
+        applyStatusLocal(defender, chosenMove.status ?? (secondaryTriggered ? chosenMove.secondary?.status : null), currentWeather, lines, chosenMove)
       }
-      if (enemyHpNow > 0 && !enemyStatusNow) {
-        const newStatus = rollStatus(move, enemyMon)
-        if (newStatus) {
-          const sleepTurns = newStatus === 'slp' ? 1 + Math.floor(Math.random() * 3) : undefined
-          setEnemyMon((m) => ({ ...m, status: newStatus, sleepTurns }))
-          enemyStatusNow = newStatus
-          enemyJustStatused = newStatus
-          pushLog(`${enemyMon.name} bị ${STATUS_INFO[newStatus].label.toLowerCase()}!`)
+
+      if (totalDamage > 0 && chosenMove.drain) {
+        const healed = ratioValue(chosenMove.drain, totalDamage)
+        const before = actor.hp
+        actor.hp = Math.min(actor.maxHp, actor.hp + healed)
+        if (actor.hp > before) lines.push(`${actor.name} hút lại ${actor.hp - before} HP.`)
+      }
+      if (totalDamage > 0 && chosenMove.recoil && !hasAbility(actor, 'Rock Head', 'Magic Guard')) {
+        const recoil = ratioValue(chosenMove.recoil, totalDamage)
+        actor.hp = Math.max(0, actor.hp - recoil)
+        lines.push(`${actor.name} chịu ${recoil} sát thương phản lực.`)
+      }
+      if (defender.hp <= 0) {
+        lines.push(`${defender.name} đã gục ngã!`)
+        const knockout = knockoutAbilityEffect(actor)
+        if (knockout && actor.hp > 0) {
+          boostLocal(actorStages, knockout.boosts, actor.name, lines, actor)
+          lines.push(knockout.log)
         }
       }
+      if (actor.hp <= 0) lines.push(`${actor.name} đã gục vì phản lực!`)
+      void actorSide
     }
 
-    if (enemyHpNow <= 0) {
-      pushLog(`${enemyMon.name} đã gục ngã! Bạn thắng!`)
-      setBusy(false)
+    const pAction = { side: 'player', move, priority: movePriorityWithAbility(move, p), speed: effectiveSpeed(p, pStageNow, weatherKey()) }
+    const eAction = { side: 'enemy', move: enemyMove, priority: movePriorityWithAbility(enemyMove, e), speed: effectiveSpeed(e, eStageNow, weatherKey()) }
+    const queue = [pAction, eAction].sort((a, b) => b.priority - a.priority || b.speed - a.speed || Math.random() - 0.5)
+
+    for (const action of queue) {
+      if (action.side === 'player') executeMove(p, e, action.move, pStageNow, eStageNow, 'player')
+      else executeMove(e, p, action.move, eStageNow, pStageNow, 'enemy')
+      if (p.hp <= 0 || e.hp <= 0) break
+    }
+
+    // Cuối lượt: Poison Heal phải thay thế sát thương độc, không được bị trừ
+    // máu trước rồi mới hồi. Cloud Nine/Air Lock chỉ vô hiệu THỜI TIẾT, không
+    // được làm câm Speed Boost/Shed Skin/Poison Heal.
+    for (const mon of [p, e]) {
+      const statusEnd = endTurnStatusEffect(mon)
+      Object.assign(mon, statusEnd.mon)
+      lines.push(...statusEnd.logs)
+    }
+    const effectiveEndWeather = weatherIsSuppressed([p, e]) ? null : turnEnv?.key
+    for (const [mon, stages] of [[p, pStageNow], [e, eStageNow]]) {
+      const result = endTurnAbilityEffect(mon, effectiveEndWeather)
+      Object.assign(mon, result.mon)
+      if (result.boosts) boostLocal(stages, result.boosts, mon.name, lines, mon)
+      lines.push(...result.logs)
+    }
+
+    setPlayerMon(p)
+    setEnemyMon(e)
+    setPStages(pStageNow)
+    setEStages(eStageNow)
+    for (const line of lines) pushLog(line)
+
+    if (turnWeatherTurns !== null) {
+      turnWeatherTurns -= 1
+      if (turnWeatherTurns <= 0) {
+        turnWeatherTurns = null
+        turnEnv = environment ?? getBattleEnv('none')
+        pushLog('Thời tiết tạm thời đã tan.')
+      }
+    }
+    battleEnvRef.current = turnEnv
+    setBattleEnv(turnEnv)
+    setWeatherTurns(turnWeatherTurns)
+
+    if (e.hp <= 0) {
+      pushLog(`${enemyMon.name} không thể chiến đấu nữa — bạn thắng!`)
       setFinished(true)
-      return
+    } else if (p.hp <= 0) {
+      reportActiveFainted(playerMon.name, p)
     }
 
-    await new Promise((r) => setTimeout(r, 500))
-
-    // Nếu địch VỪA bị gây trạng thái trong chính lượt này, xử lý bằng biến cục
-    // bộ (không qua checkCanAct vì state chưa cập nhật): vừa ngủ = mất lượt
-    // ngay (đúng game gốc), vừa tê liệt = vẫn có 25% mất lượt.
-    let enemyCanAct
-    if (enemyJustStatused === 'slp') {
-      pushLog(`${enemyMon.name} đang ngủ say, không thể hành động.`)
-      enemyCanAct = false
-    } else if (enemyJustStatused === 'par' && Math.random() < 0.25) {
-      pushLog(`${enemyMon.name} bị tê liệt, không thể cử động!`)
-      enemyCanAct = false
-    } else if (enemyJustStatused) {
-      enemyCanAct = true
-    } else {
-      enemyCanAct = checkCanAct(enemyMon, setEnemyMon, enemyMon.name)
-    }
-
-    if (enemyCanAct) {
-      const enemyMove = enemyMon.moves[Math.floor(Math.random() * enemyMon.moves.length)]
-      const dmgToPlayer = applyEnvToDamage(computeDamage(enemyMove, enemyMon, playerMon, eStages, pStages), enemyMove, environment)
-      playerHpNow = Math.max(0, playerMon.hp - dmgToPlayer)
-      setPlayerMon((m) => ({ ...m, hp: playerHpNow }))
-      pushLog(`${enemyMon.name} dùng ${enemyMove.name}! Gây ${dmgToPlayer} sát thương.`)
-      if (enemyMove.self?.boosts && Math.random() * 100 < (enemyMove.self.chance ?? 100)) {
-        applyBoosts(enemyMove.self.boosts, 'enemy', enemyMon.name)
-      }
-      if (enemyMove.boosts) {
-        if (enemyMove.target === 'self') applyBoosts(enemyMove.boosts, 'enemy', enemyMon.name)
-        else if (playerHpNow > 0) applyBoosts(enemyMove.boosts, 'player', playerMon.name)
-      }
-      if (playerHpNow > 0 && enemyMove.secondary?.boosts && Math.random() * 100 < (enemyMove.secondary.chance ?? 100)) {
-        applyBoosts(enemyMove.secondary.boosts, 'player', playerMon.name)
-      }
-
-      if (playerHpNow > 0 && !playerMon.status) {
-        const newStatus = rollStatus(enemyMove, playerMon)
-        if (newStatus) {
-          const sleepTurns = newStatus === 'slp' ? 1 + Math.floor(Math.random() * 3) : undefined
-          setPlayerMon((m) => ({ ...m, status: newStatus, sleepTurns }))
-          pushLog(`${playerMon.name} bị ${STATUS_INFO[newStatus].label.toLowerCase()}!`)
-        }
-      }
-    }
-
-    if (playerHpNow <= 0) {
-      reportActiveFainted(playerMon.name)
-      setBusy(false)
-      return
-    }
-
-    // Cuối lượt: bỏng trừ 1/16 máu tối đa của bên bị bỏng. Tính bằng biến HP
-    // cục bộ (không đọc state cũ) và PHẢI kiểm tra gục ngã sau khi trừ — bug
-    // cũ: bỏng đưa HP về 0 nhưng không set finished → mọi nút bị khoá mà nút
-    // "Tiếp tục câu chuyện" không hiện (soft-lock).
-    if (playerMon.status === 'brn' && playerHpNow > 0) {
-      const tick = Math.max(1, Math.round(playerMon.maxHp / 16))
-      playerHpNow = Math.max(0, playerHpNow - tick)
-      setPlayerMon((m) => ({ ...m, hp: Math.max(0, m.hp - tick) }))
-      pushLog(`${playerMon.name} bị bỏng, mất ${tick} HP.`)
-    }
-    if (enemyStatusNow === 'brn' && enemyHpNow > 0) {
-      const tick = Math.max(1, Math.round(enemyMon.maxHp / 16))
-      enemyHpNow = Math.max(0, enemyHpNow - tick)
-      setEnemyMon((m) => ({ ...m, hp: Math.max(0, m.hp - tick) }))
-      pushLog(`${enemyMon.name} bị bỏng, mất ${tick} HP.`)
-    }
-
-    if (enemyHpNow <= 0) {
-      pushLog(`${enemyMon.name} đã gục ngã vì vết bỏng! Bạn thắng!`)
-      setFinished(true)
-    } else if (playerHpNow <= 0) {
-      pushLog(`${playerMon.name} không trụ nổi vết bỏng!`)
-      reportActiveFainted(playerMon.name)
-    }
-
-    // Hết hạn Dynamax: chỉ trở về nếu trận còn tiếp diễn (gục/thắng thì
-    // revertGimmicks lúc "Tiếp tục câu chuyện" tự xử lý cả tỉ lệ máu).
-    if (dynaEnds && playerHpNow > 0 && enemyHpNow > 0) {
-      endDynamax()
-    }
-
+    if (dynaEnds && p.hp > 0 && e.hp > 0) endDynamax()
+    await new Promise((resolve) => setTimeout(resolve, 250))
     setBusy(false)
   }
 
@@ -825,9 +1000,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           setFinished(true)
           return
         }
-        const lured = applyPerksToMon({ ...enemyMon }, playerTraits)
-        if (party.length < 6) {
-          setParty([...party, lured])
+        const lured = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
+        if ((party ?? []).length < 6) {
+          setParty((cur) => [...(cur ?? []), lured])
           pushLog(`${enemyMon.name} quyết định ĐI THEO BẠN! Đã vào đội hình.`)
         } else {
           // Đợt 71: đội đầy thì vào HÒM PC thay vì biến mất như trước.
@@ -842,15 +1017,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         setFinished(true)
       } else {
         // Nói chuyện tốn 1 lượt — đối phương được tấn công tự do.
-        const enemyCanAct = checkCanAct(enemyMon, setEnemyMon, enemyMon.name)
-        if (enemyCanAct) {
-          const enemyMove = enemyMon.moves[Math.floor(Math.random() * enemyMon.moves.length)]
-          const dmg = applyEnvToDamage(computeDamage(enemyMove, enemyMon, playerMon, eStages, pStages), enemyMove, environment)
-          const hpAfter = Math.max(0, playerMon.hp - dmg)
-          setPlayerMon((m) => ({ ...m, hp: hpAfter }))
-          pushLog(`${enemyMon.name} không đợi bạn nói xong — dùng ${enemyMove.name}! Gây ${dmg} sát thương.`)
-          if (hpAfter <= 0) reportActiveFainted(playerMon.name)
-        }
+        enemyFreeHit(playerMon, setPlayerMon, 'không đợi bạn nói xong — ')
       }
     } catch (err) {
       pushLog(`(Lỗi gọi AI khi nói chuyện: ${err.message} — không mất lượt.)`)
@@ -862,20 +1029,161 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   // ============ LƯỢT PHẢN ĐÒN CỦA ĐỐI PHƯƠNG (đợt 68) ============
   // Dùng vật phẩm và ĐỔI POKÉMON đều TỐN 1 LƯỢT — đối phương được đánh tự
   // do, đúng luật game gốc. Tách riêng để 2 tính năng mới dùng chung.
-  function enemyFreeHit(targetMon, setTarget) {
-    const canAct = checkCanAct(enemyMon, setEnemyMon, enemyMon.name)
-    if (!canAct) return targetMon.hp
-    const enemyMove = enemyMon.moves[Math.floor(Math.random() * enemyMon.moves.length)]
-    const dmg = applyEnvToDamage(
-      computeDamage(enemyMove, enemyMon, targetMon, eStages, pStages),
-      enemyMove, environment,
-    )
-    const hpAfter = Math.max(0, targetMon.hp - dmg)
-    setTarget((m) => ({ ...m, hp: hpAfter }))
-    pushLog(`${enemyMon.name} dùng ${enemyMove.name}! Gây ${dmg} sát thương.`)
-    if (hpAfter <= 0) reportActiveFainted(targetMon.name)
-    return hpAfter
+  function enemyFreeHit(targetMon, setTarget, prefix = '') {
+    const attacker = { ...enemyMon, stats: enemyMon.stats ? { ...enemyMon.stats } : enemyMon.stats }
+    const defender = { ...targetMon, stats: targetMon.stats ? { ...targetMon.stats } : targetMon.stats }
+    const lines = []
+    const eStageNow = { ...eStages }
+    const pStageNow = { ...pStages }
+    let activeEnv = battleEnvRef.current ?? battleEnv
+    let nextWeatherTurns = weatherTurns
+    const effectiveWeather = () => weatherIsSuppressed([attacker, defender]) ? null : activeEnv?.key
+
+    const finishFreeTurn = () => {
+      // Dùng đồ/đổi Pokémon/nói chuyện vẫn là một lượt thật: bỏng, độc, bão
+      // cát, Rain Dish, Speed Boost... đều phải chạy cuối lượt như khi FIGHT.
+      for (const mon of [defender, attacker]) {
+        const statusEnd = endTurnStatusEffect(mon)
+        Object.assign(mon, statusEnd.mon)
+        lines.push(...statusEnd.logs)
+      }
+      const weatherKey = effectiveWeather()
+      for (const [mon, stageMap] of [[defender, pStageNow], [attacker, eStageNow]]) {
+        const result = endTurnAbilityEffect(mon, weatherKey)
+        Object.assign(mon, result.mon)
+        if (result.boosts) boostLocal(stageMap, result.boosts, mon.name, lines, mon)
+        lines.push(...result.logs)
+      }
+      if (nextWeatherTurns !== null) {
+        nextWeatherTurns -= 1
+        if (nextWeatherTurns <= 0) {
+          nextWeatherTurns = null
+          activeEnv = environment ?? getBattleEnv('none')
+          lines.push('Hiệu ứng thời tiết đã tan.')
+        }
+      }
+      battleEnvRef.current = activeEnv
+      setBattleEnv(activeEnv)
+      setWeatherTurns(nextWeatherTurns)
+      setEnemyMon(attacker)
+      setTarget(defender)
+      setEStages(eStageNow)
+      setPStages(pStageNow)
+      for (const line of lines) pushLog(line)
+      if (attacker.hp <= 0) {
+        pushLog(`${attacker.name} không thể chiến đấu nữa — bạn thắng!`)
+        setFinished(true)
+      } else if (defender.hp <= 0) {
+        reportActiveFainted(targetMon.name, defender)
+      }
+      return defender.hp
+    }
+
+    if (!canActLocal(attacker, lines)) return finishFreeTurn()
+    const enemyMove = (attacker.moves ?? [])[Math.floor(Math.random() * Math.max(1, attacker.moves?.length ?? 0))]
+    if (!enemyMove) return finishFreeTurn()
+
+    const moveWeather = moveWeatherKey(enemyMove)
+    if (moveWeather) {
+      activeEnv = getBattleEnv(moveWeather)
+      nextWeatherTurns = 5
+      lines.push(`${attacker.name} dùng ${enemyMove.name} và làm thay đổi thời tiết!`)
+    }
+    const weatherKey = effectiveWeather()
+
+    if (enemyMove.target === 'self') {
+      lines.push(`${attacker.name} ${prefix}dùng ${enemyMove.name}.`)
+      if (enemyMove.heal) {
+        const before = attacker.hp
+        attacker.hp = Math.min(attacker.maxHp, attacker.hp + ratioValue(enemyMove.heal, attacker.maxHp))
+        if (attacker.hp > before) lines.push(`${attacker.name} hồi ${attacker.hp - before} HP.`)
+      }
+      boostLocal(eStageNow, enemyMove.boosts, attacker.name, lines, attacker)
+      if (enemyMove.self?.boosts && Math.random() * 100 < (enemyMove.self.chance ?? 100)) {
+        boostLocal(eStageNow, enemyMove.self.boosts, attacker.name, lines, attacker)
+      }
+      applyStatusLocal(attacker, enemyMove.status ?? enemyMove.self?.status, weatherKey, lines)
+      return finishFreeTurn()
+    }
+
+    if (!moveHitsWithAbilities(enemyMove, attacker, defender, weatherKey, eStageNow, pStageNow)) {
+      lines.push(`${attacker.name} ${prefix}dùng ${enemyMove.name}, nhưng đòn đánh trượt!`)
+      return finishFreeTurn()
+    }
+
+    const hits = Array.isArray(enemyMove.multihit)
+      ? enemyMove.multihit[0] + Math.floor(Math.random() * (enemyMove.multihit[1] - enemyMove.multihit[0] + 1))
+      : Number.isFinite(enemyMove.multihit) ? enemyMove.multihit : 1
+    const effectiveness = getEffectivenessMulti(enemyMove.type, defender.types)
+    let totalDealt = 0
+    let actualHits = 0
+    let suppressSecondary = false
+    let moveImmune = false
+
+    for (let hit = 0; hit < hits && defender.hp > 0 && attacker.hp > 0; hit++) {
+      let dmg = computeDamage(enemyMove, attacker, defender, eStageNow, pStageNow, weatherKey)
+      if (weatherKey) dmg = applyEnvToDamage(dmg, enemyMove, activeEnv)
+      const abilityResult = modifyDamageByAbilities({
+        damage: dmg, move: enemyMove, attacker, defender, weatherKey, effectiveness,
+      })
+      lines.push(...abilityResult.logs)
+      suppressSecondary ||= abilityResult.suppressSecondary
+      moveImmune ||= abilityResult.immune
+      if (abilityResult.healDefender) {
+        const before = defender.hp
+        defender.hp = Math.min(defender.maxHp, defender.hp + abilityResult.healDefender)
+        if (defender.hp > before) lines.push(`${defender.name} hồi ${defender.hp - before} HP nhờ ${abilityLabel(defender)}.`)
+      }
+      if (abilityResult.defenderBoost) {
+        if (abilityResult.defenderBoost.flashFire) defender.flashFireBoost = true
+        else boostLocal(pStageNow, abilityResult.defenderBoost, defender.name, lines, defender)
+      }
+      if (abilityResult.attackerBoost) boostLocal(eStageNow, abilityResult.attackerBoost, attacker.name, lines, attacker)
+      if (abilityResult.immune) break
+      const dealt = Math.min(defender.hp, abilityResult.damage)
+      defender.hp = Math.max(0, defender.hp - abilityResult.damage)
+      totalDealt += dealt
+      actualHits += 1
+      const contact = contactAbilityEffect(attacker, defender, enemyMove, dealt)
+      if (contact) {
+        if (contact.recoil && !hasAbility(attacker, 'Magic Guard')) attacker.hp = Math.max(0, attacker.hp - contact.recoil)
+        if (contact.status && !statusIsBlocked(attacker, contact.status, weatherKey)) attacker.status = contact.status
+        lines.push(contact.log)
+      }
+    }
+
+    lines.push(`${attacker.name} ${prefix}dùng ${enemyMove.name}! Gây ${totalDealt} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
+    if (defender.hp > 0 && !moveImmune) {
+      if (enemyMove.boosts) boostLocal(pStageNow, enemyMove.boosts, defender.name, lines, defender, { fromOpponent: true })
+      const secondaryTriggered = !suppressSecondary && enemyMove.secondary
+        && Math.random() * 100 < (enemyMove.secondary.chance ?? 100)
+      if (secondaryTriggered && enemyMove.secondary?.boosts) {
+        boostLocal(pStageNow, enemyMove.secondary.boosts, defender.name, lines, defender, { fromOpponent: true })
+      }
+        applyStatusLocal(defender, enemyMove.status ?? (secondaryTriggered ? enemyMove.secondary?.status : null), weatherKey, lines, enemyMove)
+    } else if (defender.hp <= 0) {
+      const knockout = knockoutAbilityEffect(attacker)
+      if (knockout && attacker.hp > 0) {
+        boostLocal(eStageNow, knockout.boosts, attacker.name, lines, attacker)
+        lines.push(knockout.log)
+      }
+    }
+    if (attacker.hp > 0 && enemyMove.self?.boosts && Math.random() * 100 < (enemyMove.self.chance ?? 100)) {
+      boostLocal(eStageNow, enemyMove.self.boosts, attacker.name, lines, attacker)
+    }
+    if (totalDealt > 0 && enemyMove.drain && attacker.hp > 0) {
+      const before = attacker.hp
+      attacker.hp = Math.min(attacker.maxHp, attacker.hp + ratioValue(enemyMove.drain, totalDealt))
+      if (attacker.hp > before) lines.push(`${attacker.name} hút lại ${attacker.hp - before} HP.`)
+    }
+    if (totalDealt > 0 && enemyMove.recoil && attacker.hp > 0 && !hasAbility(attacker, 'Rock Head', 'Magic Guard')) {
+      const recoil = ratioValue(enemyMove.recoil, totalDealt)
+      attacker.hp = Math.max(0, attacker.hp - recoil)
+      lines.push(`${attacker.name} chịu ${recoil} sát thương phản lực.`)
+    }
+    return finishFreeTurn()
   }
+
 
   /** Trừ 1 vật phẩm khỏi túi (đợt 68 — "biến không cập nhật trong trận"). */
   function consumeItem(itemId) {
@@ -922,10 +1230,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const roll = Math.random() * 100
       pushLog(`Bạn ném ${item.name}! (khả năng ~${chance}%)`)
       if (roll < chance) {
-        const caught = applyPerksToMon(
-          { ...enemyMon, hp: enemyMon.maxHp, status: null, sleepTurns: undefined },
-          playerTraits,
-        )
+        const caught = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), caught])
           pushLog(`Tuyệt vời! ${enemyMon.name} đã được bắt và vào đội hình!`)
@@ -958,25 +1263,36 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       pushLog('Không có Pokémon nào gục ngã để hồi sinh.')
       return
     }
-    if (heal !== undefined && playerMon.hp >= playerMon.maxHp && !(cures && playerMon.status)) {
-      pushLog(`${playerMon.name} đang khoẻ mạnh — chưa cần dùng ${item.name}.`)
+    const canHeal = heal !== undefined && playerMon.hp < playerMon.maxHp
+    const canCure = Boolean(cures && playerMon.status && cures.includes(playerMon.status))
+    if (!canHeal && !canCure) {
+      const reason = playerMon.status && cures
+        ? `${item.name} không chữa được trạng thái hiện tại của ${playerMon.name}.`
+        : `${playerMon.name} đang khoẻ mạnh — chưa cần dùng ${item.name}.`
+      pushLog(reason)
       return
     }
     setBusy(true)
     setMenu('main')
     consumeItem(id)
-    if (heal !== undefined) {
-      const healed = Math.min(playerMon.maxHp, playerMon.hp + heal)
-      const gained = healed - playerMon.hp
-      setPlayerMon((m) => ({ ...m, hp: healed }))
-      pushLog(`Bạn dùng ${item.name} — ${playerMon.name} hồi ${gained} HP.`)
+    // Tính snapshot SAU KHI dùng đồ trước rồi mới cho địch đánh trả. Trước
+    // đây hai setState chữa HP/trạng thái chạy riêng, sau đó enemyFreeHit lại
+    // nhận snapshot cũ nên thuốc chữa trạng thái có thể bị ghi đè và bệnh quay lại.
+    const itemTarget = { ...playerMon }
+    if (canHeal) {
+      const before = itemTarget.hp
+      itemTarget.hp = Math.min(itemTarget.maxHp, itemTarget.hp + heal)
+      pushLog(`Bạn dùng ${item.name} — ${playerMon.name} hồi ${itemTarget.hp - before} HP.`)
     }
-    if (cures && playerMon.status && cures.includes(playerMon.status)) {
-      setPlayerMon((m) => ({ ...m, status: null, sleepTurns: undefined }))
-      pushLog(`${playerMon.name} đã khỏi ${STATUS_INFO[playerMon.status]?.label?.toLowerCase() ?? 'trạng thái xấu'}!`)
+    if (canCure) {
+      const oldStatus = itemTarget.status
+      itemTarget.status = null
+      delete itemTarget.sleepTurns
+      pushLog(`${playerMon.name} đã khỏi ${STATUS_INFO[oldStatus]?.label?.toLowerCase() ?? 'trạng thái xấu'}!`)
     }
+    setPlayerMon(itemTarget)
     // Dùng đồ tốn 1 lượt.
-    enemyFreeHit({ ...playerMon, hp: Math.min(playerMon.maxHp, playerMon.hp + (heal ?? 0)) }, setPlayerMon)
+    enemyFreeHit(itemTarget, setPlayerMon)
     setBusy(false)
   }
 
@@ -999,11 +1315,14 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     pushLog(wasFainted
       ? `${playerMon.name} không thể chiến đấu nữa! Bạn tung ${target.name} ra trận!`
       : `Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
-    // Lưu lại trạng thái con vừa rút về vào đội hình, rồi đưa con mới ra.
-    setParty((cur) => syncMonInParty(cur, { ...playerMon }))
+    // Regenerator/Natural Cure kích hoạt khi rút về; lưu snapshot đó vào đội.
+    const withdrawn = switchOutAbility(playerMon)
+    setParty((cur) => syncMonInParty(cur, withdrawn))
+    participantsRef.current.add(participantKey(target))
     setPlayerMon({ ...target })
     // Bậc chỉ số reset khi đổi Pokémon (đúng luật game gốc).
     setPStages({ ...STAGE_ZERO })
+    applyEntryAbility(target, 'player')
     // Đổi sau khi con cũ GỤC = thay thế bắt buộc → không bị đánh trả.
     if (!wasFainted) enemyFreeHit(target, setPlayerMon)
     setBusy(false)
@@ -1011,9 +1330,34 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
   function handleRun() {
     if (busy || finished) return
+    if (!isWild) {
+      pushLog('Không thể bỏ chạy khỏi trận đấu với huấn luyện viên!')
+      return
+    }
     pushLog(`Bạn đã chạy thoát khỏi trận đấu.`)
+    setEndReason('escaped')
     setFinished(true)
     setMenu('main')
+  }
+
+  function buildBattleRuntime() {
+    return {
+      log: [...log],
+      pStages: { ...pStages },
+      eStages: { ...eStages },
+      battleEnvKey: battleEnv?.key ?? 'none',
+      weatherTurns,
+      entryAbilitiesApplied: entryAbilitiesAppliedRef.current,
+      participantUids: [...participantsRef.current],
+      gimmickUsed,
+      dynaTurnsLeft,
+      preGimmick: preGimmickRef.current ? { ...preGimmickRef.current } : null,
+      // Luôn giữ cả hai cá thể đang ở trên sân. Bản cũ chỉ lưu player khi
+      // đang biến hình và RoleplayChat lấy enemy từ closure cũ, nên bấm Ẩn
+      // có thể làm đối thủ hồi máu/trạng thái hoặc reset sai trận.
+      playerBattleMon: { ...playerMon },
+      enemy: { ...enemyMon },
+    }
   }
 
   function handleContinue() {
@@ -1032,16 +1376,26 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           ...base,
           hp: Math.min(playerMon.dyna ? Math.round(playerMon.hp / 2) : playerMon.hp, base.maxHp),
           status: playerMon.status,
-          sleepTurns: undefined,
+          ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
         }
-      : { ...playerMon, sleepTurns: undefined }
+      : {
+          ...playerMon,
+          ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
+        }
+    const persistedMon = clearBattleVolatile(finalMon)
+    const finalParty = syncMonInParty(party, persistedMon)
+    const finalEnemy = clearBattleVolatile(enemyMon)
     preGimmickRef.current = null
-    setPlayerMon(finalMon)
+    setPlayerMon(persistedMon)
     // Đồng bộ máu/trạng thái về ĐỘI HÌNH — nếu không, HUD vẫn hiện máu đầy
     // trong khi con đang ra trận thoi thóp.
-    setParty((cur) => syncMonInParty(cur, finalMon))
+    setParty(finalParty)
     resetBattle() // giờ chỉ reset đối thủ
-    onBattleEnd(outcome)
+    onBattleEnd(outcome, {
+      mode: 'single', team: finalParty, enemies: [finalEnemy],
+      participantUids: [...participantsRef.current],
+      leadUid: participantKey(persistedMon),
+    })
   }
 
   return (
@@ -1077,7 +1431,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           {!finished && (
             <button
               className="btn"
-              onClick={onClose}
+              onClick={() => onClose?.(buildBattleRuntime())}
               style={{ padding: '4px 10px' }}
               title="Cất bảng trận đi — trận VẪN tiếp diễn, máu và trạng thái đối thủ được giữ nguyên; bấm lại quả bóng để quay vào"
             >
@@ -1087,15 +1441,15 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         </div>
 
         {/* Môi trường trận (đợt 35): banner + hiệu ứng sát thương theo hệ */}
-        {environment && environment.key !== 'none' && (
+        {battleEnv && battleEnv.key !== 'none' && (
           <div
             style={{
               fontSize: 11, color: 'var(--text-mid)', border: '1px dashed var(--line)',
               borderRadius: 8, padding: '5px 10px', marginBottom: 8,
             }}
-            title={environment.desc}
+            title={battleEnv.desc}
           >
-            {environment.label} — {environment.desc}
+            {battleEnv.label} — {battleEnv.desc}{weatherTurns !== null ? ` · còn ${weatherTurns} lượt` : ''}
           </div>
         )}
         <Battlefield playerMon={playerMon} enemyMon={enemyMon} pStages={pStages} eStages={eStages} />

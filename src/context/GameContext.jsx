@@ -5,6 +5,10 @@ import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, sync
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 import { normalizeMapLocation } from '../data/mapPins.js'
+import { ensureMonAbility } from '../data/pokemonAbilities.js'
+import { normalizeFriendship } from '../data/pokemonFriendship.js'
+import { loadStoredMessages, persistMessagesSafely } from '../utils/storageOptimizer.js'
+import { repairSaveSlots } from '../utils/saveManager.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -101,31 +105,33 @@ export function GameProvider({ children }) {
   // --- Lịch sử chat roleplay (đợt 46: PERSIST — F5 không mất truyện) ---
   // Trước đây messages chỉ sống trong phiên: reload giữa chừng là mất sạch
   // chính văn trong khi tiền/túi đồ/vị trí vẫn còn → lệch nhau rất khó chịu.
-  const [messages, setMessagesState] = useState(() => {
-    try {
-      const saved = localStorage.getItem('trainer-arena:messages')
-      if (saved) return JSON.parse(saved)
-    } catch { /* ignore */ }
-    return []
-  })
-  // Đợt 64: BÁO cho người chơi biết khi truyện KHÔNG lưu được nữa (quota
-  // localStorage đầy — truyện dài + ảnh đại diện base64). Trước đây lỗi bị
-  // nuốt im lặng: người chơi tưởng đã lưu, F5 một cái là mất cả buổi chơi.
+  const [messages, setMessagesState] = useState(() => loadStoredMessages())
+  // Đợt 78: cache Pokédex/moves lớn đã chuyển sang IndexedDB; khi lưu lịch sử
+  // chỉ lược raw/thinking của lượt cũ, còn CHÍNH VĂN + biến DNA vẫn giữ trọn.
+  // Nếu quota vừa đầy, persistMessagesSafely tự xoá cache localStorage đời cũ
+  // rồi thử lại một lần trước khi báo người chơi.
   const [storageFull, setStorageFull] = useState(false)
   const setMessages = useCallback((next) => {
     setMessagesState((cur) => {
       const resolved = typeof next === 'function' ? next(cur) : next
-      try {
-        localStorage.setItem('trainer-arena:messages', JSON.stringify(resolved))
-        setStorageFull(false)
-      } catch {
-        // Phiên hiện tại vẫn chạy bình thường, chỉ mất khả năng khôi phục sau F5.
-        setStorageFull(true)
-      }
+      const result = persistMessagesSafely(resolved)
+      // Không gọi setState khác ngay bên trong React updater — đẩy sang microtask
+      // để tránh đúng bẫy updater/pha render từng gây lỗi state trong dự án.
+      const updateFlag = () => setStorageFull(!result.ok)
+      if (typeof queueMicrotask === 'function') queueMicrotask(updateFlag)
+      else setTimeout(updateFlag, 0)
       return resolved
     })
   }, [])
   const resetChat = useCallback(() => setMessages([]), [setMessages])
+
+  // Migration ngay khi mở bản mới: giải phóng cache cũ + rút debug lịch sử,
+  // kể cả người chơi chưa gửi thêm lượt nào sau khi cập nhật.
+  useEffect(() => {
+    void repairSaveSlots()
+    const result = persistMessagesSafely(messages)
+    setStorageFull(!result.ok)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Màn hình mở đầu (title screen → tạo nhân vật → vào truyện) ---
   // Đợt 46: persist để F5 giữa truyện quay lại ĐÚNG màn chơi thay vì title.
@@ -600,6 +606,16 @@ export function GameProvider({ children }) {
       cancelled = true
     }
   }, [])
+
+  // Đợt 77: nâng save cũ lên Ability + độ thân mật sau khi Pokédex thật
+  // tải xong. Chọn Ability ổn định theo uid, nên F5 không làm đổi Ability.
+  useEffect(() => {
+    if (pokedexStatus !== 'ready') return
+    const upgrade = (mon) => ensureMonAbility(normalizeFriendship(mon), pokedexSpecies)
+    setPlayerMon((cur) => upgrade(cur))
+    setParty((cur) => (cur ?? []).map(upgrade))
+    setPcBox((cur) => (cur ?? []).map(upgrade))
+  }, [pokedexStatus, pokedexSpecies, setParty, setPcBox, setPlayerMon])
 
   // --- Dữ liệu chiêu thức thật + learnset theo level, tự tải cùng lúc với
   // pokedex. movesDb = null cho tới khi tải xong — pickMoves() trong

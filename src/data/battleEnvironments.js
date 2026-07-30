@@ -7,11 +7,11 @@
 
 export const BATTLE_ENVS = [
   { key: 'none', label: 'Không có gì đặc biệt', desc: 'Trời quang, địa hình thường — không hiệu ứng.', mods: {} },
-  { key: 'rain', label: '🌧 Trời mưa', desc: 'Chiêu hệ nước +25%, hệ lửa −25%.', mods: { water: 1.25, fire: 0.75 } },
-  { key: 'sun', label: '☀️ Nắng gắt', desc: 'Chiêu hệ lửa +25%, hệ nước −25%.', mods: { fire: 1.25, water: 0.75 } },
+  { key: 'rain', label: '🌧 Trời mưa', desc: 'Chiêu hệ Nước ×1,5; hệ Lửa ×0,5.', mods: { water: 1.5, fire: 0.5 } },
+  { key: 'sun', label: '☀️ Nắng gắt', desc: 'Chiêu hệ Lửa ×1,5; hệ Nước ×0,5.', mods: { fire: 1.5, water: 0.5 } },
   { key: 'storm', label: '⛈ Giông bão', desc: 'Chiêu hệ điện +25%, hệ nước +10%.', mods: { electric: 1.25, water: 1.1 } },
-  { key: 'snow', label: '🌨 Tuyết / băng giá', desc: 'Chiêu hệ băng +20%.', mods: { ice: 1.2 } },
-  { key: 'sandstorm', label: '🏜 Bão cát', desc: 'Chiêu hệ đá +20%, hệ đất +10%.', mods: { rock: 1.2, ground: 1.1 } },
+  { key: 'snow', label: '🌨 Tuyết / băng giá', desc: 'Pokémon hệ Băng được tăng Phòng thủ ×1,5.', mods: {} },
+  { key: 'sandstorm', label: '🏜 Bão cát', desc: 'Hệ Đá được tăng PT đặc biệt ×1,5; loài không miễn nhiễm mất máu cuối lượt.', mods: {} },
   { key: 'volcano', label: '🌋 Hơi nóng núi lửa', desc: 'Chiêu hệ lửa +25%, hệ nước −10%, hệ băng −25%.', mods: { fire: 1.25, water: 0.9, ice: 0.75 } },
   { key: 'cave', label: '🕳 Hang tối', desc: 'Không gian kín — chưa có hiệu ứng chỉ số, thuần không khí.', mods: {} },
 ]

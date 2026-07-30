@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   listSaves, saveToSlot, loadFromSlot, deleteSlot, exportSaveFile, importSaveFile, MAX_SLOTS,
 } from '../utils/saveManager.js'
@@ -20,33 +20,67 @@ function fmtTime(ts) {
 }
 
 export default function SaveModal({ onClose }) {
-  const [saves, setSaves] = useState(() => listSaves())
+  const [saves, setSaves] = useState(() => Array(MAX_SLOTS).fill(null))
   const [msg, setMsg] = useState(null)
   const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(true)
 
-  function doSave(slot) {
+  useEffect(() => {
+    let cancelled = false
+    listSaves()
+      .then((list) => { if (!cancelled) setSaves(list) })
+      .catch((e) => { if (!cancelled) setErr(e.message) })
+      .finally(() => { if (!cancelled) setBusy(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  async function doSave(slot) {
     setErr(null)
     try {
       if (saves[slot] && !window.confirm(`Ghi đè ô ${slot + 1}? Dữ liệu cũ trong ô này sẽ mất.`)) return
-      setSaves(saveToSlot(slot))
+      setBusy(true)
+      // Gọi trong đúng thao tác bấm Save để trình duyệt có thể cấp chế độ
+      // lưu trữ bền vững, giảm nguy cơ tự dọn dữ liệu khi thiết bị thiếu chỗ.
+      try { await navigator.storage?.persist?.() } catch { /* không hỗ trợ vẫn lưu bình thường */ }
+      setSaves(await saveToSlot(slot))
       setMsg(`Đã lưu vào ô ${slot + 1}.`)
     } catch (e) {
       setErr(e.message)
+    } finally {
+      setBusy(false)
     }
   }
 
-  function doLoad(slot) {
+  async function doLoad(slot) {
     if (!window.confirm(
       `Tải ván chơi ở ô ${slot + 1}? Ván đang chơi hiện tại sẽ bị thay thế ` +
       '(hãy lưu lại trước nếu muốn giữ). Trang sẽ tự tải lại.',
     )) return
-    if (loadFromSlot(slot)) window.location.reload()
+    setBusy(true)
+    try {
+      const loaded = await loadFromSlot(slot)
+      if (loaded) {
+        window.location.reload()
+        return
+      }
+      setErr('Ô save này không còn dữ liệu để tải.')
+    } catch (e) {
+      setErr(e.message)
+    }
+    setBusy(false)
   }
 
-  function doDelete(slot) {
+  async function doDelete(slot) {
     if (!window.confirm(`Xoá ô save ${slot + 1}? Không hoàn tác được.`)) return
-    setSaves(deleteSlot(slot))
-    setMsg(`Đã xoá ô ${slot + 1}.`)
+    setBusy(true)
+    try {
+      setSaves(await deleteSlot(slot))
+      setMsg(`Đã xoá ô ${slot + 1}.`)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function doImport(file) {
@@ -72,8 +106,8 @@ export default function SaveModal({ onClose }) {
         </div>
 
         <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '0 0 12px', lineHeight: 1.6 }}>
-          Save nằm trong trình duyệt của bạn. Xoá dữ liệu duyệt web là mất — nên nếu ván chơi quan
-          trọng, hãy bấm <b>Xuất ra file</b> để cất một bản ra ngoài. File save KHÔNG chứa API key.
+          Save nằm trong trình duyệt của bạn và được cất trong vùng lưu trữ dung lượng lớn hơn. Xoá dữ liệu duyệt web vẫn sẽ mất —
+          nên với ván quan trọng, hãy bấm <b>Xuất ra file</b> để cất một bản ra ngoài. File save KHÔNG chứa API key.
         </p>
 
         {Array.from({ length: MAX_SLOTS }, (_, i) => {
@@ -112,15 +146,15 @@ export default function SaveModal({ onClose }) {
                 </div>
               </div>
               <div className="btn-row" style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <button className="btn" style={{ fontSize: 12 }} onClick={() => doSave(i)}>
+                <button className="btn" style={{ fontSize: 12 }} onClick={() => doSave(i)} disabled={busy}>
                   {s ? '💾 Ghi đè' : '💾 Lưu vào ô này'}
                 </button>
                 {s && (
                   <>
-                    <button className="btn btn--primary" style={{ fontSize: 12 }} onClick={() => doLoad(i)}>
+                    <button className="btn btn--primary" style={{ fontSize: 12 }} onClick={() => doLoad(i)} disabled={busy}>
                       ▶ Tải ván này
                     </button>
-                    <button className="btn" style={{ fontSize: 12 }} onClick={() => doDelete(i)}>✕ Xoá</button>
+                    <button className="btn" style={{ fontSize: 12 }} onClick={() => doDelete(i)} disabled={busy}>✕ Xoá</button>
                   </>
                 )}
               </div>
@@ -147,6 +181,7 @@ export default function SaveModal({ onClose }) {
           </label>
         </div>
 
+        {busy && <div className="status-pill" style={{ marginTop: 10 }}>Đang đọc/ghi dữ liệu save…</div>}
         {msg && <div className="status-pill status-pill--ok" style={{ marginTop: 10 }}>{msg}</div>}
         {err && <div className="status-pill status-pill--error" style={{ marginTop: 10, display: 'block' }}>{err}</div>}
       </div>

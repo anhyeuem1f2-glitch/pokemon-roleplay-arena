@@ -1,3 +1,5 @@
+import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './browserCache.js'
+
 // Tải dữ liệu CHIÊU THỨC THẬT (power/type/category) và LEARNSET THẬT (chiêu
 // nào học được ở level nào) trực tiếp từ Showdown — cùng tinh thần với
 // pokedexFetch.js. Nhờ đó Pokémon sẽ mang đúng bộ chiêu tối ưu theo level
@@ -8,7 +10,7 @@ const MOVES_URL = 'https://play.pokemonshowdown.com/data/moves.json'
 const LEARNSETS_URL = 'https://play.pokemonshowdown.com/data/learnsets.json'
 // v5 (đợt 35): bảng all giữ thêm boosts/target/self/secondary — bắt buộc bump
 // key vì cache lưu output ĐÃ xử lý, người dùng cache cũ sẽ thiếu field mới.
-const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v5'
+const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v7'
 const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v2'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
@@ -18,11 +20,21 @@ const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 const CURRENT_GEN_PREFIX = '9'
 
 async function fetchJsonCached(url, cacheKey, transform) {
+  const cachedDb = await readLargeCache(cacheKey)
+  if (cachedDb && Date.now() - cachedDb.savedAt < CACHE_MAX_AGE && cachedDb.data) {
+    removeLegacyLocalCache(cacheKey)
+    return cachedDb.data
+  }
+
+  // Migration cache localStorage đời cũ. Sau khi chuyển xong phải xoá bản cũ
+  // để trả lại vài MB cho chính văn và các ô save.
   try {
     const cached = localStorage.getItem(cacheKey)
     if (cached) {
       const parsed = JSON.parse(cached)
       if (Date.now() - parsed.savedAt < CACHE_MAX_AGE && parsed.data) {
+        await writeLargeCache(cacheKey, parsed)
+        removeLegacyLocalCache(cacheKey)
         return parsed.data
       }
     }
@@ -35,11 +47,8 @@ async function fetchJsonCached(url, cacheKey, transform) {
   const raw = await res.json()
   const data = transform(raw)
 
-  try {
-    localStorage.setItem(cacheKey, JSON.stringify({ savedAt: Date.now(), data }))
-  } catch {
-    /* dữ liệu quá lớn cho localStorage — vẫn dùng được trong phiên hiện tại */
-  }
+  await writeLargeCache(cacheKey, { savedAt: Date.now(), data })
+  removeLegacyLocalCache(cacheKey)
   return data
 }
 
@@ -68,6 +77,15 @@ export async function loadMovesData() {
         target: m.target || 'normal',
         self: m.self || null,
         secondary: m.secondary || null,
+        accuracy: m.accuracy ?? true,
+        flags: m.flags || {},
+        status: m.status || null,
+        heal: m.heal || null,
+        drain: m.drain || null,
+        recoil: m.recoil || null,
+        multihit: m.multihit || null,
+        priority: m.priority || 0,
+        weather: m.weather || null,
       }
       if (!m.basePower || m.basePower <= 0) continue
       out[id] = {
@@ -92,6 +110,11 @@ export async function loadMovesData() {
         self: m.self || null, // 1 số chiêu tự gây hiệu ứng phụ cho chính mình
         boosts: m.boosts || null, // hiếm chiêu sát thương có boosts top-level
         target: m.target || 'normal',
+        accuracy: m.accuracy ?? true,
+        drain: m.drain || null,
+        multihit: m.multihit || null,
+        priority: m.priority || 0,
+        weather: m.weather || null,
       }
     }
     return { damaging: out, all }

@@ -1,152 +1,71 @@
-=====================================================================
- NHẠC NỀN TRAINER ARENA — HƯỚNG DẪN BỎ FILE (đợt 28)
-=====================================================================
+THƯ MỤC NHẠC NỀN — Trainer Arena
+=================================
 
-Bỏ file nhạc .mp3 (hoặc .ogg) vào ĐÚNG thư mục này (public/music/)
-với đúng TÊN FILE bên dưới. App tự dò: file nào không có thì tự lùi
-về track chung hơn (VD thiếu area-cave.mp3 → dùng region-kanto.mp3 →
-thiếu nốt → exploration.mp3 → vẫn thiếu → im lặng). KHÔNG bao giờ lỗi
-vì thiếu file. Đổi/thêm file xong nhớ TẢI LẠI TRANG (F5).
+Chỉ cần bỏ file nhạc của bạn vào thư mục public/music/ với ĐÚNG tên file bên
+ dưới (không phân biệt hoa thường, nhưng nên giữ đúng cho gọn). App sẽ tự dò
+ lần lượt .mp3 rồi .ogg; thiếu file thì tự fallback, KHÔNG gây lỗi.
 
-Chỉ cần tối thiểu 3 file là cả game có nhạc:
-  exploration.mp3   — nhạc khám phá chung
-  battle.mp3        — nhạc trận chung
-  title.mp3         — màn hình mở đầu
+LUỒNG NHẠC MÀN HÌNH KHỞI ĐẦU
+----------------------------
+1) intro.mp3
+   - Phát 1 lần ở đoạn tri ân màn mở đầu Pokémon Red/Blue.
+   - Trong lúc bài này còn chạy, menu chính sẽ hiện ra dần.
+2) title and adventure.mp3 → title.mp3 → exploration.mp3
+   - Khi intro.mp3 phát xong, app tự chuyển sang danh sách nhạc title này.
+   - Nếu thiếu bài đầu, app tự lùi xuống bài kế tiếp.
 
----------------------------------------------------------------------
-1) MÀN HÌNH & KHÁM PHÁ
----------------------------------------------------------------------
-  title.mp3            Màn hình mở đầu / Dev / Cài đặt (fallback: exploration)
-  exploration.mp3      Nhạc khám phá chung — fallback CUỐI của mọi khu vực
+Danh sách file chuẩn
+--------------------
+intro.mp3
 
-  Theme riêng từng vùng (phát khi đứng trong vùng đó):
-  region-kanto.mp3     region-johto.mp3     region-hoenn.mp3
-  region-sinnoh.mp3    region-unova.mp3     region-kalos.mp3
-  region-alola.mp3     region-galar.mp3     region-paldea.mp3
+title and adventure.mp3
+title.mp3
+exploration.mp3
 
-  Đè theo "CHẤT" của khu (ưu tiên cao hơn theme vùng — khu nào khớp
-  loại nào thì phát loại đó, dò theo tên khu trong bản đồ 9 vùng):
-  area-town.mp3          Thị trấn khởi đầu / làng yên bình (Pallet, Littleroot...)
-  area-city.mp3          Đô thị lớn (Castelia, Lumiose, Goldenrod...)
-  area-forest.mp3        Rừng (Viridian Forest, Ilex, Eterna...)
-  area-cave.mp3          Hang động / hầm mỏ / lòng núi (Mt. Moon, Rock Tunnel...)
-  area-sea.mp3           Biển / đảo / hải trình (Whirl Islands, Seafolk...)
-  area-volcano.mp3       Núi lửa (Mt. Chimney, Cinnabar, Wela...)
-  area-ice.mp3           Băng tuyết (Ice Path, Snowpoint, Glaseado...)
-  area-tower.mp3         Tháp / nơi u linh (Lavender, Mt. Pyre, Burned Tower...)
-  area-victory-road.mp3  Victory Road / Liên đoàn / Nhà vô địch
-  area-endgame.mp3       Nơi huyền thoại trú ngụ (Cerulean Cave, Spear Pillar,
-                         Area Zero, Ultra Space, Sky Pillar...)
+pokecenter.mp3
+pokemon center.mp3
+shop.mp3
+rest.mp3
+night.mp3
+low hp.mp3
+victory.mp3
+defeat.mp3
 
----------------------------------------------------------------------
-2) TRẬN ĐẤU (cả trận theo lượt lẫn combat anime)
----------------------------------------------------------------------
-  battle.mp3               Nhạc trận CHUNG — fallback cuối của mọi trận
-  battle-wild.mp3          Gặp Pokémon hoang dã thường
-  battle-boss.mp3          Boss huyền thoại bậc thấp/huyền ảo (fallback về wild)
-  battle-legendary.mp3     Huyền thoại (bậc thấp + huyền ảo dùng chung nếu
-                           không có battle-boss riêng)
-  battle-legendary-high.mp3  Huyền thoại BẬC CAO — đại diện bản game
-                           (Mewtwo, Ho-Oh, Arceus, Eternatus...)
+battle.mp3
+battle-wild.mp3
+battle-trainer.mp3
+battle-trainer-hard.mp3
+battle-gym.mp3
+battle-boss.mp3
+battle-legendary.mp3
+battle-legendary-high.mp3
+battle-champion.mp3
+battle-champion-cynthia.mp3
 
-  Jingle kết quả (phát 1 LẦN, không lặp, xong tự quay lại nhạc khu vực):
-  victory.mp3          Thắng / bắt được / dụ dỗ thành công / hoà giải
-  defeat.mp3           Thua trận
-  (Chạy thoát / đối phương bỏ chạy: không jingle, về thẳng nhạc khu vực.)
+area-town.mp3
+area-city.mp3
+area-forest.mp3
+area-sea.mp3
+area-cave.mp3
+area-ice.mp3
+area-volcano.mp3
+area-tower.mp3
+area-victory-road.mp3
+area-endgame.mp3
 
----------------------------------------------------------------------
-3) KHÁC
----------------------------------------------------------------------
-  shop.mp3             Trong cửa hàng (mở giỏ hàng 🛒)
+region-kanto.mp3
+region-johto.mp3
+region-hoenn.mp3
+region-sinnoh.mp3
+region-unova.mp3
+region-kalos.mp3
+region-alola.mp3
+region-galar.mp3
+region-paldea.mp3
 
----------------------------------------------------------------------
-GHI CHÚ
----------------------------------------------------------------------
-- Đuôi file: ưu tiên .mp3; không có thì app tự thử .ogg cùng tên.
-- Nhạc nền tự LẶP; jingle victory/defeat phát đúng 1 lần.
-- Trình duyệt chặn autoplay: nhạc chỉ bắt đầu sau cú click/phím đầu
-  tiên trên trang — widget 🎵 (cột phải) sẽ nhắc "bấm vào trang để phát".
-- Bật/tắt + âm lượng: widget 🎵 ở cột HUD phải, hoặc mục "Nhạc nền"
-  trong Cài đặt. Thiết lập được lưu lại (localStorage).
-- BẢN QUYỀN: nhạc Pokémon gốc thuộc Nintendo/Game Freak — file bạn bỏ
-  vào đây là bạn tự chịu trách nhiệm; khi public cho cộng đồng nên cân
-  nhắc dùng bản fan-made/royalty-free hoặc nhạc "lấy cảm hứng".
-
-
-=====================================================================
- CẬP NHẬT ĐỢT 67 — NHẠC THEO NGỮ CẢNH TRONG CHÍNH VĂN
-=====================================================================
-
-App giờ ĐỌC chính văn lượt mới nhất để đoán "cảnh" đang diễn ra và đổi
-nhạc cho khớp (không chỉ theo vị trí bản đồ như trước). Quy tắc: cảnh
-nào được nhắc MUỘN NHẤT trong đoạn thì thắng — "sau trận gym hôm qua,
-cậu bước vào Trung tâm Pokémon" sẽ phát nhạc Trung tâm, không phải gym.
-
-FILE MỚI DÙNG CHO NGỮ CẢNH (đã đổi tên từ bộ nhạc bạn gửi):
-
-  pokecenter.mp3          Trung tâm Pokémon (nurse Joy, chữa trị, hồi phục)
-                          ← "pokemon center.mp3"
-  rest.mp3                Cắm trại, nghỉ chân, quây quần, cho Pokémon ăn,
-                          vuốt ve chải lông        ← "chill with pokemon.mp3"
-  night.mp3               Đêm khuya / buổi tối (theo giờ trong truyện)
-                          ← "super chill.mp3"
-
-  battle-gym.mp3          Đấu Gym Leader            ← "gym battle.mp3"
-  battle-trainer.mp3      Đấu trainer thường        ← "trainer battle.mp3"
-  battle-trainer-hard.mp3 Trainer cứng / cao thủ    ← "hard trainer.mp3"
-  battle-champion.mp3     Champion / Tứ Đại Thiên Vương ← "vs champion.mp3"
-  battle-champion-cynthia.mp3  Riêng Cynthia        ← "vs cynthia.mp3"
-
-FILE ĐÃ CÓ SẴN, ĐƯỢC ĐỔI TÊN CHO ĐÚNG CHUẨN:
-
-  battle.mp3              Trận chung (fallback cuối) ← "battle.mp3"
-  battle-wild.mp3         Pokémon hoang dã           ← "battle 2.mp3"
-  battle-boss.mp3         Đầu đàn / boss             ← "boss.mp3"
-  battle-legendary.mp3    Huyền thoại bậc thấp       ← "legend cấp thấp.mp3"
-  battle-legendary-high.mp3  Huyền thoại bậc cao
-                          ← "vs legenderi pokemon lv 200.mp3"
-  exploration.mp3         Khám phá chung             ← "exploration.mp3"
-  area-forest.mp3         Rừng / đường mòn           ← "explore.mp3"
-  area-city.mp3           Đô thị lớn                 ← "new city.mp3"
-  area-town.mp3           Thị trấn yên bình          ← "peace.mp3"
-  area-victory-road.mp3   Indigo / Victory Road      ← "indigo leage.mp3"
-  area-endgame.mp3        Không gian huyền ảo, dị thường ← "huyền ảo.mp3"
-  region-kanto.mp3        Theme vùng Kanto           ← "gen1.mp3"
-
-THỨ TỰ ƯU TIÊN KHI PHÁT:
-  1. Nhạc trận (khi mở bảng chiến đấu) — theo loại đối thủ + cảnh trong văn
-  2. Nhạc theo CẢNH trong chính văn (Trung tâm, cắm trại, gym...)
-  3. Nhạc theo BUỔI (đêm/tối → night.mp3)
-  4. Nhạc theo vị trí bản đồ (area-* → region-* → exploration)
-
-
-=====================================================================
- CẬP NHẬT ĐỢT 71 — 2 BÀI MỚI + NHẠC TRUNG TÂM POKÉMON
-=====================================================================
-
-TÊN FILE GIỮ NGUYÊN NHƯ BẠN ĐẶT (không cần đổi tên):
-
-  title and adventure.mp3   Màn hình mở đầu (title screen).
-                            Đứng TRƯỚC title.mp3 trong danh sách ưu tiên,
-                            nên có file này là nó thắng; xoá đi thì tự lùi
-                            về title.mp3 → exploration.mp3 như cũ.
-
-  low hp.mp3                Pokémon đang ra trận tụt dưới 20% máu.
-                            CHỈ phát trong trận, đè lên nhạc trận đang
-                            chạy; máu hồi lên trên 20% hoặc hết trận là
-                            tự tắt, quay lại đúng bài nhạc trận cũ.
-
-  pokemon center.mp3        Chấp nhận song song với pokecenter.mp3 — bảng
-                            Trung tâm Pokémon thử pokecenter.mp3 trước,
-                            không có thì dùng "pokemon center.mp3", rồi
-                            rest.mp3, rồi area-town.mp3.
-
-LƯU Ý KỸ THUẬT: từ đợt 71 đường dẫn nhạc được MÃ HOÁ (encodeURIComponent)
-nên tên file có DẤU CÁCH ("title and adventure.mp3") hoặc TIẾNG VIỆT CÓ DẤU
-("huyền ảo.mp3") đều tải được. Trước đây dấu cách trong URL có thể bị máy
-chủ trả 404 và nhạc câm mà không báo lỗi gì.
-
-NHẠC TRUNG TÂM POKÉMON phát trong 2 trường hợp:
-  1. Chính văn nhắc tới Trung tâm Pokémon (cơ chế nhạc theo cảnh, đợt 67).
-  2. Người chơi MỞ bảng Trung tâm Pokémon bằng nút ✚ Chữa trị / 💻 Máy PC
-     — nhạc được đè trong suốt lúc bảng mở, đóng bảng thì trả lại như cũ.
+Gợi ý nhanh
+-----------
+- Nếu chỉ muốn game có nhạc tối thiểu: bỏ ít nhất exploration.mp3, battle.mp3,
+  title.mp3 (hoặc title and adventure.mp3), pokecenter.mp3.
+- Nếu bạn đã đưa bài intro riêng lên GitHub, chỉ cần đảm bảo lúc build/deploy,
+  file được copy thành public/music/intro.mp3 là app sẽ tự phát đúng thứ tự.

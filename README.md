@@ -2402,3 +2402,16 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 **ĐẠI TU POKÉMON SUMMARY.** Màn xem Pokémon được bố trí lại theo giao diện game: thanh đội hình bên trái, sprite và tab Thông tin / Chỉ số / Chiêu thức. Vẫn hiển thị đầy đủ HP, EXP, level, hệ, Nature, Ability, độ thân mật, trạng thái, trang bị, độ no của Pokémon đang đồng hành, sáu chỉ số, IV/EV và toàn bộ thông số từng chiêu. Có thể chuyển nhanh giữa các cá thể ngay trong modal.
 
 **Kiểm tra trong gói bàn giao:** regression đợt 73–82 đều PASS. Test mới bao phủ chữa Greninja save cũ từ 2 lên 4 chiêu, học Double Team tại mốc cấp, thay/quên chiêu, học vào ô trống và bỏ qua. Toàn bộ 99 file JS/JSX transpile cú pháp thành công; quét TS2304 không còn biến chưa khai báo; toàn bộ import tương đối tồn tại. Gói nguồn rút gọn không có `package.json`, nên chưa chạy được chính lệnh `npm run lint` và `npm run build`.
+
+
+## Cập nhật (đợt 83) — moveset Pokémon hoang/NPC đúng level
+
+**ĐÃ XÁC NHẬN GIAO THỨC CHỌN CHIÊU CÓ TỒN TẠI NHƯNG TRƯỚC ĐÂY CHƯA ĐƯỢC ÁP AN TOÀN Ở MỌI ĐƯỜNG.** `pickMoves` đã được nâng thành `pickEncounterMoves`: Pokémon hoang chỉ lấy level-up move đã học tới level hiện tại; Pokémon của trainer/NPC được phép có TM nhưng số lượng và uy lực TM bị giới hạn theo level. Trainer cấp thấp không còn tự nhiên cầm Hyper Beam/Earthquake chỉ vì loài đó có thể học TM.
+
+**KHÔNG CÒN KẸT BỘ FALLBACK.** Nếu người chơi mở trận trước khi `moves.json`/`learnsets.json` tải xong, đối thủ từng bị lưu vĩnh viễn với Growl/Quick Attack hoặc chỉ 2–3 chiêu. Khi dữ liệu sẵn sàng, app nay sửa `enemyMon`, snapshot trận đơn, hai snapshot trận đôi và runtime đang ẩn; chỉ thay moveset, tuyệt đối không reset HP, trạng thái, Ability, trang bị hay tiến độ trận. Modal đấu đôi cũng tự sửa local state vì nó không đọc lại `enemyMon` sau khi đã mở.
+
+**PHỦ CẢ NHỮNG LOÀI KHÔNG CÓ MẶT Ở GEN 9.** Parser learnset không còn ép cứng mọi loài vào Gen 9. Với mỗi loài, app ưu tiên Gen 9; nếu loài đó không có level-up learnset Gen 9 thì tự dùng thế hệ mới nhất còn dữ liệu hợp lệ (Gen 8/7...). Cache learnset tăng lên `v4` để trình duyệt tự tải lại dữ liệu đã chuẩn hoá.
+
+**BỘ CHIÊU CÓ TÍNH CHIẾN THUẬT NHƯNG VẪN HỢP LỆ.** Thuật toán vẫn ưu tiên Atk/SpA, STAB, coverage và chiêu đặc trưng, đồng thời giữ một chiêu hỗ trợ hữu ích khi phù hợp. Mọi chiêu được chọn đều phải nằm trong learnset hợp lệ của loài và không vượt mốc level; tối đa 4 chiêu. Bộ fallback chỉ dùng trong lúc dữ liệu mạng chưa sẵn sàng và sẽ được thay tự động sau đó.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–83 đều PASS. Test đợt 83 bao phủ wild không học chiêu tương lai/TM, trainer cấp thấp bị giới hạn TM, trainer cấp cao tối đa 2 TM, repair snapshot giữ nguyên HP/status, và fallback Gen 8 cho loài không có learnset Gen 9.

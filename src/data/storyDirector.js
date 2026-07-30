@@ -369,7 +369,7 @@ function weightedPick(entries, rng) {
  * hoặc null (đa số lượt là null — đó mới là tự nhiên).
  * @param {{identityKey: string, location: {regionKey,areaKey}|null, turn: number, rng?: () => number}} params
  */
-export function maybeMakeNudge({ identityKey, location, turn, rng = Math.random }) {
+export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', worldProgress = null, rng = Math.random }) {
   const st = loadSettings()
   const cfg = INTENSITY[st.intensity]
   if (!cfg) return null // 'off'
@@ -377,8 +377,26 @@ export function maybeMakeNudge({ identityKey, location, turn, rng = Math.random 
   const dstate = loadState()
   const sinceLast = turn - dstate.lastNudgeTurn
   if (sinceLast <= cfg.cooldown) return null
-  const chance = Math.min(cfg.cap, cfg.base + cfg.ramp * (sinceLast - cfg.cooldown - 1))
+  const modeFactor = mode === 'sang' ? 1.18 : mode === 'realistic' ? 0.82 : 1
+  const chance = Math.min(cfg.cap, (cfg.base + cfg.ramp * (sinceLast - cfg.cooldown - 1)) * modeFactor)
   if (rng() >= chance) return null
+
+  // Khi đã có tuyến đang chạy, đạo diễn phục vụ tiến trình đó thay vì ném
+  // thêm một biến cố rời rạc. Truy nã ưu tiên trước nhiệm vụ.
+  const wanted = Number(worldProgress?.wanted?.level) || 0
+  const activeQuest = (worldProgress?.quests ?? []).find((quest) => quest.status === 'active')
+  let progressSeed = ''
+  if (wanted >= 2) {
+    progressSeed = `Cho một hệ quả nhỏ nhưng cụ thể của mức truy nã ${wanted}: tuần tra, kiểm tra giấy tờ, tin đồn, người dân hoặc thợ săn tiền thưởng phản ứng hợp lý với địa điểm. Không tự bắt người chơi và không tự kết thúc cuộc truy đuổi.`
+  } else if (activeQuest) {
+    progressSeed = `Đưa một dấu hiệu, nhân chứng, trở ngại hoặc hậu quả nhỏ liên quan trực tiếp tới nhiệm vụ đang làm “${activeQuest.title}”${activeQuest.objective ? ` (mục tiêu: ${activeQuest.objective})` : ''}. Không giải hộ và không tự đánh dấu hoàn thành.`
+  }
+  if (progressSeed) {
+    state = { lastNudgeTurn: turn, recentCats: ['world-progress', ...dstate.recentCats].slice(0, 2) }
+    persistState()
+    notify()
+    return ['[Hệ thống — ĐẠO DIỄN TIẾN TRÌNH (người chơi không thấy ghi chú này):]', progressSeed, FAIRNESS_RULES].join('\n')
+  }
 
   // Gom pool ứng viên: pool chung + pool thân phận; lọc romance tắt / pool
   // cần region khi chưa có vị trí / 2 loại vừa dùng gần nhất.

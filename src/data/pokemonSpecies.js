@@ -2,6 +2,7 @@
 // loại — tên & hệ, giống hệt kiểu dữ liệu trên Bulbapedia/Serebii/PokéAPI).
 // species = slug khớp sprite Pokémon Showdown (ani/{species}.gif, ani-back/...).
 import { getBossTier } from './bossTiers.js'
+import { createStableId, publicPokemonCode } from './persistentIdentity.js'
 import { getEffectivenessMulti } from './pokemonTypes.js'
 import { resolveAbilityForEntry } from './pokemonAbilities.js'
 import { DEFAULT_FRIENDSHIP, friendshipTier, normalizeFriendship } from './pokemonFriendship.js'
@@ -703,12 +704,21 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
   // theo độ trâu thật của nó) — fallback công thức cũ (30+level*2) cho loài
   // không có baseStats (VD 151 loài tĩnh dự phòng khi chưa tải được pokedex).
   const maxHp = stats ? stats.hp : 30 + level * 2
-  const uid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const uid = createStableId('pkm')
   const ability = resolveAbilityForEntry(speciesEntry, null, uid)
+  const randomMark = Math.random() < 1 / 80
+    ? ['Dấu Ấn Hiếu Kỳ', 'Dấu Ấn Điềm Tĩnh', 'Dấu Ấn Năng Động', 'Dấu Ấn Hay Đói', 'Dấu Ấn Lang Thang'][Math.floor(Math.random() * 5)]
+    : null
   return {
     name: speciesEntry.name,
     species: speciesEntry.species,
     spriteId: speciesEntry.spriteId ?? speciesEntry.species,
+    // Metadata Pokédex/sinh thái của cá thể. Save cũ không có vẫn được dò
+    // ngược từ `species`; cá thể mới giữ sẵn để ghi seen/caught chính xác.
+    dexNum: Number.isFinite(speciesEntry.num) ? speciesEntry.num : null,
+    gen: Number.isFinite(speciesEntry.gen) ? speciesEntry.gen : null,
+    forme: speciesEntry.forme ?? null,
+    baseSpeciesId: speciesEntry.baseSpeciesId ?? null,
     level,
     types: speciesEntry.types,
     stats, // {hp,atk,def,spa,spd,spe} thật hoặc null — BattleModal dùng để tính sát thương đúng
@@ -721,6 +731,19 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     // theo TÊN, nên 2 con cùng loài (hoặc tên đổi) là lệch nhau — người chơi
     // báo "🧬 bảo lên Lv.8 mà HUD vẫn Lv.6". uid không đổi trọn đời cá thể.
     uid,
+    // Đợt 87: mã công khai ổn định dùng cho trao đổi thử nghiệm. uid là
+    // khoá nội bộ; pokemonId là mã ngắn người chơi có thể đối chiếu trên UI.
+    pokemonId: publicPokemonCode(uid),
+    originalTrainerId: null,
+    currentTrainerId: null,
+    tradeHistory: [],
+    // Biến cá thể đời sống: shiny đúng tỉ lệ cơ bản 1/4096, giới tính/kích
+    // thước cố định và Mark hiếm. Tất cả persist theo đúng cá thể.
+    shiny: Math.random() < 1 / 4096,
+    gender: Math.random() < 0.5 ? 'male' : 'female',
+    sizeClass: Math.random() < 0.06 ? 'tiny' : Math.random() > 0.94 ? 'jumbo' : 'average',
+    ribbons: [],
+    marks: randomMark ? [randomMark] : [],
     // Ability + độ thân mật là biến CỦA CÁ THỂ, persist qua save/tiến hoá.
     ability: ability.name,
     abilitySlot: ability.slot,

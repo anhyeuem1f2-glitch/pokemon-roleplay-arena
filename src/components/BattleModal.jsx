@@ -384,8 +384,8 @@ function normalizeAcquiredMon(mon) {
   return { ...normalized, hp: normalized.maxHp, status: null, isTrainerMon: false }
 }
 
-export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox } = useGame()
+export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null, initialEnemyTeam = null }) {
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate } = useGame()
   const restoredEnv = initialBattleState?.battleEnvKey
     ? getBattleEnv(initialBattleState.battleEnvKey)
     : (environment ?? getBattleEnv('none'))
@@ -394,12 +394,25 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     : [isWild ? `Một ${enemyMon.name} hoang dã xuất hiện!` : `${enemyMon.name} của huấn luyện viên đối thủ xuất trận!`])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
+  // Đợt 87: trainer có đội bền vững được đánh liên tiếp trong CÙNG một
+  // trận. `enemyMon` vẫn là cá thể trên sân; reserves giữ các slot chưa ra.
+  const [enemyReserves, setEnemyReserves] = useState(() => Array.isArray(initialBattleState?.enemyReserves)
+    ? initialBattleState.enemyReserves.map((mon) => ({ ...mon }))
+    : (Array.isArray(initialEnemyTeam) ? initialEnemyTeam.slice(1).map((mon) => ({ ...mon })) : []))
+  const defeatedEnemiesRef = useRef(Array.isArray(initialBattleState?.defeatedEnemies)
+    ? initialBattleState.defeatedEnemies.map((mon) => ({ ...mon }))
+    : [])
   // 'main' | 'fight' | 'bag' | 'party' | 'talk'
   const [menu, setMenu] = useState('main')
   // Lý do kết thúc đặc biệt do THUYẾT PHỤC: 'calm' (đối phương nguôi giận,
   // hoà), 'join' (Pokémon hoang dã bị dụ theo mình), 'flee' (đối phương bỏ
   // chạy). null = kết thúc thường (thắng/thua/tự chạy).
   const [endReason, setEndReason] = useState(null)
+  // Ghi "đã thấy" bằng sự kiện gameplay thật, không cần AI nhớ khai tag.
+  useEffect(() => {
+    if (!enemyMon) return
+    markPokedexSeen(enemyMon, { source: isWild ? 'wild-battle' : 'trainer-battle', location: playerLocation, date: storyDate })
+  }, [enemyMon, isWild, markPokedexSeen, playerLocation, storyDate])
   const [talkInput, setTalkInput] = useState('')
   // Bậc chỉ số và thời tiết là state của TRẬN, không phải của modal. Vì modal
   // có thể bị Ẩn rồi mở lại, phải khôi phục chúng từ message thay vì reset.
@@ -592,7 +605,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     (pm) => pm && !isSameMon(pm, playerMon) && (pm.hp ?? 0) > 0,
   )
   const mustSwitch = playerMon.hp <= 0 && healthyBackups.length > 0
-  const battleOver = enemyMon.hp <= 0 || (playerMon.hp <= 0 && healthyBackups.length === 0)
+  const battleOver = (enemyMon.hp <= 0 && enemyReserves.length === 0) || (playerMon.hp <= 0 && healthyBackups.length === 0)
 
   // Con ra trận vừa gục nhưng còn dự bị → tự mở bảng đội hình cho người chơi
   // chọn con thay thế (đợt 69).
@@ -602,6 +615,19 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
   function pushLog(line) {
     setLog((l) => [...l, line])
+  }
+
+  /** Đưa slot trainer kế tiếp ra sân. true = trận còn tiếp diễn. */
+  function sendNextEnemy(faintedMon) {
+    if (isWild || enemyReserves.length === 0) return false
+    const [nextEnemy, ...remaining] = enemyReserves
+    defeatedEnemiesRef.current = [...defeatedEnemiesRef.current, restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(faintedMon)))]
+    setEnemyReserves(remaining)
+    setEnemyMon({ ...nextEnemy })
+    setEStages({ ...STAGE_ZERO })
+    pushLog(`Huấn luyện viên đối thủ thu ${faintedMon.name} về và cho ${nextEnemy.name} ra sân! Còn ${remaining.length} Pokémon dự bị.`)
+    applyEntryAbility(nextEnemy, 'enemy')
+    return true
   }
 
   // ===== ĐỢT 72 — "1 POKÉMON CHẾT LÀ THUA DÙ CÒN 2 CON" (tester báo lại) =====
@@ -969,8 +995,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     setWeatherTurns(turnWeatherTurns)
 
     if (e.hp <= 0) {
-      pushLog(`${enemyMon.name} không thể chiến đấu nữa — bạn thắng!`)
-      setFinished(true)
+      if (!sendNextEnemy(e)) {
+        pushLog(`${enemyMon.name} không thể chiến đấu nữa — đội đối thủ đã hết Pokémon!`)
+        setFinished(true)
+      }
     } else if (p.hp <= 0) {
       reportActiveFainted(playerMon.name, p)
     }
@@ -1048,6 +1076,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           return
         }
         const lured = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
+        markPokedexCaught(lured, { source: 'befriended-in-battle', location: playerLocation, date: storyDate })
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), lured])
           pushLog(`${enemyMon.name} quyết định ĐI THEO BẠN! Đã vào đội hình.`)
@@ -1124,8 +1153,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       setPStages(pStageNow)
       for (const line of lines) pushLog(line)
       if (attacker.hp <= 0) {
-        pushLog(`${attacker.name} không thể chiến đấu nữa — bạn thắng!`)
-        setFinished(true)
+        if (!sendNextEnemy(attacker)) {
+          pushLog(`${attacker.name} không thể chiến đấu nữa — đội đối thủ đã hết Pokémon!`)
+          setFinished(true)
+        }
       } else if (defender.hp <= 0) {
         reportActiveFainted(targetMon.name, defender)
       }
@@ -1310,6 +1341,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       pushLog(`Bạn ném ${item.name}! (khả năng ~${chance}%)`)
       if (roll < chance) {
         const caught = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
+        markPokedexCaught(caught, { source: 'wild-battle', location: playerLocation, date: storyDate })
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), caught])
           pushLog(`Tuyệt vời! ${enemyMon.name} đã được bắt và vào đội hình!`)
@@ -1436,6 +1468,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       // có thể làm đối thủ hồi máu/trạng thái hoặc reset sai trận.
       playerBattleMon: { ...playerMon },
       enemy: { ...enemyMon },
+      enemyReserves: enemyReserves.map((mon) => ({ ...mon })),
+      defeatedEnemies: defeatedEnemiesRef.current.map((mon) => ({ ...mon })),
     }
   }
 
@@ -1468,6 +1502,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const restoredParty = (party ?? []).map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(mon))))
     const finalParty = syncMonInParty(restoredParty, persistedMon)
     const finalEnemy = restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(enemyMon)))
+    const allEnemies = [...defeatedEnemiesRef.current, finalEnemy]
     preGimmickRef.current = null
     setPlayerMon(persistedMon)
     // Đồng bộ máu/trạng thái về ĐỘI HÌNH — nếu không, HUD vẫn hiện máu đầy
@@ -1475,7 +1510,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     setParty(finalParty)
     resetBattle() // giờ chỉ reset đối thủ
     onBattleEnd(outcome, {
-      mode: 'single', team: finalParty, enemies: [finalEnemy],
+      mode: 'single', team: finalParty, enemies: allEnemies,
       participantUids: [...participantsRef.current],
       leadUid: participantKey(persistedMon),
     })

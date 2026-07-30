@@ -172,7 +172,7 @@ function actionText(action, team, enemies) {
 }
 
 export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd, initialBattleState = null }) {
-  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies } = useGame()
+  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies, markPokedexSeen, playerLocation, storyDate } = useGame()
   const fallbackTeam = buildInitialTeam(party, playerMon)
   const restoredTeam = initialBattleState?.team?.length
     ? initialBattleState.team.map(cloneMon)
@@ -204,6 +204,11 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   const [outcome, setOutcome] = useState(null)
   const [battleEnv, setBattleEnv] = useState(restoredEnv)
   const [weatherTurns, setWeatherTurns] = useState(initialBattleState?.weatherTurns ?? null)
+  useEffect(() => {
+    for (const enemy of enemies ?? []) {
+      markPokedexSeen(enemy, { source: 'double-trainer-battle', location: playerLocation, date: storyDate })
+    }
+  }, [enemies, markPokedexSeen, playerLocation, storyDate])
   const entryAbilitiesAppliedRef = useRef(Boolean(initialBattleState?.entryAbilitiesApplied))
   const [log, setLog] = useState(() => Array.isArray(initialBattleState?.log) && initialBattleState.log.length
     ? [...initialBattleState.log]

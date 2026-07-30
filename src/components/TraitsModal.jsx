@@ -7,18 +7,20 @@ import {
   describeCustomMechanicEffects,
   syncTraitGrantedItems,
 } from '../data/playerPerks.js'
+import { normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 
 // ============ SỬA TÍNH CÁCH & NĂNG LỰC GIỮA TRUYỆN (đợt 74) ============
 // Toàn bộ hiệu ứng sửa số liệu chỉ được nhận từ ô "Tự mô tả…". Các lựa chọn
 // dựng sẵn chỉ là chất liệu roleplay; không còn nút bật Max IV/EV/EXP/catch
 // riêng để tránh người chơi vô tình kích hoạt cheat.
 
-function ChoiceChip({ active, children, onClick, tone = 'amber' }) {
+function ChoiceChip({ active, children, onClick, tone = 'amber', disabled = false }) {
   const color = tone === 'mint' ? 'var(--mint)' : 'var(--amber)'
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       style={{
         border: `1px solid ${active ? color : 'var(--line)'}`,
         color: active ? color : 'var(--text-mid)',
@@ -26,7 +28,8 @@ function ChoiceChip({ active, children, onClick, tone = 'amber' }) {
         borderRadius: 999,
         padding: '7px 13px',
         fontSize: 12,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled && !active ? 0.45 : 1,
         transition: 'transform .15s ease, border-color .15s ease, background .15s ease',
       }}
     >
@@ -46,7 +49,8 @@ function SectionHeading({ eyebrow, title, note }) {
 }
 
 export default function TraitsModal({ onClose }) {
-  const { playerTraits, setPlayerTraits, party, setParty, setPlayerMon, setInventory } = useGame()
+  const { playerTraits, setPlayerTraits, party, setParty, setPlayerMon, setInventory, storyTone } = useGame()
+  const realistic = normalizeGameMode(storyTone) === 'realistic'
   const [draft, setDraft] = useState(() => ({
     personality: playerTraits?.personality ?? [],
     superpower: playerTraits?.superpower ?? 'none',
@@ -66,11 +70,12 @@ export default function TraitsModal({ onClose }) {
     }))
   }
 
-  const detectedCustom = describeCustomMechanicEffects(draft)
-  const resolvedEffects = resolveMechanicEffects(draft)
+  const safeDraft = sanitizeTraitsForMode(draft, storyTone)
+  const detectedCustom = describeCustomMechanicEffects(safeDraft)
+  const resolvedEffects = resolveMechanicEffects(safeDraft)
 
   function save() {
-    const nextTraits = { ...draft, perks: [] }
+    const nextTraits = sanitizeTraitsForMode(draft, storyTone)
     setPlayerTraits(nextTraits)
 
     // Chỉ áp cơ chế khi CHÍNH ô Tự mô tả nhận diện được luật tương ứng.
@@ -133,15 +138,18 @@ export default function TraitsModal({ onClose }) {
           <section style={{ marginTop: 14, padding: 14, border: '1px solid var(--line)', borderRadius: 12, background: 'var(--bg-deep)' }}>
             <SectionHeading
               eyebrow="NĂNG LỰC"
-              title="Chọn chất liệu roleplay hoặc tự viết luật riêng"
-              note="Các lựa chọn có sẵn chỉ ảnh hưởng lời kể. Muốn Max IV/EV, nhân EXP, Kẹo Hiếm vô hạn… phải chọn “Tự mô tả…”."
+              title={realistic ? 'Chọn một năng lực dựng sẵn' : 'Chọn chất liệu roleplay hoặc tự viết luật riêng'}
+              note={realistic
+                ? 'Chế độ Thực tế khoá năng lực đã chọn lúc bắt đầu; năng lực tự tạo và mọi cheat cũng bị chặn ở tầng dữ liệu.'
+                : 'Các lựa chọn có sẵn chỉ ảnh hưởng lời kể. Muốn cơ chế đặc biệt phải chọn “Tự mô tả…”.'}
             />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-              {SUPERPOWERS.map((p) => (
+              {SUPERPOWERS.filter((p) => !realistic || p.key !== 'custom').map((p) => (
                 <ChoiceChip
                   key={p.key}
                   active={draft.superpower === p.key}
                   tone={p.key === 'custom' ? 'mint' : 'amber'}
+                  disabled={realistic}
                   onClick={() => setDraft((d) => ({ ...d, superpower: p.key }))}
                 >
                   {p.label}
@@ -149,7 +157,7 @@ export default function TraitsModal({ onClose }) {
               ))}
             </div>
 
-            {draft.superpower === 'custom' && (
+            {!realistic && draft.superpower === 'custom' && (
               <>
                 <textarea
                   className="input"

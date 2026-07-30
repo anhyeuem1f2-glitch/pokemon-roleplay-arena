@@ -38,15 +38,20 @@ import { isSafariArea } from '../data/regions.js'
 import { musicManager } from '../utils/musicManager.js'
 import { VICTORY_TRACK_KEYS, DEFEAT_TRACK_KEYS } from '../data/musicTracks.js'
 import { rememberExchange, recallRelevant, buildMemoryNote, forgetMemoriesInTurnRange, clearMemory } from '../utils/storyMemory.js'
-import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote } from '../utils/storyNotebook.js'
+import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote, findNpcProfileInText, recordNpcBattle } from '../utils/storyNotebook.js'
 import { maybeUpdateSummary, buildSummaryNote, trimSummaryCoverage, clearSummary } from '../utils/storySummary.js'
 import { maybeMakeNudge, getIdentity } from '../data/storyDirector.js'
 import { getRegion, getArea } from '../data/regions.js'
 import { normalizeMapLocation } from '../data/mapPins.js'
 import { getWeather } from '../data/weather.js'
+import { buildEcologyNote, pickEcologicalEncounter } from '../data/pokemonEcology.js'
 import { envFromWeather } from '../data/battleEnvironments.js'
 import { buildFestivalLine } from '../data/festivals.js'
 import { buildCanonNote } from '../services/wikiLookup.js'
+import { buildModeRulesNote, legendaryAccess, normalizeGameMode } from '../data/gameModes.js'
+import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
+import { addCollectionAward } from '../data/pokemonLife.js'
+import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 
 // Cửa sổ tin gần nhất gửi cho model khi TRÍ NHỚ DÀI HẠN đang bật (đợt 29):
 // phần cũ hơn không gửi nguyên văn nữa mà được thay bằng các "ký ức" truy
@@ -299,6 +304,10 @@ function filterSupplementalDuplicates(extra, applied) {
   const appliedHunger = new Set((applied?.hunger ?? []).map((entry) => entry.who))
   const appliedNpc = new Set((applied?.npcs ?? []).map((entry) => monKey(entry.name)))
   const appliedFact = new Set((applied?.facts ?? []).map((entry) => monKey(entry.key)))
+  const appliedBadges = new Set((applied?.badges ?? []).map((entry) => entry.id))
+  const appliedQuests = new Set((applied?.quests ?? []).map((entry) => entry.id))
+  const appliedReps = new Set((applied?.reputations ?? []).map((entry) => monKey(entry.name)))
+  const appliedAwards = new Set((applied?.collectionAwards ?? []).map((entry) => `${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`))
   const appliedMoneyEntries = applied?.moneyEntries?.length
     ? applied.moneyEntries.map(Number)
     : applied?.money ? [Number(applied.money)] : []
@@ -331,6 +340,11 @@ function filterSupplementalDuplicates(extra, applied) {
     training: applied?.training ? 0 : (extra?.training ?? 0),
     npcs: (extra?.npcs ?? []).filter((entry) => !appliedNpc.has(monKey(entry.name))),
     facts: (extra?.facts ?? []).filter((entry) => !appliedFact.has(monKey(entry.key))),
+    badges: (extra?.badges ?? []).filter((entry) => !appliedBadges.has(entry.id)),
+    quests: (extra?.quests ?? []).filter((entry) => !appliedQuests.has(entry.id)),
+    reputations: (extra?.reputations ?? []).filter((entry) => !appliedReps.has(monKey(entry.name))),
+    wanted: (applied?.wanted ?? []).length ? [] : (extra?.wanted ?? []),
+    collectionAwards: (extra?.collectionAwards ?? []).filter((entry) => !appliedAwards.has(`${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`)),
     shops: (applied?.shops ?? []).length ? [] : (extra?.shops ?? []),
     pokecenter: applied?.pokecenter ? null : (extra?.pokecenter ?? null),
   }
@@ -408,6 +422,11 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
   }
   for (const n of parsed.npcs ?? []) out.push(`👤 Sổ tay NPC: ${n.name}${tag}`)
   for (const f of parsed.facts ?? []) out.push(`📌 Fact [${f.key}]: ${f.text.length > 90 ? f.text.slice(0, 90) + '…' : f.text}${tag}`)
+  for (const badge of parsed.badges ?? []) out.push(`🏅 Huy hiệu: ${badge.name}${tag}`)
+  for (const quest of parsed.quests ?? []) out.push(`📋 Nhiệm vụ: ${quest.title} · ${quest.status}${tag}`)
+  for (const rep of parsed.reputations ?? []) out.push(`⚑ Danh tiếng ${rep.name} ${rep.delta > 0 ? '+' : ''}${rep.delta}${tag}`)
+  for (const wanted of parsed.wanted ?? []) out.push(`⚖ Truy nã ${wanted.delta > 0 ? '+' : ''}${wanted.delta}${wanted.reason ? ` · ${wanted.reason}` : ''}${tag}`)
+  for (const award of parsed.collectionAwards ?? []) out.push(`${award.kind === 'mark' ? '✦ Mark' : '🎗 Ribbon'} ${award.target}: ${award.name}${tag}`)
   for (const sh of parsed.shops ?? []) out.push(`🛒 Mở cửa hàng: ${sh.name}${tag}`)
   if (parsed.pokecenter) out.push(`✚ Trung tâm Pokémon: ${parsed.pokecenter.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
@@ -465,6 +484,9 @@ export default function RoleplayChat() {
     setBodyStatus,
     inventory,
     setInventory,
+    worldProgress,
+    setWorldProgress,
+    trainerId,
   } = useGame()
   const [input, setInput] = useState('')
   const inputRef = useRef(null)
@@ -675,6 +697,12 @@ export default function RoleplayChat() {
       // LEVEL chạy TRƯỚC EVOLVE. Một lượt tiến hoá do lên cấp thường có cả
       // [[LEVEL Fletchling | +1]] và [[EVOLVE Fletchling | Fletchinder]];
       // nếu đổi tên trước thì tag LEVEL tên cũ sẽ mất target.
+      const realisticMode = normalizeGameMode(storyTone) === 'realistic'
+      const candyStock = (latestInventoryRef.current ?? []).filter((item) => /rare\s*candy|kẹo\s*hiếm/i.test(`${item.name} ${item.id}`))
+        .reduce((sum, item) => sum + Math.max(0, Number(item.qty) || 0), 0)
+      const candyDebit = (parsed.items ?? []).filter((item) => item.qty < 0 && /rare\s*candy|kẹo\s*hiếm/i.test(item.name))
+        .reduce((sum, item) => sum + Math.abs(item.qty), 0)
+      let verifiedCandyBudget = Math.min(candyStock, candyDebit)
       for (const directive of parsed.levels ?? []) {
         let targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
         // Model đôi khi gọi luôn TÊN SAU TIẾN HOÁ trong LEVEL dù cá thể trong
@@ -692,6 +720,14 @@ export default function RoleplayChat() {
           report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
           continue
         }
+        const requiredCandy = directive.mode === 'delta'
+          ? Math.max(0, directive.value)
+          : Math.max(0, directive.value - (targetMon.level ?? 1))
+        if (realisticMode && (requiredCandy <= 0 || verifiedCandyBudget < requiredCandy || !/rare\s*candy|kẹo\s*hiếm/i.test(storyText))) {
+          report.lines.push(`⚠ Chế độ Thực tế chặn tăng cấp trực tiếp cho ${directive.target}: cần ${requiredCandy || 1} Kẹo Hiếm đang có trong túi và đúng số tag trừ vật phẩm`)
+          continue
+        }
+        if (realisticMode) verifiedCandyBudget -= requiredCandy
         const before = targetMon.level ?? 1
         const previewAfter = applyLevelDirective(targetMon, directive, movesDb)
         const after = previewAfter?.level ?? before
@@ -724,6 +760,10 @@ export default function RoleplayChat() {
           report.lines.push(`⚠ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: không phải nhánh tiến hoá trực tiếp`)
           continue
         }
+        if (normalizeGameMode(storyTone) === 'realistic' && Number.isFinite(targetEntry.evoLevel) && (targetMon.level ?? 1) < targetEntry.evoLevel) {
+          report.lines.push(`⛔ Chế độ Thực tế chặn tiến hoá ${targetMon.name} → ${targetEntry.name}: cần Lv.${targetEntry.evoLevel}, hiện Lv.${targetMon.level ?? 1}`)
+          continue
+        }
         if (normalizeMonTarget(targetMon.species ?? targetMon.name) === normalizeMonTarget(targetEntry.species ?? targetEntry.name)) {
           report.lines.push(`ℹ ${targetMon.name} đã ở đúng dạng ${targetEntry.name} — không đổi biến`)
           continue
@@ -739,6 +779,12 @@ export default function RoleplayChat() {
           continue
         }
 
+        const access = legendaryAccess(entry, worldProgress, storyTone)
+        if (!access.allowed) {
+          report.lines.push(`⛔ Không cấp ${entry.name}: cổng tiến trình ${access.tier?.label ?? 'huyền thoại'} chưa mở — ${access.reason}`)
+          continue
+        }
+
         // Tương thích model cũ 1: POKEMON trùng loài đang có = yêu cầu nâng
         // cấp. Nếu vừa EVOLVE sang đúng loài này trong cùng lượt thì bỏ tag
         // POKEMON dư, không tạo thêm dòng DNA gây hiểu nhầm.
@@ -750,6 +796,10 @@ export default function RoleplayChat() {
             if (!evolvedTargets.has(normalizeMonTarget(entry.name))) {
               report.lines.push(`ℹ ${existing.name} đang Lv.${before} — tag Lv.${pk.level} không làm thay đổi biến`)
             }
+            continue
+          }
+          if (realisticMode) {
+            report.lines.push(`⛔ Chế độ Thực tế không cho dùng POKEMON để nâng ${existing.name} Lv.${before} → Lv.${after}; phải qua EXP/Kẹo Hiếm hợp lệ`)
             continue
           }
           const identity = { uid: existing.uid, name: existing.name }
@@ -778,6 +828,10 @@ export default function RoleplayChat() {
           const requestedLevel = Math.max(beforeLevel, Math.min(100, Number(pk.level) || beforeLevel))
           let current = prevo
           if (requestedLevel > beforeLevel) {
+            if (realisticMode) {
+              report.lines.push(`⛔ Chế độ Thực tế bỏ phần tăng cấp ngầm ${prevo.name} Lv.${beforeLevel} → Lv.${requestedLevel} trong tag POKEMON`)
+              if (Number.isFinite(entry.evoLevel) && beforeLevel < entry.evoLevel) continue
+            } else {
             const identity = { uid: prevo.uid, name: prevo.name }
             const raise = (mon) => raiseMonToLevel(mon, requestedLevel, movesDb)
             setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
@@ -785,13 +839,14 @@ export default function RoleplayChat() {
             replacePreviewMon(identity, raise)
             current = raise(prevo)
             report.lines.push(`✅ ${prevo.name}: Lv.${beforeLevel} → Lv.${requestedLevel}`)
+            }
           }
           evolveOne(current, entry, 'inferred')
           continue
         }
 
         const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-        const newMon = applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits)
+        const newMon = ensurePokemonIdentity(applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits), trainerId)
         if (previewParty.length < 6) {
           setParty((cur) => {
             const next = [...(cur ?? [])]
@@ -1006,6 +1061,34 @@ export default function RoleplayChat() {
       for (const f of parsed.facts ?? []) addFact(f.key, f.text, turnNow)
     } catch (e2) { console.warn('[state] NPC/FACT lỗi:', e2.message) }
 
+    try {
+      if ((parsed.badges?.length ?? 0) || (parsed.quests?.length ?? 0) || (parsed.reputations?.length ?? 0) || (parsed.wanted?.length ?? 0)) {
+        setWorldProgress((cur) => applyWorldDirectives(cur, parsed, { mode: storyTone, turn: turnNow, date: storyDate }))
+        for (const badge of parsed.badges ?? []) report.lines.push(worldProgress.badgeTracking
+          ? `🏅 Lưu huy hiệu: ${badge.name}`
+          : `ℹ Bỏ qua huy hiệu ${badge.name}: người chơi đã tắt theo dõi Badge Case`)
+        for (const quest of parsed.quests ?? []) report.lines.push(`📋 Nhiệm vụ “${quest.title}”: ${quest.status}`)
+        for (const rep of parsed.reputations ?? []) report.lines.push(`⚑ Danh tiếng ${rep.name}: ${rep.delta > 0 ? '+' : ''}${rep.delta}`)
+        for (const wanted of parsed.wanted ?? []) report.lines.push(`⚖ Truy nã: ${wanted.delta > 0 ? '+' : ''}${wanted.delta}${wanted.reason ? ` · ${wanted.reason}` : ''}`)
+      }
+      for (const award of parsed.collectionAwards ?? []) {
+        const targetMon = resolveOwnedMonTarget(award.target, previewActive, previewParty)
+        if (!targetMon) {
+          report.lines.push(`⚠ Không trao ${award.name}: không tìm thấy ${award.target}`)
+          continue
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const apply = (mon) => addCollectionAward(mon, award.kind, award.name)
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        replacePreviewMon(identity, apply)
+        report.lines.push(`${award.kind === 'mark' ? '✦ Mark' : '🎗 Ribbon'}: ${targetMon.name} nhận ${award.name}`)
+      }
+    } catch (e2) {
+      console.warn('[state] WORLD/COLLECTION lỗi:', e2.message)
+      report.lines.push(`⚠ Lỗi khi áp tiến trình thế giới: ${e2.message}`)
+    }
+
     return report
   }
 
@@ -1084,7 +1167,26 @@ export default function RoleplayChat() {
           role: 'user',
           content: `[Hệ thống — VỊ TRÍ HIỆN TẠI: ${areaInfo?.name ?? currentMapLocation.areaKey ?? 'chưa rõ'}, vùng ${regionInfo?.name ?? currentMapLocation.regionKey}${coordText}. Không tự coi nhân vật đã sang nơi khác nếu chính văn chưa có di chuyển. Khi thực sự đổi vị trí, dùng [[MOVE Tên nơi | x=N | y=N]] nếu biết toạ độ; không nhắc tới ghi chú này.]`,
         }]
+
+        // Đợt 86: vị trí không chỉ quyết định level. Sinh cảnh, buổi và thời
+        // tiết là luật thế giới thật để model không thả Pokémon ngẫu nhiên từ
+        // toàn National Dex vào mọi bụi cỏ.
+        const ecologyNote = buildEcologyNote({
+          location: currentMapLocation,
+          storyDate,
+          weather: getWeather(storyDate, currentMapLocation),
+        })
+        if (ecologyNote) history = [...history, { role: 'system', content: ecologyNote }]
       }
+
+      // Đợt 87: luật chế độ và tiến trình là system state, không phải gợi ý
+      // mềm. Nhờ vậy model không thể “viết cheat thành canon” ở Thực tế.
+      history = [...history,
+        { role: 'system', content: buildModeRulesNote(storyTone, worldProgress) },
+        { role: 'system', content: buildWorldProgressNote(worldProgress, storyTone) },
+      ]
+      const priority = directorPriority(worldProgress)
+      if (priority) history = [...history, { role: 'system', content: `[Hệ thống — ƯU TIÊN ĐẠO DIỄN: ${priority} Không nhắc tới ghi chú này.]` }]
 
       // --- ĐẠO DIỄN TÌNH HUỐNG (đợt 31) ---
       // Thi thoảng (theo nhịp cooldown + xác suất) chèn 1 hạt giống tình
@@ -1115,6 +1217,8 @@ export default function RoleplayChat() {
         identityKey: playerIdentity,
         location: playerLocation,
         turn: nextMessages.length,
+        mode: normalizeGameMode(storyTone),
+        worldProgress,
       })
       if (nudge) history = [...history, { role: 'user', content: nudge }]
 
@@ -1364,6 +1468,9 @@ export default function RoleplayChat() {
               training: stateParsed.training, moves: stateParsed.moveDirectives,
               npcs: (stateParsed.npcs ?? []).map((n) => n.name),
               facts: (stateParsed.facts ?? []).map((f) => f.key),
+              badges: stateParsed.badges, quests: stateParsed.quests,
+              reputations: stateParsed.reputations, wanted: stateParsed.wanted,
+              collectionAwards: stateParsed.collectionAwards,
             },
             hasPokemon: Boolean(latestPlayerMonRef.current) || (stateParsed.pokemons ?? []).length > 0,
           })
@@ -1841,10 +1948,38 @@ ${m.content}`
                     const ownNames = [...(party ?? []).map((pm) => pm?.name), playerMon?.name].filter(Boolean)
                     const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
                     const mentioned = detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
-                    const speciesEntry = mentioned || pokedexSpecies[Math.floor(Math.random() * pokedexSpecies.length)]
+                    const ecologyOptions = {
+                      pokedex: pokedexSpecies,
+                      location: playerLocation,
+                      storyDate,
+                      weather: getWeather(storyDate, playerLocation),
+                      kind: battleCtx.isTrainer ? 'trainer' : 'wild',
+                      excludeNames: ownNames,
+                    }
+                    const npcProfile = battleCtx.isTrainer ? findNpcProfileInText(battleSource) : null
+                    const persistentRoster = (npcProfile?.team ?? []).map((slot) => ({
+                      ...slot,
+                      entry: pokedexSpecies.find((entry) => normalizeMonTarget(entry.name) === normalizeMonTarget(slot.species)
+                        || normalizeMonTarget(entry.species) === normalizeMonTarget(slot.species)),
+                    })).filter((slot) => slot.entry)
+                    const persistentStart = persistentRoster.length ? (npcProfile.battles ?? 0) % persistentRoster.length : 0
+                    const persistentPick = persistentRoster[persistentStart]?.entry
+                    const requestedSpecial = persistentPick || mentioned
+                    const encounterAccess = legendaryAccess(requestedSpecial, worldProgress, storyTone)
+                    if (requestedSpecial && !encounterAccess.allowed) {
+                      setActiveBattleMsgIndex(null)
+                      window.alert(`Cổng tiến trình chặn cuộc gặp ${requestedSpecial.name}: ${encounterAccess.reason}. Chính văn không thể bỏ qua luật này.`)
+                      return
+                    }
+                    const speciesEntry = persistentPick
+                      || mentioned
+                      || pickEcologicalEncounter(ecologyOptions)
+                      || pokedexSpecies.find((entry) => !legendaryAccess(entry, {}, storyTone).tier)
                     const leagueSlotBase = nextLeagueTeamSlot(messages, i, battleCtx.tier)
                     const levelFor = (entry, offset = 0) => {
                       if (battleCtx.isTrainer) {
+                        const savedSlot = persistentRoster.find((slot) => slot.entry === entry)
+                        if (savedSlot) return Math.max(1, Math.min(100, savedSlot.level))
                         // League dùng đúng bảng 6 ô: Elite 85/85/90/90/95/95,
                         // Champion 98/98/99/99/100/100. Trainer thường giữ
                         // logic cũ; Pokémon thứ hai trong đấu đôi chỉ nhỉnh +1.
@@ -1876,18 +2011,32 @@ ${m.content}`
                     if (doubleCtx.isDouble) {
                       // Lấy hai loài được nhắc MUỘN NHẤT. Thiếu một loài thì
                       // sinh thêm đối thủ khác, nhưng không dùng Pokémon phe mình.
-                      const picked = mentionedList.slice(-2)
+                      const picked = persistentRoster.length
+                        ? [0, 1].map((offset) => persistentRoster[(persistentStart + offset) % persistentRoster.length]?.entry).filter(Boolean)
+                        : mentionedList.slice(-2)
+                      const lockedEntry = picked.find((entry) => !legendaryAccess(entry, worldProgress, storyTone).allowed)
+                      if (lockedEntry) {
+                        const locked = legendaryAccess(lockedEntry, worldProgress, storyTone)
+                        setActiveBattleMsgIndex(null)
+                        window.alert(`Cổng tiến trình chặn cuộc gặp ${lockedEntry.name}: ${locked.reason}.`)
+                        return
+                      }
                       if (!picked.length) picked.push(speciesEntry)
                       while (picked.length < 2) {
+                        const ecologicalPick = pickEcologicalEncounter({
+                          ...ecologyOptions,
+                          excludeSpecies: picked.map((chosen) => chosen.species),
+                        })
                         const pool = pokedexSpecies.filter((entry) =>
                           !ownNames.some((name) => name?.toLowerCase() === entry.name.toLowerCase())
                           && !picked.some((chosen) => chosen.name === entry.name))
-                        picked.push(pool[Math.floor(Math.random() * pool.length)] ?? speciesEntry)
+                        picked.push(ecologicalPick ?? pool[Math.floor(Math.random() * pool.length)] ?? speciesEntry)
                       }
                       const duo = picked.slice(0, 2).map((entry, index) => decorateTrainer(buildMonSmart(
                         entry, levelFor(entry, index === 1 ? 1 : 0), movesDb, playerMon?.types, true,
                       )))
                       setEnemyMon(duo[0])
+                      if (npcProfile) recordNpcBattle(npcProfile.id, npcProfile.team)
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
                         ...mm, battleStarted: true, battleMode: 'double', doubleReason: doubleCtx.reason,
                         trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase,
@@ -1895,14 +2044,22 @@ ${m.content}`
                         enemySnapshot: duo[0], enemySnapshots: duo,
                       } : mm))
                     } else {
-                      const mon = decorateTrainer(buildMonSmart(
+                      const orderedPersistentTeam = persistentRoster.length
+                        ? persistentRoster.map((_, offset) => persistentRoster[(persistentStart + offset) % persistentRoster.length])
+                        : []
+                      const fullEnemyTeam = orderedPersistentTeam.map((slot) => decorateTrainer(buildMonSmart(
+                        slot.entry, Math.max(1, Math.min(100, slot.level)), movesDb, playerMon?.types, true,
+                      )))
+                      const mon = fullEnemyTeam[0] ?? decorateTrainer(buildMonSmart(
                         speciesEntry, levelFor(speciesEntry), movesDb, playerMon?.types, battleCtx.isTrainer,
                       ))
+                      const enemyTeam = fullEnemyTeam.length ? fullEnemyTeam : [mon]
                       setEnemyMon(mon)
+                      if (npcProfile) recordNpcBattle(npcProfile.id, npcProfile.team)
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
                         ...mm, battleStarted: true, battleMode: 'single',
-                        trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase, trainerTeamCount: 1,
-                        enemySnapshot: mon,
+                        trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase, trainerTeamCount: enemyTeam.length,
+                        enemySnapshot: mon, enemySnapshots: enemyTeam,
                       } : mm))
                     }
                   } else if (m.battleMode === 'double' && m.enemySnapshots?.length) {
@@ -2319,6 +2476,8 @@ ${m.content}`
           // Đợt 71: Pokémon của huấn luyện viên khác thì KHÔNG bắt được,
           // KHÔNG chạy trốn được, KHÔNG dụ đi theo được.
           isWild={!enemyMon?.isTrainerMon}
+          initialEnemyTeam={messages[activeBattleMsgIndex]?.enemySnapshots
+            ?? [messages[activeBattleMsgIndex]?.enemySnapshot ?? enemyMon].filter(Boolean)}
           initialBattleState={messages[activeBattleMsgIndex]?.battleRuntime ?? null}
           environment={envFromWeather(getWeather(storyDate, playerLocation).label)}
           onClose={(runtime) => {
@@ -2329,8 +2488,11 @@ ${m.content}`
             const idx = activeBattleMsgIndex
             if (idx !== null) {
               const snap = runtime?.enemy ?? enemyMon
+              const remainingTeam = runtime
+                ? [runtime.enemy, ...(runtime.enemyReserves ?? [])].filter(Boolean)
+                : [snap].filter(Boolean)
               setMessages((msgs) =>
-                msgs.map((mm, i) => (i === idx ? { ...mm, enemySnapshot: snap, battleRuntime: runtime } : mm)),
+                msgs.map((mm, i) => (i === idx ? { ...mm, enemySnapshot: snap, enemySnapshots: remainingTeam, battleRuntime: runtime } : mm)),
               )
               if (snap) setEnemyMon(snap)
             }

@@ -129,6 +129,9 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
 
               <div className="summary-info-grid">
                 <div className="summary-info-card">
+                  <span>MÃ CÁ THỂ</span><strong>{current.pokemonId ?? current.uid ?? '—'}</strong><small>{current.shiny ? '✨ Shiny' : 'Màu thường'} · {current.gender ?? 'unknown'} · {current.sizeClass ?? 'average'}</small>
+                </div>
+                <div className="summary-info-card">
                   <span>TÍNH CÁCH</span><strong>{describeNature(current.nature)}</strong>
                 </div>
                 <div className="summary-info-card">
@@ -145,6 +148,9 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
                 </div>
                 <div className="summary-info-card">
                   <span>EXP TỚI CẤP SAU</span><strong>{maxed ? 'Đã đạt Lv.100' : `${Math.max(0, exp.need - exp.current)} EXP`}</strong><small>{maxed ? 'Không thể tăng cấp thêm' : `Mục tiêu Lv.${current.level + 1}`}</small>
+                </div>
+                <div className="summary-info-card">
+                  <span>RIBBON / MARK</span><strong>{(current.ribbons?.length ?? 0)} / {(current.marks?.length ?? 0)}</strong><small>{[...(current.ribbons ?? []), ...(current.marks ?? [])].join(', ') || 'Chưa có danh hiệu cá thể'}</small>
                 </div>
               </div>
             </div>

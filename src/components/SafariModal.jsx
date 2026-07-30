@@ -20,7 +20,7 @@ import { describeNatureBehavior } from '../data/pokemonSpecies.js'
 const SAFARI_BALLS = 30
 
 export default function SafariModal({ onClose, onSafariEnd }) {
-  const { enemyMon, party, setParty, playerMon, setPlayerMon, apiConfig, playerLocation, playerTraits } = useGame()
+  const { enemyMon, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, apiConfig, playerLocation, storyDate, playerTraits, markPokedexSeen, markPokedexCaught } = useGame()
   const [balls, setBalls] = useState(SAFARI_BALLS)
   const [catchScore, setCatchScore] = useState(20) // 0-100, ≥ ngưỡng random thì bắt được
   const [fleeChance, setFleeChance] = useState(15) // % bỏ chạy mỗi lượt sau hành động
@@ -35,6 +35,11 @@ export default function SafariModal({ onClose, onSafariEnd }) {
     musicManager.pushOverride('safari', ['exploration'])
     return () => musicManager.popOverride('safari')
   }, [])
+
+  useEffect(() => {
+    if (!enemyMon) return
+    markPokedexSeen(enemyMon, { source: 'safari', location: playerLocation, date: storyDate })
+  }, [enemyMon, markPokedexSeen, playerLocation, storyDate])
 
   function push(text) {
     setLog((l) => [...l, text])
@@ -122,11 +127,16 @@ export default function SafariModal({ onClose, onSafariEnd }) {
     if (continuingRef.current) return
     continuingRef.current = true
     if (finished === 'caught') {
+      const caught = applyPerksToMon({ ...enemyMon }, playerTraits)
+      markPokedexCaught(caught, { source: 'safari', location: playerLocation, date: storyDate })
       if (party.length < 6) {
         // Đợt 70: áp thiên phú cơ chế cho Pokémon bắt được ở Safari.
-        const caught = applyPerksToMon({ ...enemyMon }, playerTraits)
         setParty([...party, caught])
         if (!playerMon) setPlayerMon(caught)
+      } else {
+        // Safari cũ báo bắt thành công nhưng làm mất Pokémon thứ 7. Đồng nhất
+        // với battle thường: đội đầy thì gửi cá thể vào PC Box.
+        setPcBox([...(pcBox ?? []), caught])
       }
     }
     onSafariEnd(finished === 'caught' ? 'caught' : finished === 'fled' ? 'flee' : 'escaped')

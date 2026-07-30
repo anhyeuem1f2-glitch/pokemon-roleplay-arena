@@ -3,7 +3,13 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
-import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
+import { GENRES, buildToneNote } from '../data/storyTones.js'
+import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
+import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
+import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
+import { validateStateAgainstProse } from '../utils/stateEvidence.js'
+import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
+import { DEFAULT_TRADE_STATE } from '../data/trading.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
 import { applyPerksToMon, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
@@ -13,7 +19,7 @@ import { extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { clearMemory, rememberExchange } from '../utils/storyMemory.js'
-import { clearNotebook } from '../utils/storyNotebook.js'
+import { addFact, clearNotebook, upsertNpc } from '../utils/storyNotebook.js'
 import { clearSummary } from '../utils/storySummary.js'
 import { resetDirectorState } from '../data/storyDirector.js'
 import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
@@ -36,14 +42,14 @@ const GENDERS = ['Nam', 'Nữ', 'Khác / không tiết lộ']
 const TITLE_INTRO_SESSION_KEY = 'trainer-arena-title-seen-v1'
 
 const STEPS = [
+  { key: 'mode', label: 'Chế độ' },
   { key: 'profile', label: 'Hồ sơ' },
   { key: 'identity', label: 'Thân phận' },
   // Đợt 61: tính cách + siêu năng lực — chống việc AI mặc định vẽ nhân vật
   // chính thành lạnh lùng/thực dụng.
   { key: 'traits', label: 'Tính cách' },
   { key: 'origin', label: 'Xuất thân' },
-  // Đợt 50: trang chọn ĐỘ KHÓ + THỂ LOẠI — quyết định giọng văn toàn truyện
-  // (thay cho tông REALISTIC hardcode cũ bị chê "đen tối quá").
+  // Chế độ đã chọn ở bước đầu; đây chỉ là trang thể loại.
   { key: 'tone', label: 'Tông truyện' },
   { key: 'opening', label: 'Mở đầu' },
 ]
@@ -118,7 +124,8 @@ function PickCard({ selected, title, desc, onClick, compact }) {
 export default function IntroScreen({ onOpenSettings, onOpenDev }) {
   const {
     apiConfig, character, stylePreset, mainPreset, assistantPrefill,
-    setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox,
+    setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
+    resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
     memoryApiConfig, playerIdentity, setPlayerIdentity,
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
@@ -236,9 +243,13 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     if (d.originRegionKey) setOriginRegionKey(d.originRegionKey)
     setOriginAreaKey(d.originAreaKey ?? '')
     setPersonality(d.personality ?? [])
-    setSuperpower(d.superpower ?? 'none')
-    setCustomPower(d.customPower ?? '')
-    if (d.storyTone) setStoryTone(d.storyTone)
+    // Preset có thể mang thể loại cũ nhưng không được đổi CHẾ ĐỘ vừa chọn
+    // ở bước đầu — tránh nạp hồ sơ để lách luật Thực tế.
+    const incomingTone = d.storyTone ? { ...d.storyTone, difficulty: storyTone.difficulty } : storyTone
+    const safeTraits = sanitizeTraitsForMode({ personality: d.personality, superpower: d.superpower, customPower: d.customPower }, incomingTone)
+    setSuperpower(safeTraits.superpower)
+    setCustomPower(safeTraits.customPower)
+    if (d.storyTone) setStoryTone(incomingTone)
     setOpeningKey(d.openingKey ?? 'auto')
     setDesiredOpening(d.desiredOpening ?? '')
   }
@@ -300,13 +311,22 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     // LUÔN tay trắng (đợt 34): nhận Pokémon đầu tiên là cột mốc trong truyện.
     // Đợt 69: lưu tính cách/thiên phú để MỌI LƯỢT sau đều gửi cho AI.
     // Đợt 73: cùng object này được app phân tích thành cơ chế tùy chỉnh thật.
-    const traits = { personality, superpower, customPower, perks: [] }
+    const traits = sanitizeTraitsForMode({ personality, superpower, customPower, perks: [] }, storyTone)
     setPlayerTraits(traits)
+    const journeyTrainerId = resetTrainerIdentity()
     setPlayerMon(null)
     setParty([])
     // Đợt 71: hòm PC cũng phải sạch khi bắt đầu hành trình mới, không thì
     // Pokémon của run trước còn nằm trong máy tính của run sau.
     setPcBox([])
+    setPokedexRecords({})
+    setWorldProgress({ ...DEFAULT_WORLD_PROGRESS, wanted: { ...DEFAULT_WORLD_PROGRESS.wanted } })
+    setPokemonLife({ ...DEFAULT_POKEMON_LIFE })
+    setTradeState({ ...DEFAULT_TRADE_STATE })
+    clearMemory()
+    clearNotebook()
+    clearSummary()
+    resetDirectorState()
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
     // tích/độ no của run trước dính sang run mới (vì đều persist) — hành
     // trình MỚI phải sạch sẽ từ đầu.
@@ -331,7 +351,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       appearance.trim() ? `Ngoại hình: ${appearance.trim()}.` : '',
       `Thân phận: ${identity.name} — ${identity.desc} Để thân phận thấm vào bối cảnh một cách TỰ NHIÊN, không kể lể dồn dập.`,
       // Tính cách + siêu năng lực (đợt 61).
-      buildCharacterTraitsNote({ personality, superpower, customPower, perks: [] }),
+      buildCharacterTraitsNote(traits),
       originArea
         ? `Xuất thân: ${originArea.name}, vùng ${originRegion?.name}. Mở đầu diễn ra tại/gắn với nơi này (trừ khi tình huống mở đầu nói khác).`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
@@ -380,8 +400,14 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
       }
-      const parsed = parseStoryStateTags(cleaned)
+      let parsed = parseStoryStateTags(cleaned)
+      parsed = validateStateAgainstProse(parsed, parsed.cleaned, { playerName: finalName, party: [] }).parsed
       const openingText = parsed.cleaned
+      setWorldProgress(applyWorldDirectives(DEFAULT_WORLD_PROGRESS, parsed, {
+        mode: storyTone, turn: 2, date: { day: d, month: m, year: y, part: 'sáng' },
+      }))
+      for (const npc of parsed.npcs ?? []) upsertNpc(npc.name, npc.fields, 2)
+      for (const fact of parsed.facts ?? []) addFact(fact.key, fact.text, 2)
       // Một số preset có regex loại khối lựa chọn khỏi prompt/đầu ra hoặc model
       // quên tuân thủ. Chỉ khi reply chính không có lựa chọn mới gọi thêm một
       // lượt ngắn để màn mở đầu cũng luôn có nút hành động phù hợp chương.
@@ -404,18 +430,17 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       // AI lỡ cấp Pokémon ngay mở đầu (đã cấm nhưng đề phòng) → vẫn tôn trọng tag.
       for (const pk of parsed.pokemons ?? []) {
         const entry = pokedexSpecies.find((sp) => sp.name.toLowerCase() === pk.species.toLowerCase())
-        if (entry) {
+        const access = legendaryAccess(entry, DEFAULT_WORLD_PROGRESS, storyTone)
+        if (entry && access.allowed) {
           const { buildMonSmart } = await import('../data/pokemonSpecies.js')
           // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
-          const mon = applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), traits)
+          const mon = ensurePokemonIdentity(applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), traits), journeyTrainerId)
           setPlayerMon((cur) => cur ?? mon)
           setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
+        } else if (entry) {
+          console.warn(`[intro] Chặn ${entry.name}: ${access.reason}`)
         }
       }
-      clearMemory()
-      clearNotebook()
-      clearSummary()
-      resetDirectorState()
       const embCfg = memoryApiConfig?.embedding
       if (embCfg?.baseUrl && embCfg?.model) {
         rememberExchange(
@@ -511,7 +536,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
     <div className="wizard-wrap" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div className="panel panel--wizard" style={{ width: 'min(720px, 100%)', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
         {/* Thanh tiến trình */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, overflowX: 'auto', paddingBottom: 3 }}>
           {STEPS.map((s2, i) => (
             <React.Fragment key={s2.key}>
               <button
@@ -541,21 +566,56 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           ))}
         </div>
         <h2 className="page-title" style={{ marginTop: 8 }}>
+          {stepKey === 'mode' && 'Chọn luật vận hành cho cả hành trình'}
           {stepKey === 'profile' && 'Bạn là ai?'}
           {stepKey === 'identity' && 'Thân phận — xuất phát điểm xã hội của bạn'}
           {stepKey === 'traits' && 'Tính cách & năng lực — nhân vật của bạn là người thế nào?'}
           {stepKey === 'origin' && 'Quê nhà & thời điểm bắt đầu'}
-          {stepKey === 'tone' && 'Tông truyện — bạn muốn thế giới này vận hành thế nào?'}
+          {stepKey === 'tone' && 'Thể loại — câu chuyện mang hương vị nào?'}
           {stepKey === 'opening' && 'Câu chuyện bắt đầu thế nào?'}
         </h2>
 
         <div style={{ overflowY: 'auto', flex: 1, paddingRight: 4 }}>
+          {/* Chế độ là lựa chọn đầu tiên và là luật dữ liệu, không chỉ giọng văn. */}
+          {stepKey === 'mode' && (
+            <div>
+              <p className="page-subtitle">
+                Chế độ quyết định luật dữ liệu, tiến trình và những gì chính văn được phép làm. Lựa chọn này được khoá theo hành trình để save và trao đổi không bị lách luật.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {GAME_MODES.map((mode) => (
+                  <button
+                    key={mode.key}
+                    onClick={() => {
+                      setStoryTone((tone) => ({ ...tone, difficulty: mode.key }))
+                      if (mode.key === 'realistic' && superpower === 'custom') {
+                        setSuperpower('none')
+                        setCustomPower('')
+                      }
+                    }}
+                    style={{
+                      textAlign: 'left', border: `1px solid ${normalizeGameMode(storyTone) === mode.key ? 'var(--amber)' : 'var(--line)'}`,
+                      background: normalizeGameMode(storyTone) === mode.key ? 'var(--bg-deep)' : 'transparent',
+                      borderRadius: 12, padding: '14px 16px', cursor: 'pointer', color: 'var(--text-main)',
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, color: normalizeGameMode(storyTone) === mode.key ? 'var(--amber)' : 'var(--text-hi)' }}>{mode.label} · {mode.short}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-mid)', lineHeight: 1.6, marginTop: 5 }}>{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: 12, padding: 11, border: '1px dashed var(--line)', borderRadius: 10, color: 'var(--text-dim)', fontSize: 11, lineHeight: 1.65 }}>
+                Giao dịch multiplayer thử nghiệm chỉ xuất hiện ở <b style={{ color: 'var(--text-hi)' }}>Thực tế</b>. Anime và Sảng văn có thể linh hoạt trong lời kể nhưng không được tạo gói chuyển quyền sở hữu Pokémon.
+              </div>
+            </div>
+          )}
+
           {/* ===== TRANG 1: HỒ SƠ ===== */}
           {stepKey === 'profile' && (
             <>
               <p className="page-subtitle">
-                Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Giọng văn và
-                mức độ khắc nghiệt của thế giới do bạn chọn ở bước "Tông truyện" phía sau.
+                Điền thông tin cơ bản. Để trống phần nào cũng được — AI sẽ tự lo phần đó. Luật thế giới
+                đã được chốt ở bước Chế độ; preset nhân vật bên dưới không thể đổi lựa chọn ấy.
               </p>
               {/* NẠP hồ sơ nhân vật đã lưu (đợt 61) */}
               {presets.length > 0 && (
@@ -722,7 +782,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 Siêu năng lực (tuỳ chọn)
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {SUPERPOWERS.map((p2) => (
+                {SUPERPOWERS.filter((p2) => normalizeGameMode(storyTone) !== 'realistic' || p2.key !== 'custom').map((p2) => (
                   <button
                     key={p2.key}
                     onClick={() => setSuperpower(p2.key)}
@@ -774,10 +834,10 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                   fontSize: 11, color: 'var(--text-mid)', lineHeight: 1.7,
                 }}
               >
-                <strong style={{ color: 'var(--mint)' }}>⚙ Luật cơ chế chỉ nhận từ “Tự mô tả…”</strong><br />
-                Max IV/EV, nhân EXP, Kẹo Hiếm vô hạn, cộng tỉ lệ bắt và các kiểu cheat tương tự
-                chỉ chạy khi bạn chủ động chọn <strong>Tự mô tả…</strong> rồi viết rõ trong ô năng lực.
-                Các siêu năng lực có sẵn chỉ ảnh hưởng lời kể, không tự sửa số liệu game.
+                <strong style={{ color: 'var(--mint)' }}>⚙ Luật năng lực theo chế độ</strong><br />
+                {normalizeGameMode(storyTone) === 'realistic'
+                  ? 'Thực tế: chỉ chọn đúng một năng lực dựng sẵn (hoặc người thường). Không có ô tự tạo, Max IV/EV, nhân EXP, vật phẩm vô hạn hay cheat.'
+                  : 'Anime/Sảng văn: năng lực tự mô tả có thể tạo cơ chế số liệu nếu viết rõ. Các năng lực dựng sẵn vẫn chủ yếu ảnh hưởng nhập vai.'}
               </div>
             </div>
           )}
@@ -832,21 +892,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
           {/* ===== TRANG 4: MỞ ĐẦU + TỔNG KẾT ===== */}
           {stepKey === 'tone' && (
             <div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {DIFFICULTIES.map((d) => (
-                  <button
-                    key={d.key}
-                    onClick={() => setStoryTone((t) => ({ ...t, difficulty: d.key }))}
-                    style={{
-                      textAlign: 'left', border: `1px solid ${storyTone.difficulty === d.key ? 'var(--amber)' : 'var(--line)'}`,
-                      background: storyTone.difficulty === d.key ? 'var(--bg-deep)' : 'transparent',
-                      borderRadius: 10, padding: '12px 14px', cursor: 'pointer', color: 'var(--text-main)',
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: 14, color: storyTone.difficulty === d.key ? 'var(--amber)' : 'var(--text-main)' }}>{d.label}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-mid)', marginTop: 4 }}>{d.desc}</div>
-                  </button>
-                ))}
+              <div style={{ padding: '9px 11px', border: '1px solid var(--line)', borderRadius: 9, color: 'var(--text-mid)', fontSize: 11.5 }}>
+                Chế độ đã chọn: <b style={{ color: 'var(--amber)' }}>{GAME_MODES.find((m) => m.key === normalizeGameMode(storyTone))?.label}</b>. Bước này chỉ chọn thể loại; không thay luật dữ liệu.
               </div>
               <div style={{ marginTop: 16 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', marginBottom: 8 }}>
@@ -877,8 +924,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                   })}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
-                  Độ khó quyết định giọng văn & mức rủi ro (Thực tế: có thể chết → game over). Thể loại là
-                  gia vị AI sẽ ưu tiên dệt vào truyện. Đổi được giữa chừng trong Cài đặt sau này nếu cần.
+                  Thể loại là gia vị AI ưu tiên dệt vào truyện; luật chế độ đã được chọn từ bước đầu.
                 </div>
               </div>
             </div>
@@ -926,6 +972,8 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
                 <div style={{ fontSize: 12.5, lineHeight: 1.7, color: 'var(--text-mid)' }}>
                   <b style={{ color: 'var(--text-hi)' }}>{trainerName.trim() || 'Nhà Huấn Luyện'}</b>
                   {gender && ` · ${gender}`}{age && ` · ${age} tuổi`}
+                  <br />
+                  Chế độ: <b style={{ color: 'var(--amber)' }}>{GAME_MODES.find((m) => m.key === normalizeGameMode(storyTone))?.label}</b>
                   <br />
                   Thân phận: <b style={{ color: 'var(--text-hi)' }}>{identity.name}</b>
                   <br />

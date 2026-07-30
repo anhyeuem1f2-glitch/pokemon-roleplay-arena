@@ -6,6 +6,12 @@ import RegionMap from './RegionMap.jsx'
 import MusicWidget from './MusicWidget.jsx'
 import NotebookModal from './NotebookModal.jsx'
 import { getWeather } from '../data/weather.js'
+import PokedexModal from './PokedexModal.jsx'
+import { pokedexProgress } from '../data/pokedexProgress.js'
+import WorldProgressModal from './WorldProgressModal.jsx'
+import PokemonLifeModal from './PokemonLifeModal.jsx'
+import TradeModal from './TradeModal.jsx'
+import { modeAllowsTrading } from '../data/gameModes.js'
 
 // ============ CỘT HUD BÊN PHẢI (đợt 26) ============
 // Theo yêu cầu chuyển Cài đặt / Màn hình chính / Bản đồ sang PHẢI (bố cục
@@ -14,14 +20,19 @@ import { getWeather } from '../data/weather.js'
 
 export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const [saveOpen, setSaveOpen] = useState(false)
-  const { playerLocation, setPlayerLocation, storyDate,
+  const { playerLocation, setPlayerLocation, storyDate, pokedexRecords, pokedexSpecies, worldProgress, pokemonLife, storyTone,
   } = useGame()
   const [mapOpen, setMapOpen] = useState(false)
   const [notebookOpen, setNotebookOpen] = useState(false)
+  const [pokedexOpen, setPokedexOpen] = useState(false)
+  const [progressOpen, setProgressOpen] = useState(false)
+  const [lifeOpen, setLifeOpen] = useState(false)
+  const [tradeOpen, setTradeOpen] = useState(false)
 
   const region = playerLocation ? getRegion(playerLocation.regionKey) : null
   const area = playerLocation ? getArea(playerLocation.regionKey, playerLocation.areaKey) : null
   const areaIndex = region && area ? region.areas.findIndex((a) => a.key === area.key) : -1
+  const dexProgress = pokedexProgress(pokedexRecords, pokedexSpecies)
 
   return (
     <aside
@@ -107,6 +118,22 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
         📓 Sổ tay cốt truyện
       </button>
 
+      <button className="btn" style={{ width: '100%' }} onClick={() => setPokedexOpen(true)}>
+        📘 Pokédex · thấy {dexProgress.seen} / bắt {dexProgress.caught}
+      </button>
+
+      <button className="btn" style={{ width: '100%' }} onClick={() => setProgressOpen(true)}>
+        🏅 Nhật ký · {worldProgress.badges.length} huy hiệu / {worldProgress.quests.filter((q) => q.status === 'active').length} việc
+      </button>
+
+      <button className="btn" style={{ width: '100%' }} onClick={() => setLifeOpen(true)}>
+        ⛺ Đời sống · {pokemonLife.eggs.length} trứng
+      </button>
+
+      {modeAllowsTrading(storyTone) && <button className="btn" style={{ width: '100%', borderColor: 'var(--amber)' }} onClick={() => setTradeOpen(true)}>
+        ⇄ Trao đổi (Thực tế)
+      </button>}
+
       <div style={{ flex: 1 }} />
 
       {/* Nút hệ thống */}
@@ -124,6 +151,10 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       </button>
 
       {notebookOpen && <NotebookModal onClose={() => setNotebookOpen(false)} />}
+      {pokedexOpen && <PokedexModal onClose={() => setPokedexOpen(false)} />}
+      {progressOpen && <WorldProgressModal onClose={() => setProgressOpen(false)} />}
+      {lifeOpen && <PokemonLifeModal onClose={() => setLifeOpen(false)} />}
+      {tradeOpen && <TradeModal onClose={() => setTradeOpen(false)} />}
 
       {/* Modal bản đồ đầy đủ */}
       {mapOpen && (

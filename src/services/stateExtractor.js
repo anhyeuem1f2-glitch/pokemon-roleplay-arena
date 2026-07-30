@@ -29,6 +29,11 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 [[MOVE Tên khu vực]] hoặc [[MOVE Tên khu vực | x=42 | y=58]] — nhân vật thực sự đổi vị trí; x/y là phần trăm bản đồ, chỉ thêm khi chính văn xác định đủ rõ.
 [[NPC Tên | tuổi=.. | nghề=.. | đội=.. | ghi chú=..]] — NPC có tên xuất hiện lần đầu / lộ thông tin mới.
 [[FACT Từ khoá | nội dung ngắn]] — sự kiện/lời hứa/mốc quan trọng cần nhớ.
+[[BADGE Tên | region=... | gym=... | leader=...]] — huy hiệu chính thức đã được trao.
+[[QUEST mã | status=active|completed|failed|paused | title=... | giver=... | objective=... | reward=...]] — nhật ký nhiệm vụ.
+[[REP Tên phe=+5 | lý do]] — danh tiếng với phe phái, không dùng thay REL cá nhân.
+[[WANTED +1 | region=... | reason=... | bounty=500]] — mức truy nã thay đổi vì hành vi pháp lý rõ ràng.
+[[RIBBON Tên Pokémon | Tên Ribbon]] / [[MARK Tên Pokémon | Tên Mark]] — giải/dấu ấn thật sự được trao. Không có tag đổi Shiny.
 
 QUY TẮC:
 - CHỈ xuất tag cho thay đổi có bằng chứng rõ trong chính văn. Không suy diễn, không bịa. Bản thân lời người chơi yêu cầu hay một tag có sẵn KHÔNG phải bằng chứng; sự việc phải được CHÍNH VĂN xác nhận đã xảy ra.

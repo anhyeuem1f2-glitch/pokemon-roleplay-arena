@@ -10,10 +10,20 @@ import { normalizeHeldItem } from '../data/pokemonHeldItems.js'
 import { normalizeFriendship } from '../data/pokemonFriendship.js'
 import { loadStoredMessages, persistMessagesSafely } from '../utils/storageOptimizer.js'
 import { repairSaveSlots } from '../utils/saveManager.js'
+import { normalizePokedexRecords, recordPokedexEncounter } from '../data/pokedexProgress.js'
+import { normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
+import { createStableId, ensurePokemonIdentity, publicTrainerCode } from '../data/persistentIdentity.js'
+import { DEFAULT_WORLD_PROGRESS, normalizeWorldProgress } from '../data/worldProgress.js'
+import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.js'
+import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
 const GameContext = createContext(null)
+
+function storedGameMode() {
+  try { return normalizeGameMode(JSON.parse(localStorage.getItem('trainer-arena:story-tone') || '{}')) } catch { return 'anime' }
+}
 
 export function GameProvider({ children }) {
   // --- Cấu hình API (OpenAI-compatible) ---
@@ -73,7 +83,7 @@ export function GameProvider({ children }) {
         const parsed = JSON.parse(saved)
         // Đợt 74: thiên phú cơ chế dựng sẵn bị gỡ. Mọi cheat chỉ có hiệu lực
         // khi người chơi chọn "Tự mô tả…" và viết trong customPower.
-        return { ...parsed, perks: [] }
+        return sanitizeTraitsForMode({ ...parsed, perks: [] }, storedGameMode())
       }
     } catch { /* ignore */ }
     return { personality: [], superpower: 'none', customPower: '', perks: [] }
@@ -81,7 +91,7 @@ export function GameProvider({ children }) {
   const setPlayerTraits = useCallback((next) => {
     setPlayerTraitsState((cur) => {
       const raw = typeof next === 'function' ? next(cur) : next
-      const resolved = { ...(raw ?? {}), perks: [] }
+      const resolved = sanitizeTraitsForMode({ ...(raw ?? {}), perks: [] }, storedGameMode())
       try { localStorage.setItem('trainer-arena:player-traits', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
@@ -102,6 +112,16 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+  // Đổi/nạp chế độ Thực tế phải dọn cheat ngay cả khi traits tới từ preset
+  // hay save cũ. Đây là chốt tầng state, không phụ thuộc giao diện.
+  useEffect(() => {
+    setPlayerTraitsState((cur) => {
+      const resolved = sanitizeTraitsForMode(cur, storyTone)
+      try { localStorage.setItem('trainer-arena:player-traits', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return JSON.stringify(resolved) === JSON.stringify(cur) ? cur : resolved
+    })
+  }, [storyTone?.difficulty])
 
   // --- Lịch sử chat roleplay (đợt 46: PERSIST — F5 không mất truyện) ---
   // Trước đây messages chỉ sống trong phiên: reload giữa chừng là mất sạch
@@ -154,15 +174,29 @@ export function GameProvider({ children }) {
     try { localStorage.setItem('trainer-arena:player-name', val ?? '') } catch { /* ignore */ }
   }, [])
 
+  // Mã trainer thuộc về hành trình/save và không đổi giữa các lần reload.
+  const [trainerId, setTrainerIdState] = useState(() => {
+    try { return localStorage.getItem('trainer-arena:trainer-id') || createStableId('trainer') } catch { return createStableId('trainer') }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('trainer-arena:trainer-id', trainerId) } catch { /* ignore */ }
+  }, [trainerId])
+  const resetTrainerIdentity = useCallback(() => {
+    const next = createStableId('trainer')
+    setTrainerIdState(next)
+    return next
+  }, [])
+  const trainerCode = publicTrainerCode(trainerId)
+
   // --- State chiến đấu ---
   // playerMon persist (đợt 46): party đã persist mà con đang ra trận thì
   // không → F5 xong HUD hiện nhầm mon mẫu dù đội hình thật vẫn còn.
   const [playerMon, setPlayerMonState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:player-mon')
-      if (saved !== null) return JSON.parse(saved) // có thể là null hợp lệ (tay trắng)
+      if (saved !== null) return ensurePokemonIdentity(JSON.parse(saved), trainerId) // có thể là null hợp lệ (tay trắng)
     } catch { /* ignore */ }
-    return SAMPLE_PLAYER_MON
+    return ensurePokemonIdentity(SAMPLE_PLAYER_MON, trainerId)
   })
   const setPlayerMon = useCallback((next) => {
     setPlayerMonState((cur) => {
@@ -171,11 +205,11 @@ export function GameProvider({ children }) {
       // pokemonSpecies.js — bất kỳ luồng nào ghi đè con đang ra trận bằng một
       // bản chụp CŨ HƠN (API phụ chạy nền, callback giữ closure cũ...) đều bị
       // giữ lại mốc level/exp cao hơn thay vì để người chơi mất công sức.
-      const resolved = guardMonRegression(cur, raw)
+      const resolved = ensurePokemonIdentity(guardMonRegression(cur, raw), trainerId)
       try { localStorage.setItem('trainer-arena:player-mon', JSON.stringify(resolved ?? null)) } catch { /* ignore */ }
       return resolved
     })
-  }, [])
+  }, [trainerId])
   const [enemyMon, setEnemyMon] = useState(SAMPLE_ENEMY_MON)
 
   const resetBattle = useCallback(() => {
@@ -452,7 +486,7 @@ export function GameProvider({ children }) {
   const [party, setPartyState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:party')
-      return saved ? JSON.parse(saved) : []
+      return saved ? JSON.parse(saved).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
     } catch {
       return []
     }
@@ -465,11 +499,11 @@ export function GameProvider({ children }) {
       // Đợt 70: cùng chốt chặn tụt cấp như setPlayerMon, áp cho từng cá thể
       // trong đội (khớp theo uid). Người chơi báo HUD tụt về Lv5 — đội hình
       // cũng nằm trên đường ghi đè đó.
-      const resolved = guardPartyRegression(cur, raw)
+      const resolved = guardPartyRegression(cur, raw).map((mon) => ensurePokemonIdentity(mon, trainerId))
       try { localStorage.setItem('trainer-arena:party', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
-  }, [])
+  }, [trainerId])
 
   // --- HÒM PC (đợt 71): Pokémon gửi vào máy tính, không giới hạn 6 như đội.
   // Trước đây bắt được con thứ 7 là app chỉ ghi log "được gửi về nhà" rồi
@@ -478,15 +512,52 @@ export function GameProvider({ children }) {
   const [pcBox, setPcBoxState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:pc-box')
-      return saved ? JSON.parse(saved) : []
+      return saved ? JSON.parse(saved).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
     } catch {
       return []
     }
   })
   const setPcBox = useCallback((next) => {
     setPcBoxState((cur) => {
-      const resolved = typeof next === 'function' ? next(cur) : next
+      const resolved = (typeof next === 'function' ? next(cur) : next).map((mon) => ensurePokemonIdentity(mon, trainerId))
       try { localStorage.setItem('trainer-arena:pc-box', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [trainerId])
+
+  // --- Tiến trình thế giới có cấu trúc (đợt 87): huy hiệu, nhiệm vụ, phe
+  // phái/danh tiếng, luật pháp và truy nã. ---
+  const [worldProgress, setWorldProgressState] = useState(() => {
+    try { return normalizeWorldProgress(JSON.parse(localStorage.getItem('trainer-arena:world-progress') || 'null')) } catch { return { ...DEFAULT_WORLD_PROGRESS } }
+  })
+  const setWorldProgress = useCallback((next) => {
+    setWorldProgressState((cur) => {
+      const resolved = normalizeWorldProgress(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:world-progress', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
+  // Trứng/cắm trại/Contest là state riêng để không nhồi dữ liệu cá thể vào
+  // nhật ký nhiệm vụ. Ribbon/Mark vẫn nằm trên chính Pokémon.
+  const [pokemonLife, setPokemonLifeState] = useState(() => {
+    try { return normalizePokemonLife(JSON.parse(localStorage.getItem('trainer-arena:pokemon-life') || 'null')) } catch { return { ...DEFAULT_POKEMON_LIFE } }
+  })
+  const setPokemonLife = useCallback((next) => {
+    setPokemonLifeState((cur) => {
+      const resolved = normalizePokemonLife(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:pokemon-life', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
+  const [tradeState, setTradeStateState] = useState(() => {
+    try { return normalizeTradeState(JSON.parse(localStorage.getItem('trainer-arena:trade-state') || 'null')) } catch { return { ...DEFAULT_TRADE_STATE } }
+  })
+  const setTradeState = useCallback((next) => {
+    setTradeStateState((cur) => {
+      const resolved = normalizeTradeState(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:trade-state', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
   }, [])
@@ -586,6 +657,40 @@ export function GameProvider({ children }) {
   const [pokedexStatus, setPokedexStatus] = useState('idle') // idle|loading|ready|error
   const [pokedexError, setPokedexError] = useState(null)
 
+  // --- Pokédex HÀNH TRÌNH (đợt 86): khác với database loài ở trên, đây là
+  // tiến độ seen/caught của đúng save hiện tại. Khoá trainer-arena:* nên tự
+  // đi cùng ba ô save và file export mà không phải sửa saveManager.
+  const [pokedexRecords, setPokedexRecordsState] = useState(() => {
+    try {
+      return normalizePokedexRecords(JSON.parse(localStorage.getItem('trainer-arena:pokedex-records') || '{}'))
+    } catch {
+      return {}
+    }
+  })
+  const setPokedexRecords = useCallback((next) => {
+    setPokedexRecordsState((cur) => {
+      const resolved = normalizePokedexRecords(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:pokedex-records', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+  const markPokedexSeen = useCallback((subject, meta = {}) => {
+    setPokedexRecordsState((cur) => {
+      const next = recordPokedexEncounter(cur, subject, { ...meta, caught: false }, pokedexSpecies)
+      if (next === cur) return cur
+      try { localStorage.setItem('trainer-arena:pokedex-records', JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [pokedexSpecies])
+  const markPokedexCaught = useCallback((subject, meta = {}) => {
+    setPokedexRecordsState((cur) => {
+      const next = recordPokedexEncounter(cur, subject, { ...meta, caught: true }, pokedexSpecies)
+      if (next === cur) return cur
+      try { localStorage.setItem('trainer-arena:pokedex-records', JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [pokedexSpecies])
+
   useEffect(() => {
     let cancelled = false
     setPokedexStatus('loading')
@@ -607,6 +712,23 @@ export function GameProvider({ children }) {
       cancelled = true
     }
   }, [])
+
+  // Save cũ đã sở hữu Pokémon trước đợt 86 phải tự hiện là "đã bắt". Effect
+  // cũng là lưới an toàn cho mọi đường nhận Pokémon hiện tại (battle, Safari,
+  // [[POKEMON]], PC); không cần tin model khai thêm tag Pokédex.
+  useEffect(() => {
+    const owned = [...(party ?? []), ...(pcBox ?? []), playerMon].filter(Boolean)
+    if (!owned.length) return
+    setPokedexRecordsState((cur) => {
+      let next = cur
+      for (const mon of owned) {
+        next = recordPokedexEncounter(next, mon, { caught: true, source: 'owned' }, pokedexSpecies)
+      }
+      if (next === cur) return cur
+      try { localStorage.setItem('trainer-arena:pokedex-records', JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [party, pcBox, playerMon, pokedexSpecies])
 
   // Đợt 81: nâng save cũ lên Ability + thân mật + metadata trang bị.
   // Eviolite cần biết cá thể còn tiến hóa được hay không; held item cũ có thể
@@ -748,6 +870,9 @@ export function GameProvider({ children }) {
     setGameStarted,
     playerName,
     setPlayerName,
+    trainerId,
+    trainerCode,
+    resetTrainerIdentity,
     playerMon,
     setPlayerMon,
     enemyMon,
@@ -781,6 +906,12 @@ export function GameProvider({ children }) {
     setParty,
     pcBox,
     setPcBox,
+    worldProgress,
+    setWorldProgress,
+    pokemonLife,
+    setPokemonLife,
+    tradeState,
+    setTradeState,
     healAll,
     relationships,
     setRelationships,
@@ -789,6 +920,10 @@ export function GameProvider({ children }) {
     pokedexSpecies,
     pokedexStatus,
     pokedexError,
+    pokedexRecords,
+    setPokedexRecords,
+    markPokedexSeen,
+    markPokedexCaught,
     movesDb,
     movesDbStatus,
     movesDbError,

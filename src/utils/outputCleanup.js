@@ -1,4 +1,5 @@
 import { parseRegexLiteral } from './presetImport.js'
+import { stripActionChoiceBlocks } from './actionChoices.js'
 
 // Làm sạch nội dung AI trả về TRƯỚC khi hiển thị/lưu.
 //
@@ -26,7 +27,7 @@ function extractContent(text) {
   if (openMatch) {
     let rest = text.slice(text.search(/<content>/i) + openMatch[0].length)
     // cắt ở thẻ mở của bất kỳ block hậu kỳ nào (chữ cái/ gạch dưới/ khoảng trắng).
-    rest = rest.split(/<(?:\/?\s*)?(?:Thúc đẩy|thinking|Technical_Footer|danmu|disclaimer|schedule|theater|recap|parallel|choice|status|Hậu Trường|Bảng)/i)[0]
+    rest = rest.split(/<(?:\/?\s*)?(?:Thúc đẩy|thinking|Technical_Footer|danmu|disclaimer|schedule|theater|recap|parallel|actions?|action_choices?|choices?|choice|selection|status|Hậu Trường|Bảng)/i)[0]
     return rest
   }
   return null // KHÔNG có content
@@ -44,6 +45,8 @@ const STRIP_BLOCKS = [
   /<recap>[\s\S]*?<\/recap>/gi,
   /<theater>[\s\S]*?<\/theater>/gi,
   /<schedule[^>]*>[\s\S]*?<\/schedule[^>]*>/gi,
+  /<(?:actions?|action_choices?|choices?|choice|selection)\b[^>]*>[\s\S]*?<\/(?:actions?|action_choices?|choices?|choice|selection)\s*>/gi,
+  /<details\b[^>]*>\s*<summary\b[^>]*>[^<]*(?:tùy\s*chọn|lựa\s*chọn)[^<]*<\/summary>[\s\S]*?<\/details>/gi,
 ]
 
 const DEFAULT_SCRIPTS = [
@@ -146,6 +149,10 @@ export function cleanAiOutput(text, customScripts) {
     }
     for (const re of STRIP_BLOCKS) cleaned = cleaned.replace(re, '')
   }
+
+  // Lựa chọn hành động là dữ liệu UI, không phải chính văn. Bóc riêng từ
+  // reply gốc trước khi gọi hàm này; ở đây gỡ mọi định dạng preset còn sót.
+  cleaned = stripActionChoiceBlocks(cleaned)
 
   // Pipeline song ngữ jp/vn + comment HTML điều khiển (đợt 45).
   cleaned = resolveDualLanguage(cleaned)

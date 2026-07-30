@@ -5,6 +5,7 @@ import { buildPresetPrompt } from './presetImport.js'
 import { buildSystemPrompt, applyPlaceholders, BATTLE_INSTRUCTION } from './promptBuilder.js'
 import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
 import { DIRECTOR_WORLD_INSTRUCTION } from '../data/storyDirector.js'
+import { ACTION_CHOICES_INSTRUCTION } from './actionChoices.js'
 
 /**
  * Build apiMessages + callOptions cho 1 lượt gọi API CHÍNH — dùng chung giữa
@@ -61,6 +62,7 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       // người chơi — chèn cả khi dùng preset để preset không đè mất.
       { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
       { role: 'system', content: PROSE_QUALITY_NOTE },
+      { role: 'system', content: ACTION_CHOICES_INSTRUCTION },
       ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
       ...(wbActive.length
         ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — canon người dùng; TÍNH CÁCH & vai trò nhân vật trong đây phải được tôn trọng kể cả khi văn phong preset khác đi):\n${wbActive.join('\n\n')}` }]
@@ -81,6 +83,7 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
     // Đạo diễn tình huống (đợt 31) — nhánh mặc định.
     { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
     { role: 'system', content: PROSE_QUALITY_NOTE },
+    { role: 'system', content: ACTION_CHOICES_INSTRUCTION },
     ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
     ...(wbActive.length
       ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — đây là canon người dùng thiết lập; TÍNH CÁCH, ngoại hình, vai trò của nhân vật trong đây PHẢI được tôn trọng kể cả khi văn phong preset có xu hướng khác):\n${wbActive.join('\n\n')}` }]

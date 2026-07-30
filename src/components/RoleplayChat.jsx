@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion, polishProse } from '../services/aiClient.js'
 import { extractMissingStateTags } from '../services/stateExtractor.js'
+import { generateActionChoices } from '../services/actionChoiceGenerator.js'
 import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { buildScanText } from '../utils/lorebook.js'
@@ -13,6 +14,7 @@ import {
   sharesBattleExpWithParty, syncTraitGrantedItems,
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
+import { extractActionChoices } from '../utils/actionChoices.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget, resolveOwnedSpeciesTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
 import { buildMonSmart, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution } from '../data/pokemonSpecies.js'
@@ -28,6 +30,7 @@ import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
+import ActionChoices from './ActionChoices.jsx'
 import { renderInlineFormatting, stripInlineTags } from '../utils/inlineFormat.jsx'
 import SafariModal from './SafariModal.jsx'
 import { isSafariArea } from '../data/regions.js'
@@ -442,6 +445,7 @@ export default function RoleplayChat() {
     setInventory,
   } = useGame()
   const [input, setInput] = useState('')
+  const inputRef = useRef(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [cardOpen, setCardOpen] = useState(false)
@@ -469,6 +473,7 @@ export default function RoleplayChat() {
   // Đợt 77: khi không có slot API cập nhật biến riêng, luân phiên API phụ 1/2
   // đang rảnh thay vì dồn mọi lượt vào API chính. Mỗi lượt chỉ gọi MỘT API.
   const stateApiRoundRobinRef = useRef(0)
+  const actionChoiceApiRoundRobinRef = useRef(0)
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
   useEffect(() => { latestPartyRef.current = party }, [party])
   useEffect(() => { latestInventoryRef.current = inventory }, [inventory])
@@ -1001,7 +1006,7 @@ export default function RoleplayChat() {
       // để AI chủ động dựng cảnh sống động quanh hành động của người chơi.
       history = [...history, {
         role: 'user',
-        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng, Pokémon xung quanh làm gì đó theo bản tính, âm thanh/mùi/thời tiết, sự cố nhỏ chen ngang, câu chuyện nghe lỏm. Thế giới TIẾP DIỄN dù người chơi làm gì. Không hỏi lại người chơi, không liệt kê lựa chọn, không nhắc tới ghi chú này.]',
+        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng, Pokémon xung quanh làm gì đó theo bản tính, âm thanh/mùi/thời tiết, sự cố nhỏ chen ngang, câu chuyện nghe lỏm. Thế giới TIẾP DIỄN dù người chơi làm gì. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn phải tạo riêng theo chỉ dẫn hệ thống. Không nhắc tới ghi chú này.]',
       }]
 
       const nudge = maybeMakeNudge({
@@ -1030,6 +1035,9 @@ export default function RoleplayChat() {
       })
 
       const reply = await chatCompletion(configOverride || apiConfig, apiMessages, callOptions)
+      // Đợt 79: preset có thể dùng <choice>, <selection> hoặc <details>. Bóc
+      // từ reply GỐC trước khi outputCleanup vứt scaffold hậu kỳ.
+      const replyActionChoices = extractActionChoices(reply)
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
         throw new Error(
@@ -1113,6 +1121,18 @@ export default function RoleplayChat() {
           console.warn('[polish] bỏ qua chau chuốt:', polErr.message)
         }
       }
+      // Lựa chọn chỉ hiện ở nhịp truyện bình thường. Khi app đang chờ
+      // Battle/Shop/Pokécenter thì các nút tương tác thật phải là nguồn hành
+      // động duy nhất, tránh gợi ý kể vượt qua một kết quả chưa xảy ra.
+      const resolvedPokecenter = stateParsed.pokecenter ?? (detectPokecenter(displayText).inside
+        ? { name: 'Trung tâm Pokémon' }
+        : null)
+      const actionChoicesBlocked = displayText.includes(BATTLE_MARKER)
+        || stateParsed.shops.length > 0
+        || Boolean(resolvedPokecenter)
+      const actionChoices = actionChoicesBlocked ? [] : replyActionChoices
+      const actionChoicesPending = !actionChoicesBlocked && actionChoices.length === 0
+
       // Meta từng lượt (đợt 48 — học card PNTT): biến đã áp + suy nghĩ +
       // văn gốc, xem lại bằng nút 🧬 / chuột phải → "Biến cập nhật".
       const turnMeta = {
@@ -1134,18 +1154,15 @@ export default function RoleplayChat() {
           role: 'assistant',
           content: displayText,
           meta: turnMeta,
+          actionChoices,
+          actionChoicesPending,
           ...(stateParsed.shops.length > 0
             ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name, shopValidated: true }
             : {}),
           // ĐỢT 71 — TRUNG TÂM POKÉMON. Ưu tiên tag [[POKECENTER]] AI khai;
           // model quên khai thì DÒ TỪ CHÍNH VĂN (quy tắc số 5: không tin
           // model tuân thủ, phải có đường bắt ở phía app).
-          ...(() => {
-            const pc = stateParsed.pokecenter ?? (detectPokecenter(displayText).inside
-              ? { name: 'Trung tâm Pokémon' }
-              : null)
-            return pc ? { pokecenter: pc.name } : {}
-          })(),
+          ...(resolvedPokecenter ? { pokecenter: resolvedPokecenter.name } : {}),
         },
       ])
       // Tracking vị trí: chính văn nhắc địa danh nào trong bản đồ 9 vùng thì
@@ -1159,6 +1176,53 @@ export default function RoleplayChat() {
         latestPlayerLocationRef.current = movedTo
         setPlayerLocation(movedTo)
       }
+
+      // Preset/model nào không chịu xuất khối lựa chọn thì dùng một API phụ
+      // lúc trình duyệt rảnh. Ưu tiên hai slot phụ 1/2, sau đó State API, cuối
+      // cùng mới dùng API chính. Kết quả gắn bằng id tin và bị bỏ nếu người
+      // chơi đã sửa/xoá/reroll, cùng nguyên tắc chống closure cũ của state API.
+      if (actionChoicesPending) {
+        const actionPool = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose, stateApiConfig]
+          .filter((cfg) => cfg?.baseUrl && cfg?.model)
+          .map((cfg) => ({ ...apiConfig, ...cfg }))
+        const actionCfg = actionPool.length
+          ? actionPool[actionChoiceApiRoundRobinRef.current % actionPool.length]
+          : apiConfig
+        actionChoiceApiRoundRobinRef.current += 1
+        const recentContext = nextMessages
+          .filter((message) => !message.hidden)
+          .slice(-6)
+          .map((message) => `${message.role === 'user' ? 'Người chơi' : 'AI'}: ${message.content}`)
+          .join('\n\n')
+
+        scheduleIdleStateTask(() => {
+          generateActionChoices(actionCfg, {
+            recentContext,
+            storyText: displayText,
+            userText: stateUserText,
+            playerName: playerName || playerProfile?.name || '',
+          })
+            .then((generated) => {
+              setMessages((msgs) => {
+                const at = msgs.findIndex((message) => message.id === turnMessageId)
+                if (at < 0 || msgs[at].content !== displayText) return msgs
+                const current = msgs[at]
+                return msgs.map((message, index) => index === at ? {
+                  ...current,
+                  actionChoices: generated.length ? generated : [],
+                  actionChoicesPending: false,
+                } : message)
+              })
+            })
+            .catch((choiceErr) => {
+              console.warn('[action-choices] bỏ qua:', choiceErr.message)
+              setMessages((msgs) => msgs.map((message) => message.id === turnMessageId
+                ? { ...message, actionChoicesPending: false }
+                : message))
+            })
+        })
+      }
+
       // API CẬP NHẬT BIẾN (đợt 36, tuỳ chọn): model phụ đọc lại chính văn và
       // BỔ SUNG các tag model chính quên khai (kèm danh sách tag đã áp để
       // không áp trùng). Chạy nền — lỗi chỉ warn.
@@ -1327,7 +1391,31 @@ export default function RoleplayChat() {
 
   // SỬA 1 tin (đợt 39): cho phép sửa cả tin người chơi lẫn chính văn AI.
   function handleEditMessage(index, newContent) {
-    setMessages((msgs) => msgs.map((m2, i) => (i === index ? { ...m2, content: newContent } : m2)))
+    setMessages((msgs) => msgs.map((m2, i) => {
+      if (i === index) {
+        return m2.role === 'assistant'
+          ? { ...m2, content: newContent, actionChoices: [], actionChoicesPending: false }
+          : { ...m2, content: newContent }
+      }
+      // Sửa input làm các gợi ý của câu trả lời kế tiếp mất căn cứ.
+      if (i === index + 1 && msgs[index]?.role === 'user' && m2.role === 'assistant') {
+        return { ...m2, actionChoices: [], actionChoicesPending: false }
+      }
+      return m2
+    }))
+  }
+
+  function handleChooseAction(choice) {
+    if (!choice?.text) return
+    setInput(choice.text)
+    // Chờ React commit value vào textarea rồi mới đặt con trỏ ở cuối.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const textarea = inputRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }))
   }
 
   function handleKeyDown(e) {
@@ -1713,6 +1801,19 @@ ${m.content}`
                   </button>
                 </div>
               )}
+              {editingIndex !== i
+                && isLastAi
+                && i > lastUserIndex
+                && !m.content.includes(BATTLE_MARKER)
+                && !m.shopName
+                && !m.pokecenter && (
+                <ActionChoices
+                  choices={m.actionChoices ?? []}
+                  pending={Boolean(m.actionChoicesPending)}
+                  disabled={loading}
+                  onChoose={handleChooseAction}
+                />
+              )}
               {m.shopName && (m.shopValidated || detectInteractiveShop(
                 m.content,
                 m.shopName,
@@ -1986,6 +2087,7 @@ ${m.content}`
 
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}

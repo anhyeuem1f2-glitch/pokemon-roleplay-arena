@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
+import { generateActionChoices } from '../services/actionChoiceGenerator.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { DIFFICULTIES, GENRES, buildToneNote } from '../data/storyTones.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
@@ -8,6 +9,7 @@ import { applyPerksToMon, describeCustomMechanicEffects, syncTraitGrantedItems }
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
+import { extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { clearMemory, rememberExchange } from '../utils/storyMemory.js'
@@ -299,7 +301,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       // Đợt 63: trả lại quyền TỰ DO SÁNG TẠO — người chơi phản ánh AI bị gò
       // bó bởi input, chỉ thuật đúng câu lệnh chứ không dựng cảnh sống động.
       `QUYỀN TỰ DO SÁNG TẠO: input của người chơi là HÀNH ĐỘNG của nhân vật chính, KHÔNG phải kịch bản giới hạn. Hãy chủ động dựng thêm chi tiết đời sống quanh hành động đó: NPC đang bận việc riêng của họ, Pokémon quanh cảnh đang làm gì đó theo bản tính, âm thanh/mùi/thời tiết, một sự cố nhỏ chen ngang, một câu chuyện phiếm nghe lỏm... Thế giới phải TIẾP DIỄN dù người chơi có làm gì hay không.`,
-      `Bắt đầu thẳng vào câu chuyện, không hỏi lại người chơi, không liệt kê lựa chọn.`,
+      `Bắt đầu thẳng vào câu chuyện, không hỏi lại người chơi. Sau chính văn, tạo khối lựa chọn hành động theo giao thức hệ thống để app hiển thị thành nút; không viết các lựa chọn lẫn vào đoạn truyện.`,
     ].filter(Boolean).join('\n')
 
     setLoading(true)
@@ -318,15 +320,31 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
       callOptions.assistantPrefill = assistantPrefill
 
       const reply = await chatCompletion(apiConfig, apiMessages, callOptions)
+      let actionChoices = extractActionChoices(reply)
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
       }
       const parsed = parseStoryStateTags(cleaned)
       const openingText = parsed.cleaned
+      // Một số preset có regex loại khối lựa chọn khỏi prompt/đầu ra hoặc model
+      // quên tuân thủ. Chỉ khi reply chính không có lựa chọn mới gọi thêm một
+      // lượt ngắn để màn mở đầu cũng luôn có nút hành động phù hợp chương.
+      if (!actionChoices.length && !openingText.includes('[[BATTLE]]')) {
+        try {
+          actionChoices = await generateActionChoices(apiConfig, {
+            recentContext: directive,
+            storyText: openingText,
+            userText: 'Bắt đầu câu chuyện',
+            playerName: finalName,
+          })
+        } catch (choiceErr) {
+          console.warn('[action-choices:intro] bỏ qua:', choiceErr.message)
+        }
+      }
       setMessages([
         { role: 'user', hidden: true, resultLabel: 'Bắt đầu câu chuyện', content: directive },
-        { role: 'assistant', content: openingText },
+        { role: 'assistant', content: openingText, actionChoices },
       ])
       // AI lỡ cấp Pokémon ngay mở đầu (đã cấm nhưng đề phòng) → vẫn tôn trọng tag.
       for (const pk of parsed.pokemons ?? []) {

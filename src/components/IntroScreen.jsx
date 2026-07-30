@@ -438,7 +438,7 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
               <p className="intro-subtitle">Thế giới nhập vai của huấn luyện viên Pokémon</p>
             </div>
 
-            <div className="intro-spinner-wrap">
+            <div className="intro-spinner-wrap intro-spinner-wrap--hero">
               <PokeballSpinner
                 size={112}
                 label={titlePhase === 'intro'
@@ -449,21 +449,21 @@ export default function IntroScreen({ onOpenSettings, onOpenDev }) {
               />
             </div>
 
-            <div className="intro-menu">
+            <div className="intro-menu intro-menu--hero">
               {messages.length > 0 && (
-                <button className="btn--gold" onClick={() => setGameStarted(true)}>
+                <button className="btn--gold intro-hero-btn intro-hero-btn--gold" onClick={() => setGameStarted(true)}>
                   ▶ Tiếp tục hành trình
                 </button>
               )}
-              <button className={messages.length > 0 ? 'btn intro-menu__secondary' : 'btn--gold'} onClick={() => { setStage('setup'); setStep(0) }}>
+              <button className={messages.length > 0 ? 'btn intro-hero-btn' : 'btn--gold intro-hero-btn intro-hero-btn--gold'} onClick={() => { setStage('setup'); setStep(0) }}>
                 Bắt đầu một hành trình mới
               </button>
-              <div className="btn-row" style={{ justifyContent: 'center' }}>
-                <button className="btn" onClick={onOpenSettings} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="intro-actions-inline">
+                <button className="btn intro-hero-btn intro-hero-btn--secondary" onClick={onOpenSettings}>
                   Cài đặt API
                 </button>
                 {typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('dev') && (
-                  <button className="btn" onClick={onOpenDev}>Chế độ Dev</button>
+                  <button className="btn intro-hero-btn intro-hero-btn--secondary" onClick={onOpenDev}>Chế độ Dev</button>
                 )}
               </div>
             </div>

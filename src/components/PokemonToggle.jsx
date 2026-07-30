@@ -21,7 +21,12 @@ export default function PokemonToggle({ checked, onChange, label, hint, disabled
       </span>
       {(label || hint) && (
         <span className="pokeball-toggle__copy">
-          {label && <span className="pokeball-toggle__label">{label}</span>}
+          <span className="pokeball-toggle__head">
+            {label && <span className="pokeball-toggle__label">{label}</span>}
+            <span className={`pokeball-toggle__state ${checked ? 'pokeball-toggle__state--on' : 'pokeball-toggle__state--off'}`}>
+              {checked ? 'BẬT' : 'TẮT'}
+            </span>
+          </span>
           {hint && <span className="pokeball-toggle__hint">{hint}</span>}
         </span>
       )}

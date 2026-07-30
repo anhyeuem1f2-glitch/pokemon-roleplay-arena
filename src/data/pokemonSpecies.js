@@ -478,60 +478,184 @@ export function resolvePendingMoveLearn(mon, { replaceIndex = null, skip = false
  *    power cao) — ưu tiên chiêu không có tác dụng phụ khựng lượt, ưu tiên
  *    chiêu có hiệu ứng phụ tốt.
  */
-function pickMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, includeTm = false) {
+export const ENCOUNTER_MOVESET_VERSION = 3
+
+function trainerTmPolicy(level) {
+  const lv = Math.max(1, Number(level) || 1)
+  if (lv < 15) return { maxCount: 0, maxPower: 0 }
+  if (lv < 30) return { maxCount: 1, maxPower: 60 }
+  if (lv < 45) return { maxCount: 1, maxPower: 80 }
+  if (lv < 60) return { maxCount: 2, maxPower: 100 }
+  return { maxCount: 2, maxPower: Infinity }
+}
+
+function trainerTmIsAppropriate(move, level, policy) {
+  if (!move || policy.maxCount <= 0) return false
+  const power = Number(move.power) || 0
+  if (power > policy.maxPower) return false
+  // Những chiêu buộc khựng lượt hoặc có uy lực cực đoan không xuất hiện ở
+  // trainer cấp thấp chỉ vì learnset ghi "học được bằng TM".
+  if (move.flags?.recharge && level < 50) return false
+  if (power >= 120 && level < 60) return false
+  return true
+}
+
+function encounterMoveEntries(speciesEntry, level, movesDb, includeTm = false) {
   const learnable =
     movesDb?.learnsets?.[speciesEntry.species] ??
     (speciesEntry.baseSpeciesId ? movesDb?.learnsets?.[speciesEntry.baseSpeciesId] : null)
-  if (learnable?.length && movesDb?.allMoves) {
-    const available = learnable
-      .filter((e) => e.method === 'L' ? e.level <= level : includeTm)
-      .map((e) => movesDb.allMoves[e.move])
-      .filter(Boolean)
+  if (!learnable?.length || !movesDb?.allMoves) return []
 
-    if (available.length) {
-      const dominantStat = stats ? (stats.atk >= stats.spa ? 'Physical' : 'Special') : null
-
-      const scored = available.map((mv) => {
-        const offenseStat = stats ? (mv.category === 'Special' ? stats.spa : stats.atk) : 1
-        const coverage = opponentTypes?.length ? getEffectivenessMulti(mv.type, opponentTypes) : 1
-        const signatureBoost = SIGNATURE_MOVE_OVERRIDES[speciesEntry.name]?.includes(mv.name) ? 1000 : 1
-        const score = mv.power * offenseStat * coverage * effectMultiplier(mv) * signatureBoost
-        return { mv, score }
-      })
-
-      const seen = new Set()
-      const picked = []
-      function takeFrom(list) {
-        for (const { mv } of list.sort((a, b) => b.score - a.score)) {
-          if (picked.length >= 4) break
-          if (seen.has(mv.name)) continue
-          seen.add(mv.name)
-          // Đợt 35 — BUG Rapid Spin không cộng tốc: dòng này từng cắt mất
-          // self/boosts/target/flags/recoil nên mọi hiệu ứng bậc chỉ số + recoil
-          // + recharge của chiêu KHÔNG BAO GIỜ tới được trận đấu. Giữ nguyên mv.
-          picked.push({ ...mv })
-        }
-      }
-
-      if (dominantStat) {
-        takeFrom(scored.filter((s) => s.mv.category === dominantStat))
-        if (picked.length < 4) takeFrom(scored.filter((s) => s.mv.category !== dominantStat))
-      } else {
-        takeFrom(scored)
-      }
-
-      if (picked.length) return picked
-    }
+  const policy = trainerTmPolicy(level)
+  const out = []
+  const seen = new Set()
+  for (const entry of learnable) {
+    const isLevelMove = entry.method === 'L' && entry.level <= level
+    const move = movesDb.allMoves[entry.move]
+    const isTmMove = includeTm && entry.method === 'M' && trainerTmIsAppropriate(move, level, policy)
+    if ((!isLevelMove && !isTmMove) || !move) continue
+    const id = moveId(move)
+    if (!id || seen.has(`${id}|${entry.method}`)) continue
+    seen.add(`${id}|${entry.method}`)
+    out.push({ move: { ...move }, method: entry.method, learnedAt: entry.level ?? 0 })
   }
-  return fallbackMoves(speciesEntry)
+  return out
+}
+
+function supportMoveScore(move) {
+  let score = 0
+  if (move.heal) score += 95
+  if (move.status) score += 75
+  if (move.weather) score += 55
+  if (move.boosts) {
+    const values = Object.values(move.boosts)
+    if (values.some((value) => value > 0)) score += 70
+    if (values.some((value) => value < 0)) score += 55
+  }
+  if (move.self?.boosts) score += 65
+  if (move.secondary?.status) score += 25
+  if (move.secondary?.boosts) score += 20
+  return score || 12
+}
+
+/**
+ * Chọn bộ 4 chiêu hợp lệ cho Pokémon gặp trong trận.
+ * - Hoang dã: chỉ level-up move đã học tới level hiện tại.
+ * - Trainer/NPC: level-up move + số TM giới hạn theo level; trainer cấp thấp
+ *   không còn tự nhiên sở hữu Earthquake/Hyper Beam chỉ vì loài đó học TM.
+ * - Ưu tiên thiên hướng Atk/SpA, STAB/coverage và giữ tối đa một chiêu hỗ trợ
+ *   hữu ích trước khi lấp các ô còn lại.
+ */
+export function pickEncounterMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, includeTm = false) {
+  const entries = encounterMoveEntries(speciesEntry, level, movesDb, includeTm)
+  if (!entries.length) return fallbackMoves(speciesEntry)
+
+  const dominantStat = stats ? (stats.atk >= stats.spa ? 'Physical' : 'Special') : null
+  const tmPolicy = trainerTmPolicy(level)
+  const scored = entries.map((entry) => {
+    const mv = entry.move
+    const damaging = (Number(mv.power) || 0) > 0
+    const offenseStat = stats ? (mv.category === 'Special' ? stats.spa : stats.atk) : 1
+    const coverage = opponentTypes?.length ? getEffectivenessMulti(mv.type, opponentTypes) : 1
+    const stab = speciesEntry.types?.includes(mv.type) ? 1.35 : 1
+    const recentLevelBoost = entry.method === 'L'
+      ? 1 + Math.min(0.35, Math.max(0, Number(entry.learnedAt) || 0) / Math.max(1, level) * 0.35)
+      : 0.92
+    const signature = SIGNATURE_MOVE_OVERRIDES[speciesEntry.name]?.includes(mv.name) ? 3 : 1
+    const base = damaging
+      ? (Number(mv.power) || 1) * Math.max(1, offenseStat) * coverage * stab * effectMultiplier(mv)
+      : supportMoveScore(mv) * Math.max(40, level * 3)
+    return { ...entry, score: base * recentLevelBoost * signature, damaging }
+  })
+
+  const picked = []
+  const seen = new Set()
+  let tmPicked = 0
+  const take = (entry) => {
+    if (!entry || picked.length >= 4) return false
+    const id = moveId(entry.move)
+    if (!id || seen.has(id)) return false
+    if (entry.method === 'M' && tmPicked >= tmPolicy.maxCount) return false
+    seen.add(id)
+    if (entry.method === 'M') tmPicked += 1
+    picked.push({ ...entry.move })
+    return true
+  }
+  const ranked = (list) => [...list].sort((a, b) => b.score - a.score || b.learnedAt - a.learnedAt)
+
+  // Chiêu đặc trưng hợp lệ được xét trước, nhưng vẫn tuân giới hạn TM/level.
+  const signatures = ranked(scored.filter((entry) => SIGNATURE_MOVE_OVERRIDES[speciesEntry.name]?.includes(entry.move.name)))
+  for (const entry of signatures) take(entry)
+
+  const damaging = scored.filter((entry) => entry.damaging)
+  if (dominantStat) {
+    for (const entry of ranked(damaging.filter((item) => item.move.category === dominantStat))) take(entry)
+  }
+
+  // Giữ một lựa chọn chiến thuật thật sự hữu ích khi có đủ dữ liệu. Wild
+  // cấp rất thấp vẫn ưu tiên các đòn gây sát thương cơ bản.
+  if (level >= 8 && picked.length < 4) {
+    const support = ranked(scored.filter((entry) => !entry.damaging))
+    if (support.length) take(support[0])
+  }
+
+  for (const entry of ranked(damaging)) take(entry)
+  for (const entry of ranked(scored)) take(entry)
+
+  return picked.length ? picked.slice(0, 4) : fallbackMoves(speciesEntry)
+}
+
+// Tên cũ được giữ nội bộ để tránh làm hỏng các callsite cũ.
+function pickMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, includeTm = false) {
+  return pickEncounterMoves(speciesEntry, level, movesDb, stats, opponentTypes, includeTm)
+}
+
+/**
+ * Sửa Pokémon đối thủ được tạo khi learnset chưa tải xong hoặc snapshot cũ
+ * còn bộ fallback/chiêu vượt level. Chỉ đụng moveset; HP, status, held item,
+ * Ability và runtime trận được giữ nguyên. `movesetLocked` dành cho kịch bản
+ * chủ động cấu hình bộ chiêu riêng trong tương lai.
+ */
+export function repairEncounterMonMoves(mon, speciesEntry, movesDb, opponentTypes = null) {
+  if (!mon || !speciesEntry || !movesDb?.allMoves || !movesDb?.learnsets) return mon
+  if (mon.movesetLocked) {
+    const normalized = (mon.moves ?? []).map((raw) => movesDb.allMoves[moveId(raw)] ?? raw).filter(Boolean).slice(0, 4)
+    const changed = normalized.some((move, index) => move !== mon.moves?.[index])
+    return changed ? { ...mon, moves: normalized } : mon
+  }
+
+  const expected = pickEncounterMoves(
+    speciesEntry,
+    Math.max(1, Number(mon.level) || 1),
+    movesDb,
+    mon.stats,
+    opponentTypes,
+    Boolean(mon.isTrainerMon),
+  )
+  const currentIds = (mon.moves ?? []).map(moveId).filter(Boolean)
+  const expectedIds = expected.map(moveId)
+  const same = currentIds.length === expectedIds.length && currentIds.every((id, index) => id === expectedIds[index])
+  const metadataComplete = (mon.moves ?? []).every((move) => {
+    const full = movesDb.allMoves[moveId(move)]
+    return full && move?.category === full.category && move?.type === full.type
+  })
+  if (same && metadataComplete && mon.movesetDataVersion === ENCOUNTER_MOVESET_VERSION) return mon
+
+  return {
+    ...mon,
+    moves: expected,
+    movesetSource: mon.isTrainerMon ? 'trainer-level-aware' : 'wild-level-up',
+    movesetDataVersion: ENCOUNTER_MOVESET_VERSION,
+  }
 }
 
 function fallbackMoves(speciesEntry) {
   const stabMoves = speciesEntry.types.map((t) => TYPE_SIGNATURE_MOVE[t]).filter(Boolean)
   return [
     ...stabMoves,
-    { name: 'Growl', type: 'normal', power: 0, category: 'Status' },
-    { name: 'Quick Attack', type: 'normal', power: 8, category: 'Physical' },
+    { name: 'Growl', type: 'normal', power: 0, category: 'Status', boosts: { atk: -1 }, target: 'normal' },
+    { name: 'Quick Attack', type: 'normal', power: 8, category: 'Physical', priority: 1 },
+    { name: 'Leer', type: 'normal', power: 0, category: 'Status', boosts: { def: -1 }, target: 'normal' },
   ].slice(0, 4)
 }
 
@@ -617,6 +741,8 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     maxHp,
     hp: maxHp,
     moves,
+    movesetSource: movesDb?.learnsets ? (isTrainerMon ? 'trainer-level-aware' : 'wild-level-up') : 'fallback',
+    movesetDataVersion: movesDb?.learnsets ? ENCOUNTER_MOVESET_VERSION : 0,
   }
 }
 

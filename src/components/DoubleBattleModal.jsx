@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
-import { isSameMon } from '../data/pokemonSpecies.js'
+import { isSameMon, repairEncounterMonMoves } from '../data/pokemonSpecies.js'
 import { computeDamage, STAGE_ZERO } from './BattleModal.jsx'
 import HealthBar from './HealthBar.jsx'
 import MonAvatar from './MonAvatar.jsx'
@@ -172,7 +172,7 @@ function actionText(action, team, enemies) {
 }
 
 export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd, initialBattleState = null }) {
-  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory } = useGame()
+  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies } = useGame()
   const fallbackTeam = buildInitialTeam(party, playerMon)
   const restoredTeam = initialBattleState?.team?.length
     ? initialBattleState.team.map(cloneMon)
@@ -232,6 +232,25 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   // chỉ chạy khi đối thủ thực sự đổi, tránh vòng lặp render vô hạn.
   useEffect(() => { snapshotRef.current = onSnapshot }, [onSnapshot])
   useEffect(() => { snapshotRef.current?.(enemies) }, [enemies])
+
+  // Nếu trận 2v2 được mở trước khi learnset tải xong, local state của modal
+  // không tự nhận enemyMon đã sửa trong context. Sửa trực tiếp hai đối thủ,
+  // giữ nguyên HP/status/stages và gửi snapshot đã chuẩn hoá ngược về message.
+  useEffect(() => {
+    if (!movesDb?.allMoves || !movesDb?.learnsets || !pokedexSpecies?.length) return
+    const id = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    setEnemies((cur) => {
+      let changed = false
+      const next = cur.map((mon) => {
+        const key = id(mon?.species ?? mon?.name)
+        const entry = pokedexSpecies.find((species) => id(species.species) === key || id(species.name) === key)
+        const repaired = entry ? repairEncounterMonMoves(mon, entry, movesDb, playerMon?.types ?? null) : mon
+        if (repaired !== mon) changed = true
+        return repaired
+      })
+      return changed ? next : cur
+    })
+  }, [movesDb, playerMon?.types, pokedexSpecies])
 
   // Ability vào sân cho cả bốn ô. Weather chạy theo Speed; Intimidate tác
   // động cả hai đối thủ trong đấu đôi. Chỉ chạy một lần khi mở trận.

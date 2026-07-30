@@ -13,6 +13,7 @@ export const LEGACY_LARGE_CACHE_KEYS = [
   'trainer-arena:pokedex-cache-v10',
   'trainer-arena:moves-cache-v7',
   'trainer-arena:learnsets-cache-v2',
+  'trainer-arena:learnsets-cache-v3',
   'trainer-arena:wiki-cache-v1',
 ]
 

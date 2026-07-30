@@ -11,13 +11,22 @@ const LEARNSETS_URL = 'https://play.pokemonshowdown.com/data/learnsets.json'
 // v5 (đợt 35): bảng all giữ thêm boosts/target/self/secondary — bắt buộc bump
 // key vì cache lưu output ĐÃ xử lý, người dùng cache cũ sẽ thiếu field mới.
 const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v8'
-const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v3'
+const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v4'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
-// Gen hiện tại dùng để lọc learnset — learnsets.json ghi lịch sử học chiêu
-// qua TỪNG thế hệ (VD "9L20" = Gen 9, học qua Level-up ở level 20). Chỉ lấy
-// đúng gen mới nhất để không lẫn chiêu chỉ học được ở bản cũ.
-const CURRENT_GEN_PREFIX = '9'
+// Showdown ghi lịch sử học chiêu qua từng thế hệ (VD 9L20, 8M...).
+// Ưu tiên Gen 9; với loài không xuất hiện ở Gen 9, dùng thế hệ MỚI NHẤT mà
+// chính loài đó còn có level-up learnset. Nếu ép cứng Gen 9, rất nhiều loài
+// cũ sẽ rơi về bộ fallback dù dữ liệu hợp lệ vẫn tồn tại ở Gen 8/7.
+const MAX_SUPPORTED_GEN = 9
+
+function learnMethodInfo(method) {
+  const match = String(method ?? '').match(/^(\d+)([A-Z])(.*)$/)
+  if (!match) return null
+  const generation = Number(match[1])
+  if (!Number.isFinite(generation) || generation > MAX_SUPPORTED_GEN) return null
+  return { generation, method: match[2], detail: match[3] }
+}
 
 async function fetchJsonCached(url, cacheKey, transform) {
   const cachedDb = await readLargeCache(cacheKey)
@@ -133,36 +142,49 @@ export async function loadMovesData() {
  * hẳn TM/tutor/egg/event move và lịch sử các gen cũ để nhẹ hơn nhiều so với
  * file gốc (file gốc ghi lịch sử mọi cách học qua mọi thế hệ).
  */
-export async function loadLearnsets() {
-  return fetchJsonCached(LEARNSETS_URL, LEARNSETS_CACHE_KEY, (raw) => {
-    const out = {}
-    for (const [speciesId, entry] of Object.entries(raw)) {
-      const learnset = entry?.learnset
-      if (!learnset) continue
-      const moves = []
-      for (const [moveId, methods] of Object.entries(learnset)) {
-        let gotLevelUp = false
-        let gotTm = false
-        for (const m of methods) {
-          if (!m.startsWith(CURRENT_GEN_PREFIX)) continue
-          const method = m[CURRENT_GEN_PREFIX.length]
-          if (method === 'L' && !gotLevelUp) {
-            const level = parseInt(m.slice(CURRENT_GEN_PREFIX.length + 1), 10)
-            if (!Number.isNaN(level)) {
-              moves.push({ move: moveId, level, method: 'L' })
-              gotLevelUp = true
-            }
-          } else if (method === 'M' && !gotTm) {
-            // Chiêu học qua TM/Máy dạy — không gắn với level, chỉ dùng cho
-            // Pokémon CỦA TRAINER (huấn luyện viên có thể dạy TM bất kỳ lúc
-            // nào), không áp dụng cho Pokémon hoang dã.
-            moves.push({ move: moveId, level: 0, method: 'M' })
-            gotTm = true
+export function normalizeLearnsets(raw) {
+  const out = {}
+  for (const [speciesId, entry] of Object.entries(raw ?? {})) {
+    const learnset = entry?.learnset
+    if (!learnset) continue
+
+    let latestLevelGeneration = 0
+    let latestAnyGeneration = 0
+    for (const methods of Object.values(learnset)) {
+      for (const rawMethod of methods ?? []) {
+        const info = learnMethodInfo(rawMethod)
+        if (!info) continue
+        latestAnyGeneration = Math.max(latestAnyGeneration, info.generation)
+        if (info.method === 'L') latestLevelGeneration = Math.max(latestLevelGeneration, info.generation)
+      }
+    }
+    const chosenGeneration = latestLevelGeneration || latestAnyGeneration
+    if (!chosenGeneration) continue
+
+    const moves = []
+    for (const [moveId, methods] of Object.entries(learnset)) {
+      let gotLevelUp = false
+      let gotTm = false
+      for (const rawMethod of methods ?? []) {
+        const info = learnMethodInfo(rawMethod)
+        if (!info || info.generation !== chosenGeneration) continue
+        if (info.method === 'L' && !gotLevelUp) {
+          const level = parseInt(info.detail, 10)
+          if (!Number.isNaN(level)) {
+            moves.push({ move: moveId, level, method: 'L', generation: chosenGeneration })
+            gotLevelUp = true
           }
+        } else if (info.method === 'M' && !gotTm) {
+          moves.push({ move: moveId, level: 0, method: 'M', generation: chosenGeneration })
+          gotTm = true
         }
       }
-      if (moves.length) out[speciesId] = moves
     }
-    return out
-  })
+    if (moves.length) out[speciesId] = moves
+  }
+  return out
+}
+
+export async function loadLearnsets() {
+  return fetchJsonCached(LEARNSETS_URL, LEARNSETS_CACHE_KEY, normalizeLearnsets)
 }

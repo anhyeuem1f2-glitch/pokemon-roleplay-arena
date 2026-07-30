@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
-import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, repairOwnedMonMoves } from '../data/pokemonSpecies.js'
+import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, repairEncounterMonMoves, repairOwnedMonMoves } from '../data/pokemonSpecies.js'
 import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
@@ -675,6 +675,61 @@ export function GameProvider({ children }) {
     setParty((cur) => (cur ?? []).map(repair))
     setPcBox((cur) => (cur ?? []).map(repair))
   }, [movesDb, movesDbStatus, setParty, setPcBox, setPlayerMon])
+
+
+  // Đợt 83: Pokémon hoang/NPC có thể được dựng trước khi learnset tải xong,
+  // khiến snapshot giữ vĩnh viễn bộ fallback hoặc trainer cấp thấp cầm TM
+  // quá mạnh. Khi dữ liệu sẵn sàng, sửa cả enemy hiện tại lẫn snapshot đã lưu
+  // trong message; chỉ thay moveset, không reset HP/status/runtime trận.
+  useEffect(() => {
+    if (movesDbStatus !== 'ready' || !movesDb?.allMoves || !pokedexSpecies?.length) return
+    const findEntry = (mon) => {
+      const key = abilityId(mon?.species ?? mon?.name)
+      return (pokedexSpecies ?? []).find((entry) =>
+        abilityId(entry.species) === key || abilityId(entry.name) === key,
+      ) ?? null
+    }
+    const repairEncounter = (mon) => {
+      if (!mon) return mon
+      const entry = findEntry(mon)
+      return entry ? repairEncounterMonMoves(mon, entry, movesDb, playerMon?.types ?? null) : mon
+    }
+    setEnemyMon((cur) => repairEncounter(cur))
+    setMessages((cur) => (cur ?? []).map((message) => {
+      let changed = false
+      const next = { ...message }
+      if (message.enemySnapshot) {
+        const repaired = repairEncounter(message.enemySnapshot)
+        if (repaired !== message.enemySnapshot) {
+          next.enemySnapshot = repaired
+          changed = true
+        }
+      }
+      if (Array.isArray(message.enemySnapshots)) {
+        const repaired = message.enemySnapshots.map(repairEncounter)
+        if (repaired.some((mon, index) => mon !== message.enemySnapshots[index])) {
+          next.enemySnapshots = repaired
+          if (repaired[0]) next.enemySnapshot = repaired[0]
+          changed = true
+        }
+      }
+      if (message.battleRuntime?.enemy) {
+        const repaired = repairEncounter(message.battleRuntime.enemy)
+        if (repaired !== message.battleRuntime.enemy) {
+          next.battleRuntime = { ...message.battleRuntime, enemy: repaired }
+          changed = true
+        }
+      }
+      if (Array.isArray(message.doubleBattleRuntime?.enemies)) {
+        const repaired = message.doubleBattleRuntime.enemies.map(repairEncounter)
+        if (repaired.some((mon, index) => mon !== message.doubleBattleRuntime.enemies[index])) {
+          next.doubleBattleRuntime = { ...message.doubleBattleRuntime, enemies: repaired }
+          changed = true
+        }
+      }
+      return changed ? next : message
+    }))
+  }, [movesDb, movesDbStatus, playerMon?.types, pokedexSpecies, setEnemyMon, setMessages])
 
   const value = {
     apiConfig,

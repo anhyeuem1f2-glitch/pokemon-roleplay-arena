@@ -13,6 +13,11 @@ import {
   modifyDamageByAbilities, moveHitsWithAbilities, movePriorityWithAbility, redirectTargetByAbility,
   moveStatusIsBlocked, statusIsBlocked, switchOutAbility, weatherFromAbility, weatherIsSuppressed,
 } from '../data/pokemonAbilities.js'
+import {
+  afterDamageHeldItem, afterMoveHeldItem, afterStatusHeldItem, beforeDamageHeldItem, clearHeldItemVolatile,
+  endTurnHeldItemEffect, heldItemLabel, heldItemMoveAllowed, heldItemPriorityPenalty, defenderTypesWithHeldItem,
+  heldItemSpeedMultiplier, lockChoiceMove, restoreTransientHeldItem, weatherTurnsFromHeldItem,
+} from '../data/pokemonHeldItems.js'
 
 const STATUS_INFO = {
   brn: { label: 'Bỏng', short: 'BRN' },
@@ -32,7 +37,7 @@ function monKey(mon, fallback = '') {
 }
 
 function cloneMon(mon) {
-  return mon ? { ...mon, moves: [...(mon.moves ?? [])], stats: mon.stats ? { ...mon.stats } : mon.stats } : null
+  return mon ? { ...mon, heldItem: mon.heldItem ? { ...mon.heldItem } : null, moves: [...(mon.moves ?? [])], stats: mon.stats ? { ...mon.stats } : mon.stats } : null
 }
 
 function buildInitialTeam(party, playerMon) {
@@ -146,7 +151,7 @@ function BattleCard({ mon, label, active, onClick, stages }) {
           {(mon.types ?? []).map((type) => <TypeBadge key={type} type={type} />)}
           {mon.status && <span style={{ fontSize: 9, color: 'var(--amber)' }}>{STATUS_INFO[mon.status]?.short ?? mon.status}</span>}
         </div>
-        <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginBottom: 4 }}>◇ {abilityLabel(mon)}</div>
+        <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginBottom: 4 }}>◇ {abilityLabel(mon)} · ◆ {heldItemLabel(mon)}</div>
         <HealthBar hp={mon.hp} maxHp={mon.maxHp} bars={mon.bossBars ?? 1} />
         {Object.entries(stages ?? {}).some(([, value]) => value) && (
           <div style={{ fontSize: 8.5, color: 'var(--text-dim)', marginTop: 3, fontFamily: 'var(--font-mono)' }}>
@@ -218,9 +223,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   const ready = requiredSlots.length > 0 && requiredSlots.every((slot) => actions[slot]) && missingReplacementSlots.length === 0
 
   useEffect(() => {
-    setParty(team.map(clearBattleVolatile))
+    setParty(team.map((mon) => clearHeldItemVolatile(clearBattleVolatile(mon))))
     const lead = activeMons.find((mon) => mon?.hp > 0) ?? team.find((mon) => mon.hp > 0) ?? activeMons[0]
-    if (lead) setPlayerMon(clearBattleVolatile(lead))
+    if (lead) setPlayerMon(clearHeldItemVolatile(clearBattleVolatile(lead)))
   }, [team, activeIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Callback cha thường được tạo inline. Giữ nó trong ref để việc lưu snapshot
@@ -237,13 +242,13 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
     const entrants = [
       ...playerEntries.map((mon) => ({ mon, side: 'player' })),
       ...enemies.filter(Boolean).map((mon) => ({ mon, side: 'enemy' })),
-    ].sort((a, b) => effectiveSpeed(b.mon) - effectiveSpeed(a.mon))
+    ].sort((a, b) => (effectiveSpeed(b.mon) * heldItemSpeedMultiplier(b.mon)) - (effectiveSpeed(a.mon) * heldItemSpeedMultiplier(a.mon)))
     const lines = []
     for (const { mon } of entrants) {
       const weather = weatherFromAbility(mon)
       if (weather) {
         setBattleEnv(getBattleEnv(weather))
-        setWeatherTurns(5)
+        setWeatherTurns(weatherTurnsFromHeldItem(mon, weather, 5))
         lines.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
       }
     }
@@ -312,7 +317,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const weather = weatherFromAbility(mon)
       if (weather) {
         setBattleEnv(getBattleEnv(weather))
-        setWeatherTurns(5)
+        setWeatherTurns(weatherTurnsFromHeldItem(mon, weather, 5))
         entryLines.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
       }
       setStages((cur) => {
@@ -372,7 +377,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const weather = weatherFromAbility(mon)
       if (weather) {
         roundEnv = getBattleEnv(weather)
-        roundWeatherTurns = 5
+        roundWeatherTurns = weatherTurnsFromHeldItem(mon, weather, 5)
         roundLog.push(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
       }
       if (hasAbility(mon, 'Intimidate')) {
@@ -404,8 +409,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         roundLog.push(`${actor.name} dùng ${move.name} lên ${target.name}, nhưng đòn đánh trượt!`)
         return 0
       }
-      const effectiveness = getEffectivenessMulti(move.type, target.types)
+      const effectiveness = getEffectivenessMulti(move.type, defenderTypesWithHeldItem(target, move.type))
       const targetIsEnemy = nextEnemies.some((mon) => monKey(mon) === monKey(target))
+      const berryBlocked = (targetIsEnemy ? activePlayers() : nextEnemies).some((mon) => mon?.hp > 0 && hasAbility(mon, 'Unnerve'))
       const allies = targetIsEnemy ? nextEnemies : activePlayers()
       const hits = Array.isArray(move.multihit)
         ? move.multihit[0] + Math.floor(Math.random() * (move.multihit[1] - move.multihit[0] + 1))
@@ -437,10 +443,19 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (ability.attackerBoost) applyStageBoost(nextStages, monKey(actor), ability.attackerBoost, roundLog, actor.name, actor)
         if (ability.immune) break
 
-        const dealt = Math.min(target.hp, ability.damage)
-        target.hp = Math.max(0, target.hp - ability.damage)
+        const itemBefore = beforeDamageHeldItem({ attacker: actor, defender: target, move, damage: ability.damage, effectiveness, berryBlocked })
+        Object.assign(target, itemBefore.defender)
+        roundLog.push(...itemBefore.logs)
+        if (itemBefore.immune) { moveImmune = true; break }
+        const dealt = Math.min(target.hp, itemBefore.damage)
+        target.hp = Math.max(0, target.hp - itemBefore.damage)
         totalDealt += dealt
         actualHits += 1
+        const itemAfter = afterDamageHeldItem({ attacker: actor, defender: target, move, damage: dealt, effectiveness, berryBlocked })
+        Object.assign(actor, itemAfter.attacker)
+        Object.assign(target, itemAfter.defender)
+        if (itemAfter.attackerBoosts?.target === 'defender') applyStageBoost(nextStages, monKey(target), { atk: 2, spa: 2 }, roundLog, target.name, target)
+        roundLog.push(...itemAfter.logs)
 
         // Rough Skin/Static/Flame Body... kích hoạt trên TỪNG lần tiếp xúc.
         // Bản cũ cộng toàn bộ multihit rồi chỉ gọi một lần nên sai cơ chế và
@@ -448,7 +463,12 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         const contact = contactAbilityEffect(actor, target, move, dealt)
         if (contact) {
           if (contact.recoil && !hasAbility(actor, 'Magic Guard')) actor.hp = Math.max(0, actor.hp - contact.recoil)
-          if (contact.status && !statusIsBlocked(actor, contact.status, currentWeather)) actor.status = contact.status
+          if (contact.status && !statusIsBlocked(actor, contact.status, currentWeather)) {
+            actor.status = contact.status
+            const itemCure = afterStatusHeldItem(actor, (targetIsEnemy ? nextEnemies : activePlayers()).some((mon) => mon?.hp > 0 && hasAbility(mon, 'Unnerve')))
+            Object.assign(actor, itemCure.mon)
+            roundLog.push(...itemCure.logs)
+          }
           roundLog.push(contact.log)
         }
       }
@@ -473,6 +493,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             target.status = status
             if (status === 'slp') target.sleepTurns = 1 + Math.floor(Math.random() * 3)
             roundLog.push(`${target.name} bị ${STATUS_INFO[status].label.toLowerCase()}!`)
+            const itemCure = afterStatusHeldItem(target, berryBlocked)
+            Object.assign(target, itemCure.mon)
+            roundLog.push(...itemCure.logs)
           }
         }
       } else {
@@ -503,13 +526,13 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const livingSlots = nextIds.map((id, slot) => ({ slot, mon: nextTeam.find((entry) => monKey(entry) === id) })).filter(({ mon }) => mon?.hp > 0)
       if (!livingSlots.length) return null
       const targetSlot = livingSlots[Math.floor(Math.random() * livingSlots.length)].slot
-      const usableMoves = (enemy.moves ?? []).filter(Boolean)
+      const usableMoves = (enemy.moves ?? []).filter((move) => move && heldItemMoveAllowed(enemy, move).allowed)
       if (!usableMoves.length) return null
       const move = usableMoves[Math.floor(Math.random() * usableMoves.length)]
       return {
         side: 'enemy', actorIndex: enemyIndex, targetSlot, move,
-        priority: movePriorityWithAbility(move, enemy),
-        speed: effectiveSpeed(enemy, nextStages[monKey(enemy)], weatherKey()),
+        priority: movePriorityWithAbility(move, enemy) + heldItemPriorityPenalty(enemy),
+        speed: effectiveSpeed(enemy, nextStages[monKey(enemy)], weatherKey()) * heldItemSpeedMultiplier(enemy),
       }
     }).filter(Boolean)
 
@@ -517,10 +540,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const action = actions[slot]
       const actor = nextTeam.find((mon) => monKey(mon) === nextIds[slot])
       if (!action || !actor) return null
-      const priority = action.type === 'switch' ? 7 : action.type === 'item' ? 6 : movePriorityWithAbility(action.move, actor)
+      const priority = action.type === 'switch' ? 7 : action.type === 'item' ? 6 : movePriorityWithAbility(action.move, actor) + heldItemPriorityPenalty(actor)
       return {
         ...action, side: 'player', actorSlot: slot, actorUid: monKey(actor), priority,
-        speed: effectiveSpeed(actor, nextStages[monKey(actor)], weatherKey()),
+        speed: effectiveSpeed(actor, nextStages[monKey(actor)], weatherKey()) * heldItemSpeedMultiplier(actor),
       }
     }).filter(Boolean)
 
@@ -534,7 +557,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (action.type === 'switch') {
           const target = nextTeam.find((mon) => monKey(mon) === action.targetUid)
           if (!target || target.hp <= 0 || nextIds.includes(monKey(target))) continue
-          const withdrawn = switchOutAbility(actor)
+          const withdrawn = clearHeldItemVolatile(switchOutAbility(actor))
           const at = nextTeam.findIndex((mon) => monKey(mon) === monKey(actor))
           if (at >= 0) nextTeam[at] = withdrawn
           roundLog.push(`Bạn thu ${actor.name} về và tung ${target.name} vào vị trí ${action.actorSlot + 1}!`)
@@ -576,12 +599,15 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
           consumeItem(action.item.id)
           continue
         }
+        const movePermission = heldItemMoveAllowed(actor, action.move)
+        if (!movePermission.allowed) { roundLog.push(`${actor.name} không thể hành động: ${movePermission.reason}`); continue }
+        Object.assign(actor, lockChoiceMove(actor, action.move))
         if (!canAct(actor, roundLog)) continue
         const move = action.move
         const playerWeather = moveWeatherKey(move)
         if (playerWeather) {
           roundEnv = getBattleEnv(playerWeather)
-          roundWeatherTurns = 5
+          roundWeatherTurns = weatherTurnsFromHeldItem(actor, playerWeather, 5)
           roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
@@ -600,6 +626,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             actor.status = selfStatus
             if (selfStatus === 'slp') actor.sleepTurns = 1 + Math.floor(Math.random() * 3)
             roundLog.push(`${actor.name} bị ${STATUS_INFO[selfStatus]?.label?.toLowerCase() ?? selfStatus}.`)
+            const itemCure = afterStatusHeldItem(actor, nextEnemies.some((mon) => mon?.hp > 0 && hasAbility(mon, 'Unnerve')))
+            Object.assign(actor, itemCure.mon)
+            roundLog.push(...itemCure.logs)
           }
           continue
         }
@@ -610,21 +639,29 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
           ? nextEnemies.map((enemy, index) => enemy.hp > 0 ? index : -1).filter((index) => index >= 0)
           : [nextEnemies.findIndex((enemy) => enemy === redirectedTarget)].filter((index) => index >= 0)
         const spreadPenalty = targetIndexes.length > 1 ? 0.75 : 1
+        let moveTotalDamage = 0
         for (const targetIndex of targetIndexes) {
           const target = nextEnemies[targetIndex]
-          if (target?.hp > 0) damageTarget(actor, target, move, spreadPenalty)
+          if (target?.hp > 0) moveTotalDamage += damageTarget(actor, target, move, spreadPenalty)
         }
+        const attackerItemAfter = afterMoveHeldItem({ attacker: actor, move, totalDamage: moveTotalDamage })
+        Object.assign(actor, attackerItemAfter.attacker)
+        roundLog.push(...attackerItemAfter.logs)
         if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
           applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
         }
       } else {
         const actor = nextEnemies[action.actorIndex]
-        if (!actor || actor.hp <= 0 || !canAct(actor, roundLog)) continue
+        if (!actor || actor.hp <= 0) continue
+        const movePermission = heldItemMoveAllowed(actor, action.move)
+        if (!movePermission.allowed) { roundLog.push(`${actor.name} không thể hành động: ${movePermission.reason}`); continue }
+        Object.assign(actor, lockChoiceMove(actor, action.move))
+        if (!canAct(actor, roundLog)) continue
         const move = action.move
         const enemyWeather = moveWeatherKey(move)
         if (enemyWeather) {
           roundEnv = getBattleEnv(enemyWeather)
-          roundWeatherTurns = 5
+          roundWeatherTurns = weatherTurnsFromHeldItem(actor, enemyWeather, 5)
           roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
@@ -643,6 +680,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             actor.status = selfStatus
             if (selfStatus === 'slp') actor.sleepTurns = 1 + Math.floor(Math.random() * 3)
             roundLog.push(`${actor.name} bị ${STATUS_INFO[selfStatus]?.label?.toLowerCase() ?? selfStatus}.`)
+            const itemCure = afterStatusHeldItem(actor, activePlayers().some((mon) => mon?.hp > 0 && hasAbility(mon, 'Unnerve')))
+            Object.assign(actor, itemCure.mon)
+            roundLog.push(...itemCure.logs)
           }
           continue
         }
@@ -652,7 +692,11 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         const target = redirectTargetByAbility(move, activeTargets, originalTarget)
         const targets = isSpreadMove(move) ? activeTargets : [target]
         const spreadPenalty = targets.length > 1 ? 0.75 : 1
-        for (const playerTarget of targets) damageTarget(actor, playerTarget, move, spreadPenalty)
+        let moveTotalDamage = 0
+        for (const playerTarget of targets) moveTotalDamage += damageTarget(actor, playerTarget, move, spreadPenalty)
+        const attackerItemAfter = afterMoveHeldItem({ attacker: actor, move, totalDamage: moveTotalDamage })
+        Object.assign(actor, attackerItemAfter.attacker)
+        roundLog.push(...attackerItemAfter.logs)
         if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
           applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
         }
@@ -670,6 +714,13 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const result = endTurnAbilityEffect(mon, effectiveEndWeather)
       Object.assign(mon, result.mon)
       if (result.boosts) applyStageBoost(nextStages, monKey(mon), result.boosts, roundLog, mon.name, mon)
+      roundLog.push(...result.logs)
+    }
+    for (const mon of activeEndMons) {
+      const isEnemyMon = nextEnemies.some((entry) => monKey(entry) === monKey(mon))
+      const opponents = isEnemyMon ? activePlayers() : nextEnemies
+      const result = endTurnHeldItemEffect(mon, opponents.some((entry) => entry?.hp > 0 && hasAbility(entry, 'Unnerve')))
+      Object.assign(mon, result.mon)
       roundLog.push(...result.logs)
     }
 
@@ -700,7 +751,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
     continuingRef.current = true
     const lead = activeIds.find((id) => team.find((mon) => monKey(mon) === id)?.hp > 0) ?? activeIds[0]
     onBattleEnd(outcome ?? 'lose', {
-      mode: 'double', enemies: enemies.map(clearBattleVolatile), team: team.map(clearBattleVolatile), participantUids: [...participantsRef.current], leadUid: lead,
+      mode: 'double',
+      enemies: enemies.map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(mon)))),
+      team: team.map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(mon)))),
+      participantUids: [...participantsRef.current], leadUid: lead,
     })
   }
 
@@ -799,7 +853,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
                 <div style={{ fontSize: 11.5, marginBottom: 7 }}>Chọn hành động cho <strong>{selectedMon?.name}</strong></div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 7 }}>
                   {(selectedMon?.moves ?? []).map((move) => (
-                    <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                    <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0 || !heldItemMoveAllowed(selectedMon, move).allowed} title={heldItemMoveAllowed(selectedMon, move).reason} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
                       <span>{move.name}</span><TypeBadge type={move.type} />
                     </button>
                   ))}

@@ -95,7 +95,7 @@ function resolveDualLanguage(text) {
 // lẫn trong phần đó nên phải VỚT tag ra nối xuống cuối trước khi cắt,
 // không thì tiền/fact… mất theo scaffold.
 const CHAPTERINFO_LINE_RE = /^[ \t]*\[ChapterInfo[^\]\n]*\][ \t]*$/im
-const STATE_TAG_RE = /\[\[\s*(?:MONEY|REL|BODY|SHOP|NPC|FACT|POKEMON|HUNGER|DATE|MOVE|BATTLE)[^\]]*\]\]/gi
+const STATE_TAG_RE = /\[\[\s*(?:MONEY|REL|BODY|SHOP|POKECENTER|NPC|FACT|POKEMON|EVOLVE|EVOLUTION|LEVEL|LV|FRIEND|FRIENDSHIP|ITEM|EQUIP|UNEQUIP|TRAIN|HUNGER|DATE|MOVE|BATTLE)[^\]]*\]\]/gi
 
 function stripPresetScaffold(text) {
   let out = text

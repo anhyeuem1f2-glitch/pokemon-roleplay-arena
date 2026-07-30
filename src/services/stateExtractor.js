@@ -20,6 +20,7 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]] — Pokémon đang sở hữu tăng cấp trực tiếp do Kẹo Hiếm/năng lực; không dùng cho EXP trận thường hay luyện tập.
 [[FRIEND Tên Pokémon | +5 | lý do]] — độ thân mật thay đổi khi chính văn thể hiện rõ niềm tin/gắn bó tăng hoặc giảm; không cộng cho tương tác xã giao.
 [[ITEM Tên vật phẩm | số lượng]] — nhận/mất vật phẩm; số âm là mất. Nếu Kẹo Hiếm hữu hạn được dùng thì đi cùng [[LEVEL]], còn Kẹo Hiếm vô hạn thì không trừ.
+[[EQUIP Tên Pokémon | Tên held item]] — Pokémon đã thực sự được cho cầm trang bị đang có trong túi; EQUIP tự trừ 1 món nên không kèm [[ITEM ... | -1]] cho cùng hành động. [[UNEQUIP Tên Pokémon]] — đã tháo/cất trang bị. Không dùng EQUIP cho Key Stone/Z-Ring/Dynamax Band/Tera Orb vì đó là thiết bị của huấn luyện viên.
 [[SHOP Tên cửa hàng | loại=... | quy mô=...]] — CHỈ khi nhân vật đã bước vào bên trong và lượt dừng để mua.
 [[POKECENTER Tên trung tâm]] — CHỈ khi nhân vật đang ở bên trong Trung tâm Pokémon.
 [[HUNGER người+25]] / [[HUNGER pokemon+30]] — ăn uống (cộng) hoặc đói lả/lao lực rõ (trừ).

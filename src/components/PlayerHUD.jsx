@@ -8,6 +8,7 @@ import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { describeCustomMechanicEffects } from '../data/playerPerks.js'
 import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
+import { heldItemDescription, heldItemLabel, isHoldableItem, isTrainerGear, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -349,12 +350,24 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
   const catalog = useMemo(() => Object.fromEntries(SHOP_ITEMS.map((it) => [it.id, it])), [])
   const grouped = useMemo(() => {
     const g = {}
-    for (const it of inventory) {
-      const cat = catalog[it.id]?.category ?? 'misc'
+    for (const it of (inventory ?? [])) {
+      const cat = catalog[it.id]?.category ?? resolveHeldItemByName(it)?.category ?? 'misc'
       ;(g[cat] ??= []).push(it)
     }
     return g
   }, [inventory, catalog])
+
+  function addInventoryItem(item) {
+    if (!item) return
+    const resolved = resolveHeldItemByName(item) ?? item
+    setInventory((cur) => {
+      const list = [...(cur ?? [])]
+      const idx = list.findIndex((it) => it.id === resolved.id)
+      if (idx >= 0) list[idx] = { ...list[idx], qty: (list[idx].qty ?? 1) + 1 }
+      else list.push({ id: resolved.id, name: resolved.name, qty: 1 })
+      return list
+    })
+  }
 
   function consume(itemId) {
     setInventory((cur) =>
@@ -409,6 +422,54 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
     setFeedback(`${mon.name} ăn ${item.name} → Lv.${mon.level} ⭢ Lv.${leveled.level}! (HP ${leveled.hp}/${leveled.maxHp})`)
   }
 
+
+  function equipHeldItem(item, monIndex) {
+    const mon = party[monIndex]
+    const equipment = resolveHeldItemByName(item)
+    if (!mon || !equipment) return
+    if (!equipment.holdable) {
+      setFeedback(`${equipment.name} là thiết bị của huấn luyện viên, không thể cho Pokémon cầm.`)
+      return
+    }
+    if (!item.infinite && (item.qty ?? 1) <= 0) return
+    const oldItem = mon.heldItem ? resolveHeldItemByName(mon.heldItem) : null
+    if (oldItem?.id === equipment.id) {
+      setFeedback(`${mon.name} đang cầm ${equipment.name}.`)
+      return
+    }
+    // Tính toàn bộ kết quả trước rồi mới setState: tránh lỗi React updater
+    // ghi đè túi/đội hình khi vừa tháo món cũ vừa đeo món mới.
+    const updated = { ...mon, heldItem: normalizeHeldItem({ ...equipment, fromInfinite: Boolean(item.infinite) }) }
+    const nextParty = party.map((m, i) => (i === monIndex ? updated : m))
+    setParty(nextParty)
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon({ ...playerMon, heldItem: updated.heldItem })
+    setInventory((cur) => {
+      let next = (cur ?? []).map((it) => (
+        it.id === item.id && !it.infinite ? { ...it, qty: (it.qty ?? 1) - 1 } : it
+      )).filter((it) => it.infinite || (it.qty ?? 0) > 0)
+      if (oldItem && !mon.heldItem?.fromInfinite) {
+        const idx = next.findIndex((it) => it.id === oldItem.id)
+        if (idx >= 0) next[idx] = { ...next[idx], qty: (next[idx].qty ?? 1) + 1 }
+        else next.push({ id: oldItem.id, name: oldItem.name, qty: 1 })
+      }
+      return next
+    })
+    setFeedback(`${mon.name} đã cầm ${equipment.name}.${oldItem && !mon.heldItem?.fromInfinite ? ` ${oldItem.name} được cất lại vào túi.` : ''}`)
+  }
+
+  function unequipHeldItem(monIndex) {
+    const mon = party[monIndex]
+    const oldItem = resolveHeldItemByName(mon?.heldItem)
+    if (!mon || !oldItem) return
+    const updated = { ...mon, heldItem: null }
+    setParty(party.map((m, i) => (i === monIndex ? updated : m)))
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon({ ...playerMon, heldItem: null })
+    if (!mon.heldItem?.fromInfinite) addInventoryItem(oldItem)
+    setFeedback(mon.heldItem?.fromInfinite
+      ? `Đã tháo ${oldItem.name} khỏi ${mon.name}; bản vô hạn vẫn nằm sẵn trong túi.`
+      : `Đã tháo ${oldItem.name} khỏi ${mon.name} và cất lại vào túi.`)
+  }
+
   function healBodyPart(item, partKey) {
     const amount = HUMAN_HEAL[item.id] ?? 10
     const next = { ...bodyStatus, [partKey]: Math.max(0, (bodyStatus[partKey] ?? 0) - amount) }
@@ -418,12 +479,25 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
     setFeedback(`Đã dùng ${item.name} cho ${label} → thương tích còn ${next[partKey]}/100.`)
   }
 
-  if (inventory.length === 0) {
-    return <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Trống — mua đồ tại các cửa hàng trong truyện.</div>
+  if ((inventory ?? []).length === 0 && !party.some((mon) => mon?.heldItem)) {
+    return <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Trống — mua hoặc nhận đồ trong truyện.</div>
   }
 
   return (
     <div>
+      {party.some((mon) => mon.heldItem) && (
+        <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 7, marginBottom: 8 }}>
+          <div style={{ fontSize: 10.5, color: 'var(--amber)', marginBottom: 5 }}>TRANG BỊ ĐANG MANG</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {party.map((mon, i) => mon.heldItem && (
+              <div key={mon.uid ?? i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', fontSize: 10.5 }}>
+                <span title={heldItemDescription(mon.heldItem)}>{mon.name} — {heldItemLabel(mon)}</span>
+                <button className="btn" style={{ fontSize: 9.5, padding: '2px 7px' }} onClick={() => unequipHeldItem(i)}>Tháo</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* Tabs phân mục — hiện đủ mọi mục, mục trống mờ đi */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
         {Object.entries(SHOP_CATEGORY_LABELS).map(([cat, label]) => {
@@ -454,10 +528,12 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {grouped[openCat].map((it) => {
-            const info = catalog[it.id]
+            const info = catalog[it.id] ?? resolveHeldItemByName(it)
             const isOpen = openItem === it.id
             const canHealMon = openCat === 'heal' && (it.id in HEAL_AMOUNTS || it.id === 'fullrestore' || it.id === 'revive')
             const canHealHuman = openCat === 'human' && it.id in HUMAN_HEAL
+            const canEquip = isHoldableItem(info)
+            const trainerGear = isTrainerGear(info)
             return (
               <div key={it.id} style={{ border: '1px solid var(--line)', borderRadius: 7 }}>
                 <button
@@ -512,8 +588,24 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         </div>
                       </div>
                     )}
-                    {!canHealMon && !canHealHuman && it.id !== 'rarecandy' && (
-                      <div style={{ color: 'var(--text-dim)' }}>Dùng trong trận/truyện — sẽ được nối ở đợt sau.</div>
+                    {canEquip && (
+                      <div>
+                        <div style={{ marginBottom: 4, color: 'var(--amber)' }}>Cho Pokémon cầm:</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {party.map((mon, i) => (
+                            <button key={mon.uid ?? i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => equipHeldItem(it, i)}>
+                              {mon.name} · đang cầm: {heldItemLabel(mon)}
+                            </button>
+                          ))}
+                          {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}
+                        </div>
+                      </div>
+                    )}
+                    {trainerGear && (
+                      <div style={{ color: 'var(--text-dim)' }}>Thiết bị này nằm trong túi của huấn luyện viên và tự được kiểm tra khi dùng Mega/Z/Dynamax/Tera; không cho Pokémon cầm.</div>
+                    )}
+                    {!canHealMon && !canHealHuman && !canEquip && !trainerGear && it.id !== 'rarecandy' && (
+                      <div style={{ color: 'var(--text-dim)' }}>Vật phẩm này chưa có thao tác trực tiếp trong giao diện.</div>
                     )}
                   </div>
                 )}

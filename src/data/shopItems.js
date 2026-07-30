@@ -1,3 +1,5 @@
+import { ALL_EQUIPMENT_ITEMS, resolveHeldItemByName } from './pokemonHeldItems.js'
+
 // Danh mục vật phẩm bán trong shop — giá tham khảo theo game gốc. Dữ liệu
 // nhỏ, nổi tiếng, ổn định nên gõ tay được (khác species/stat/moveset).
 // AI kể chuyện có thể mở shop ở bất kỳ đâu qua tag [[SHOP Tên]]; danh mục
@@ -38,6 +40,9 @@ export const SHOP_ITEMS = [
   // Vẫn phải nằm trong SHOP_ITEMS vì đây là danh mục TRA CỨU dùng chung (túi
   // đồ đọc tên/mô tả/phân mục từ đây) — bỏ ra ngoài thì túi hiện "không rõ".
   { id: 'rarecandy', name: 'Kẹo Hiếm', price: 0, category: 'special', noShop: true, desc: 'Nâng 1 Pokémon lên 1 cấp ngay lập tức. Không bán ở bất kỳ đâu.' },
+  // Held item + thiết bị huấn luyện viên: mặc định KHÔNG bán đại trà. AI có
+  // thể trao bằng [[ITEM]], còn shop chuyên biệt về sau mới được phép lọc và bán.
+  ...ALL_EQUIPMENT_ITEMS,
 ]
 
 
@@ -73,6 +78,8 @@ export const SHOP_CATEGORY_LABELS = {
   status: 'Chữa trạng thái',
   human: 'Đồ cho người',
   misc: 'Tiện ích',
+  held: 'Trang bị Pokémon',
+  gimmick: 'Thiết bị chiến đấu',
   special: 'Đặc biệt',
 }
 
@@ -124,6 +131,11 @@ export function resolveItemByName(rawName) {
   // 3. Khớp chứa — ưu tiên tên DÀI NHẤT để "Super Potion" không rơi vào
   // "Potion" (đúng bài học "đánh con nào cũng ra Charmander" ở đợt trước:
   // hàm dò tên sắp xếp sai thứ tự thì luôn trúng món ngắn nhất).
+  // 3. Trang bị động (Mega Stone/Z-Crystal riêng) có thể chưa nằm trong
+  // danh mục tĩnh nhưng vẫn phải được nhận diện từ tên Showdown.
+  const dynamicHeld = resolveHeldItemByName(rawName)
+  if (dynamicHeld) return dynamicHeld
+  // 4. Khớp chứa — ưu tiên tên dài nhất.
   const candidates = SHOP_ITEMS
     .filter((it) => {
       const n = normalizeName(it.name)

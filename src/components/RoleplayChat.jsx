@@ -22,6 +22,7 @@ import { detectMentionedArea, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectDoubleBattle, detectPokecenter, detectInteractiveShop, inferInteractiveShop } from '../data/storyScenes.js'
 import { resolveItemByName } from '../data/shopItems.js'
+import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
@@ -272,6 +273,7 @@ function filterSupplementalDuplicates(extra, applied) {
   const appliedEvolutionTargets = new Set((applied?.evolutions ?? []).flatMap((entry) => [monKey(entry.from), monKey(entry.to)]))
   const appliedItems = new Set((applied?.items ?? []).map((entry) => itemKey(entry.name)))
   const appliedFriends = new Set((applied?.friendships ?? []).map((entry) => monKey(entry.target)))
+  const appliedEquipment = new Set((applied?.equipment ?? []).map((entry) => `${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`))
   const appliedPokemon = new Set((applied?.pokemons ?? []).map((entry) => monKey(entry.species)))
   const appliedRel = new Set((applied?.rel ?? []).map((entry) => monKey(entry.name)))
   const appliedBody = new Set((applied?.body ?? []).map((entry) => entry.part))
@@ -298,6 +300,7 @@ function filterSupplementalDuplicates(extra, applied) {
     ),
     items: (extra?.items ?? []).filter((entry) => !appliedItems.has(itemKey(entry.name))),
     friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriends.has(monKey(entry.target))),
+    equipment: (extra?.equipment ?? []).filter((entry) => !appliedEquipment.has(`${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`)),
     pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(monKey(entry.species))),
     rel: (extra?.rel ?? []).filter((entry) => !appliedRel.has(monKey(entry.name))),
     body: (extra?.body ?? []).filter((entry) => !appliedBody.has(entry.part)),
@@ -813,16 +816,41 @@ export default function RoleplayChat() {
     }
 
     try {
-      const itemChanges = (parsed.items ?? []).map((raw) => ({
-        entry: resolveItemByName(raw.name), qty: raw.qty, raw,
-      }))
+      // Một số model xuất cả [[ITEM Leftovers | -1]] lẫn
+      // [[EQUIP Pikachu | Leftovers]] cho cùng hành động. EQUIP đã tự lấy một
+      // món khỏi túi, nên nếu không gộp hai tag thì trang bị bị trừ hai lần và
+      // thậm chí EQUIP thất bại dù người chơi có đúng một món.
+      const equipDebits = new Map()
+      for (const directive of parsed.equipment ?? []) {
+        if (directive.mode !== 'equip') continue
+        const entry = resolveHeldItemByName(directive.item) ?? resolveItemByName(directive.item)
+        if (entry && isHoldableItem(entry)) equipDebits.set(entry.id, (equipDebits.get(entry.id) ?? 0) + 1)
+      }
+      const itemChanges = (parsed.items ?? []).map((raw) => {
+        const entry = resolveItemByName(raw.name)
+        let qty = raw.qty
+        let absorbedByEquip = 0
+        if (entry && qty < 0) {
+          const pending = equipDebits.get(entry.id) ?? 0
+          absorbedByEquip = Math.min(Math.abs(qty), pending)
+          if (absorbedByEquip > 0) {
+            qty += absorbedByEquip
+            equipDebits.set(entry.id, pending - absorbedByEquip)
+          }
+        }
+        return { entry, qty, raw, absorbedByEquip }
+      })
       let previewInventory = [...(latestInventoryRef.current ?? [])]
 
-      for (const { entry, qty, raw } of itemChanges) {
+      for (const { entry, qty, raw, absorbedByEquip } of itemChanges) {
         if (!entry) {
           report.lines.push(`⚠ Không áp vật phẩm “${raw.name}”: không có trong danh mục`)
           continue
         }
+        if (absorbedByEquip > 0) {
+          report.lines.push(`ℹ ${entry.name} x${absorbedByEquip} sẽ được trừ bởi lệnh trang bị, không trừ lặp bằng ITEM`)
+        }
+        if (qty === 0) continue
         const at = previewInventory.findIndex((it) => it.id === entry.id)
         if (qty > 0) {
           if (at === -1) previewInventory.push({ id: entry.id, name: entry.name, qty })
@@ -842,24 +870,76 @@ export default function RoleplayChat() {
         }
       }
 
-      const validItemChanges = itemChanges.filter((x) => x.entry)
-      if (validItemChanges.length > 0) {
-        setInventory((cur) => {
-          let next = [...(cur ?? [])]
-          for (const { entry, qty } of validItemChanges) {
-            const at = next.findIndex((it) => it.id === entry.id)
-            if (at === -1) {
-              if (qty > 0) next.push({ id: entry.id, name: entry.name, qty })
-            } else {
-              if (next[at].infinite && qty < 0) continue
-              const left = (next[at].qty ?? 0) + qty
-              if (left > 0) next[at] = { ...next[at], qty: left }
-              else next.splice(at, 1)
-            }
+      const validItemChanges = itemChanges.filter((x) => x.entry && (x.qty !== 0 || x.absorbedByEquip > 0))
+      let equipmentChanged = false
+
+      const addPreviewItem = (entry) => {
+        const at = previewInventory.findIndex((it) => it.id === entry.id)
+        if (at >= 0) previewInventory[at] = { ...previewInventory[at], qty: (previewInventory[at].qty ?? 1) + 1 }
+        else previewInventory.push({ id: entry.id, name: entry.name, qty: 1 })
+      }
+
+      // Trang bị được áp SAU [[ITEM]] để một lượt “nhận rồi đeo” hoạt động
+      // đúng. Toàn bộ túi + đội được tính trước rồi set một lần, tránh updater
+      // bất đồng bộ làm nhân đôi vật phẩm hoặc đeo xong nhưng túi không trừ.
+      for (const directive of parsed.equipment ?? []) {
+        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        if (!targetMon) {
+          report.lines.push(`⚠ Không áp trang bị “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          continue
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const oldItem = resolveHeldItemByName(targetMon.heldItem)
+
+        if (directive.mode === 'unequip') {
+          if (!oldItem) {
+            report.lines.push(`ℹ ${targetMon.name} hiện không cầm trang bị nào`)
+            continue
           }
-          return syncTraitGrantedItems(next, playerTraits)
-        })
-        latestInventoryRef.current = syncTraitGrantedItems(previewInventory, playerTraits)
+          if (!targetMon.heldItem?.fromInfinite) addPreviewItem(oldItem)
+          replacePreviewMon(identity, (mon) => ({ ...mon, heldItem: null }))
+          equipmentChanged = true
+          report.lines.push(targetMon.heldItem?.fromInfinite
+            ? `✅ Tháo trang bị: ${targetMon.name} bỏ ${oldItem.name}; bản vô hạn vẫn ở trong túi`
+            : `✅ Tháo trang bị: ${targetMon.name} → ${oldItem.name} được cất lại vào túi`)
+          continue
+        }
+
+        const entry = resolveHeldItemByName(directive.item) ?? resolveItemByName(directive.item)
+        if (!entry || !isHoldableItem(entry)) {
+          report.lines.push(`⚠ Không áp trang bị “${directive.item}”: đây không phải held item hợp lệ của Pokémon`)
+          continue
+        }
+        if (oldItem?.id === entry.id) {
+          report.lines.push(`ℹ ${targetMon.name} đã cầm ${entry.name}`)
+          continue
+        }
+        const at = previewInventory.findIndex((it) => it.id === entry.id)
+        if (at < 0 || (!previewInventory[at].infinite && (previewInventory[at].qty ?? 0) <= 0)) {
+          report.lines.push(`⚠ Không thể cho ${targetMon.name} cầm ${entry.name}: vật phẩm không có trong túi`)
+          continue
+        }
+        const fromInfinite = Boolean(previewInventory[at].infinite)
+        if (!fromInfinite) {
+          const left = (previewInventory[at].qty ?? 1) - 1
+          if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
+          else previewInventory.splice(at, 1)
+        }
+        if (oldItem && !targetMon.heldItem?.fromInfinite) addPreviewItem(oldItem)
+        const heldItem = normalizeHeldItem({ ...entry, fromInfinite })
+        replacePreviewMon(identity, (mon) => ({ ...mon, heldItem }))
+        equipmentChanged = true
+        report.lines.push(`✅ Trang bị: ${targetMon.name} cầm ${entry.name}${oldItem && !targetMon.heldItem?.fromInfinite ? ` · ${oldItem.name} được cất lại` : ''}`)
+      }
+
+      if (validItemChanges.length > 0 || equipmentChanged) {
+        const finalInventory = syncTraitGrantedItems(previewInventory, playerTraits)
+        setInventory(finalInventory)
+        setParty(previewParty)
+        setPlayerMon(previewActive)
+        latestInventoryRef.current = finalInventory
+        latestPartyRef.current = previewParty
+        latestPlayerMonRef.current = previewActive
       }
 
       const trainLv = parsed.training ?? 0
@@ -1251,7 +1331,7 @@ export default function RoleplayChat() {
             appliedTags: {
               money: stateParsed.money, moneyEntries: stateParsed.moneyEntries, rel: stateParsed.rel, body: stateParsed.body,
               pokemons: stateParsed.pokemons, levels: stateParsed.levels,
-              evolutions: stateParsed.evolutions, items: stateParsed.items,
+              evolutions: stateParsed.evolutions, items: stateParsed.items, equipment: stateParsed.equipment,
               friendships: stateParsed.friendships, hunger: stateParsed.hunger,
               dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
               training: stateParsed.training, moves: stateParsed.moveDirectives,

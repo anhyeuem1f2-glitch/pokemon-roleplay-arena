@@ -5,7 +5,8 @@ import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, sync
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 import { normalizeMapLocation } from '../data/mapPins.js'
-import { ensureMonAbility } from '../data/pokemonAbilities.js'
+import { abilityId, ensureMonAbility } from '../data/pokemonAbilities.js'
+import { normalizeHeldItem } from '../data/pokemonHeldItems.js'
 import { normalizeFriendship } from '../data/pokemonFriendship.js'
 import { loadStoredMessages, persistMessagesSafely } from '../utils/storageOptimizer.js'
 import { repairSaveSlots } from '../utils/saveManager.js'
@@ -607,11 +608,27 @@ export function GameProvider({ children }) {
     }
   }, [])
 
-  // Đợt 77: nâng save cũ lên Ability + độ thân mật sau khi Pokédex thật
-  // tải xong. Chọn Ability ổn định theo uid, nên F5 không làm đổi Ability.
+  // Đợt 81: nâng save cũ lên Ability + thân mật + metadata trang bị.
+  // Eviolite cần biết cá thể còn tiến hóa được hay không; held item cũ có thể
+  // chỉ là chuỗi tự do. Chuẩn hóa một lần sau khi Pokédex Showdown tải xong,
+  // giữ nguyên uid nên F5 không làm đổi Ability hoặc vật phẩm.
   useEffect(() => {
     if (pokedexStatus !== 'ready') return
-    const upgrade = (mon) => ensureMonAbility(normalizeFriendship(mon), pokedexSpecies)
+    const upgrade = (mon) => {
+      if (!mon) return mon
+      const key = abilityId(mon.species ?? mon.name)
+      const entry = (pokedexSpecies ?? []).find((item) =>
+        abilityId(item.species) === key || abilityId(item.name) === key,
+      )
+      const normalized = ensureMonAbility(normalizeFriendship(mon, entry?.baseFriendship), pokedexSpecies)
+      return {
+        ...normalized,
+        heldItem: normalizeHeldItem(normalized.heldItem),
+        hasEvo: entry?.hasEvo ?? normalized.hasEvo ?? false,
+        hasPrevo: entry?.hasPrevo ?? normalized.hasPrevo ?? false,
+        baseSpeciesId: normalized.baseSpeciesId ?? entry?.baseSpeciesId ?? null,
+      }
+    }
     setPlayerMon((cur) => upgrade(cur))
     setParty((cur) => (cur ?? []).map(upgrade))
     setPcBox((cur) => (cur ?? []).map(upgrade))

@@ -461,6 +461,9 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
       ? speciesEntry.baseFriendship
       : DEFAULT_FRIENDSHIP,
     baseStats: speciesEntry.baseStats ?? null,
+    // Held item Eviolite và forme battle cần biết cá thể còn tiến hoá được.
+    hasEvo: Boolean(speciesEntry.hasEvo),
+    hasPrevo: Boolean(speciesEntry.hasPrevo),
     // Đợt 71: LƯU cờ này lên chính đối tượng mon. Trước đây `isTrainerMon`
     // chỉ là tham số dùng nội bộ cho pickMoves rồi bị vứt đi — nên
     // `enemyMon.isTrainerMon` luôn undefined, kéo theo 2 hậu quả: thưởng EXP
@@ -554,6 +557,8 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     spriteId: targetEntry.spriteId ?? targetEntry.species,
     types: [...(targetEntry.types ?? generated.types ?? mon.types ?? [])],
     baseStats: targetEntry.baseStats ?? generated.baseStats ?? mon.baseStats ?? null,
+    hasEvo: Boolean(targetEntry.hasEvo),
+    hasPrevo: Boolean(targetEntry.hasPrevo),
     ability: evolvedAbility.name,
     abilitySlot: evolvedAbility.slot,
     abilityHidden: evolvedAbility.hidden,

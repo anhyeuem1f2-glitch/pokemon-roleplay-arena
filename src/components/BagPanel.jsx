@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { SHOP_ITEMS } from '../data/shopItems.js'
+import { resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 
 // ============ TÚI ĐỒ THEO NHÓM (đợt 69) ============
 // Yêu cầu người chơi: "đại tu túi đồ theo giao diện như tính năng chiến đấu
@@ -16,7 +17,8 @@ export const BAG_POCKETS = [
   { key: 'pokefood', icon: '🍖', label: 'Thức ăn Pokémon', desc: 'Độ no cho Pokémon' },
   { key: 'food', icon: '🍙', label: 'Đồ ăn người', desc: 'Độ no cho người chơi' },
   { key: 'human', icon: '🩹', label: 'Y tế cho người', desc: 'Băng gạc, cứu thương' },
-  { key: 'gimmick', icon: '💠', label: 'Trang bị đặc biệt', desc: 'Key Stone, Z-Ring, Tera Orb…' },
+  { key: 'held', icon: '◆', label: 'Trang bị Pokémon', desc: 'Vật phẩm Pokémon cầm trong trận' },
+  { key: 'gimmick', icon: '💠', label: 'Thiết bị huấn luyện viên', desc: 'Key Stone, Z-Ring, Tera Orb…' },
   { key: 'misc', icon: '🎒', label: 'Linh tinh', desc: 'Vật phẩm khác' },
 ]
 
@@ -26,7 +28,9 @@ const GIMMICK_IDS = /key-?stone|mega-?(ring|bracelet|stone)|z-?(ring|crystal|pow
 /** Xếp 1 vật phẩm vào ngăn nào. */
 export function pocketOf(item) {
   if (!item) return 'misc'
-  if (GIMMICK_IDS.test(item.id ?? '')) return 'gimmick'
+  const equipment = resolveHeldItemByName(item)
+  if (equipment?.category === 'gimmick' || GIMMICK_IDS.test(item.id ?? '')) return 'gimmick'
+  if (equipment?.category === 'held') return 'held'
   const known = SHOP_ITEMS.find((s) => s.id === item.id)
   const cat = known?.category ?? item.category
   return BAG_POCKETS.some((p) => p.key === cat) ? cat : 'misc'

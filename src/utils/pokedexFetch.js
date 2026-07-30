@@ -11,7 +11,7 @@ import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './brows
 // cho 1 số loài nhất định, và những loài đó ĐÃ nằm sẵn trong dữ liệu tải về.
 
 const POKEDEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
-const CACHE_KEY = 'trainer-arena:pokedex-cache-v9'
+const CACHE_KEY = 'trainer-arena:pokedex-cache-v10'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 function toID(text) {
@@ -61,6 +61,12 @@ function normalizeEntry(species, key) {
     // trong dữ liệu — cần fallback về learnset của loài GỐC (VD Necrozma) vì
     // trong game thật, các form này thường học đúng bộ chiêu của loài gốc.
     baseSpeciesId: species.forme && species.baseSpecies ? toID(species.baseSpecies) : null,
+    // Đợt 81: forme Mega trong Showdown khai đúng viên đá bắt buộc. Giữ
+    // các field này để battle không còn mở Mega chỉ vì có một món bất kỳ.
+    requiredItem: species.requiredItem ?? null,
+    requiredItems: Array.isArray(species.requiredItems) ? [...species.requiredItems] : [],
+    battleOnly: species.battleOnly ?? null,
+    changesFrom: species.changesFrom ?? null,
     // Đợt 39 — suy MỨC LEVEL HỢP LÝ: hasPrevo (đã tiến hoá từ loài khác),
     // hasEvo (còn tiến hoá được), BST (tổng base stats) làm proxy độ mạnh.
     hasPrevo: Boolean(species.prevo),

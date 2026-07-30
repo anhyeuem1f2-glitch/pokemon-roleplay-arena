@@ -16,11 +16,18 @@ import TypeBadge from './TypeBadge.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import BagPanel from './BagPanel.jsx'
 import {
-  abilityLabel, clearBattleVolatile, contactAbilityEffect, effectiveSpeed, endTurnAbilityEffect,
+  abilityId, abilityLabel, clearBattleVolatile, contactAbilityEffect, effectiveSpeed, endTurnAbilityEffect,
   endTurnStatusEffect, hasAbility, knockoutAbilityEffect, modifyBoostsByAbility, modifyDamageByAbilities,
   moveHitsWithAbilities, movePriorityWithAbility, resolveAbilityForEntry, statusIsBlocked, switchOutAbility,
   moveStatusIsBlocked, weatherDefenseMultiplier, weatherFromAbility, weatherIsSuppressed,
 } from '../data/pokemonAbilities.js'
+import {
+  afterDamageHeldItem, afterMoveHeldItem, afterStatusHeldItem, beforeDamageHeldItem, canUseMegaWithItems,
+  canUseZMoveWithItems, clearHeldItemVolatile, endTurnHeldItemEffect, heldItemDamageMultiplier,
+  heldItemLabel, heldItemMoveAllowed, heldItemPriorityPenalty, heldItemSpeedMultiplier,
+  heldItemStatMultiplier, defenderTypesWithHeldItem, lockChoiceMove, restoreTransientHeldItem, trainerHasGear,
+  weatherTurnsFromHeldItem, zCrystalMatchesMove,
+} from '../data/pokemonHeldItems.js'
 
 // Hiệu ứng trạng thái — đợt đầu tiên (bỏng/tê liệt/ngủ), sẽ bổ sung dần theo
 // yêu cầu (VD độc, đóng băng, giảm/tăng chỉ số theo giai đoạn...).
@@ -62,7 +69,8 @@ export function stageMult(stage) {
 
 export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO, weatherKey = null) {
   if (move.power <= 0) return 0
-  const eff = getEffectivenessMulti(move.type, defender.types)
+  const defenderTypes = defenderTypesWithHeldItem(defender, move.type)
+  const eff = getEffectivenessMulti(move.type, defenderTypes?.length ? defenderTypes : ['normal'])
   // Miễn nhiễm hệ phải gây đúng 0 sát thương. Bản cũ Math.max(1, ...) làm
   // chiêu hệ Đất vẫn rút 1 HP của Flying/Ghost miễn nhiễm.
   if (eff === 0) return 0
@@ -91,17 +99,19 @@ export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, 
   const defStageMult = stageMult(defStage)
 
   if (attacker.stats && defender.stats) {
-    const atkStat = (isSpecial ? attacker.stats.spa : attacker.stats.atk) * burnPenalty * atkStageMult
-    const defStat = (isSpecial ? defender.stats.spd : defender.stats.def) * defStageMult * weatherDefenseMultiplier(defender, move, weatherKey)
+    const atkKey = isSpecial ? 'spa' : 'atk'
+    const defKey = isSpecial ? 'spd' : 'def'
+    const atkStat = (isSpecial ? attacker.stats.spa : attacker.stats.atk) * burnPenalty * atkStageMult * heldItemStatMultiplier(attacker, atkKey)
+    const defStat = (isSpecial ? defender.stats.spd : defender.stats.def) * defStageMult * heldItemStatMultiplier(defender, defKey) * weatherDefenseMultiplier(defender, move, weatherKey)
     const base = (levelFactor * move.power * (atkStat / defStat)) / 50 + 2
-    return Math.max(1, Math.round(base * stab * eff * randomFactor))
+    return Math.max(1, Math.round(base * stab * eff * randomFactor * heldItemDamageMultiplier(attacker, move, eff, defender)))
   }
 
   // Fallback khi 1 trong 2 bên không có baseStats thật (VD loài dự phòng
   // trong danh sách 151 tĩnh) — dùng tỉ lệ chênh lệch level thay cho Atk/Def.
   const base = (levelFactor * move.power * burnPenalty) / 50 + 2
   const levelRatio = (attacker.level / defender.level) * (atkStageMult / (defStageMult * weatherDefenseMultiplier(defender, move, weatherKey)))
-  return Math.max(1, Math.round(base * levelRatio * stab * eff * randomFactor))
+  return Math.max(1, Math.round(base * levelRatio * stab * eff * randomFactor * heldItemDamageMultiplier(attacker, move, eff, defender)))
 }
 
 function effLabel(mult) {
@@ -185,6 +195,9 @@ function StatusCard({ mon, align, stages }) {
         )}
         <span title="Ability" style={{ fontFamily: 'var(--font-mono)', fontSize: 8.5, color: 'var(--text-dim)' }}>
           ◇ {abilityLabel(mon)}
+        </span>
+        <span title="Trang bị Pokémon" style={{ fontFamily: 'var(--font-mono)', fontSize: 8.5, color: mon.heldItem ? 'var(--amber)' : 'var(--text-dim)' }}>
+          ◆ {heldItemLabel(mon)}
         </span>
       </div>
       <HealthBar hp={mon.hp} maxHp={mon.maxHp} bars={mon.bossBars ?? 1} />
@@ -352,23 +365,7 @@ function MenuButton({ label, sub, color, onClick, disabled }) {
  * isWild: hiện tại luôn coi là trận hoang dã (cho phép RUN). Khi hệ thống
  * phân biệt được trận với NPC/trainer (không được chạy), truyền isWild=false.
  */
-// ID vật phẩm mở khoá từng gimmick (đợt 42) — người chơi phải CÓ trong túi
-// mới dùng được, không tự có từ đầu. Khớp theo id hoặc tên (không phân biệt
-// hoa thường) để linh hoạt với hàng mua/nhận qua truyện.
-const GIMMICK_ITEMS = {
-  mega: ['key-stone', 'mega-ring', 'mega-bracelet', 'key stone', 'mega'],
-  zmove: ['z-ring', 'z-power-ring', 'z-crystal', 'z ring', 'z-power'],
-  dynamax: ['dynamax-band', 'dynamax band'],
-  tera: ['tera-orb', 'tera orb'],
-}
-function hasGimmickItem(inventory, kind) {
-  const keys = GIMMICK_ITEMS[kind] ?? []
-  return (inventory ?? []).some((it) => {
-    const id = (it.id ?? '').toLowerCase()
-    const name = (it.name ?? '').toLowerCase()
-    return keys.some((k) => id.includes(k) || name.includes(k))
-  })
-}
+// Đợt 81: điều kiện gimmick được kiểm tra tập trung trong pokemonHeldItems.js.
 
 
 /** Pokémon thu phục phải trở về chỉ số cá thể bình thường. Boss hoang dã có
@@ -482,6 +479,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   // nguyên HP hiện tại (đúng game: base HP của Mega không đổi), giữ nguyên
   // 4 chiêu + trạng thái. Kéo dài hết trận.
   function doMega(megaEntry) {
+    const permission = canUseMegaWithItems(playerMon, megaEntry, inventory, devUnlockGimmicks)
+    if (!permission.ok) {
+      pushLog(`Không thể Mega Evolution: ${permission.reason}`)
+      return
+    }
     backupOnce()
     // Mega là CÙNG CÁ THỂ: giữ uid/IV/EV/Nature/EXP/thân mật và tính lại
     // stats bằng baseStats của forme Mega. Bản cũ gọi buildWildMon trực tiếp
@@ -573,6 +575,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       hp: Math.min(cur.dyna ? Math.round(cur.hp / 2) : cur.hp, base.maxHp),
       status: cur.status,
       sleepTurns: cur.sleepTurns,
+      heldItem: cur.heldItem ?? null,
+      consumedHeldItem: cur.consumedHeldItem,
     }))
     preGimmickRef.current = null
   }
@@ -696,7 +700,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const weatherEnv = getBattleEnv(weather)
       battleEnvRef.current = weatherEnv
       setBattleEnv(weatherEnv)
-      setWeatherTurns(5)
+      setWeatherTurns(weatherTurnsFromHeldItem(mon, weather, 5))
       pushLog(`${abilityLabel(mon)} của ${mon.name} làm thay đổi thời tiết!`)
     }
     if (hasAbility(mon, 'Intimidate')) {
@@ -728,7 +732,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const entrants = [
       { mon: playerMon, side: 'player' },
       { mon: enemyMon, side: 'enemy' },
-    ].sort((a, b) => effectiveSpeed(b.mon) - effectiveSpeed(a.mon))
+    ].sort((a, b) => (effectiveSpeed(b.mon) * heldItemSpeedMultiplier(b.mon)) - (effectiveSpeed(a.mon) * heldItemSpeedMultiplier(a.mon)))
     for (const entrant of entrants) applyEntryAbility(entrant.mon, entrant.side)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -751,11 +755,18 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const lines = []
     let turnEnv = battleEnv
     let turnWeatherTurns = weatherTurns
-    const enemyMove = (e.moves ?? [])[Math.floor(Math.random() * Math.max(1, e.moves?.length ?? 0))]
+    const enemyMovePool = (e.moves ?? []).filter((candidate) => heldItemMoveAllowed(e, candidate).allowed)
+    const enemyMove = enemyMovePool[Math.floor(Math.random() * Math.max(1, enemyMovePool.length))]
     const weatherKey = () => weatherIsSuppressed([p, e]) ? null : turnEnv?.key
 
     function executeMove(actor, defender, chosenMove, actorStages, defenderStages, actorSide) {
       if (!chosenMove || actor.hp <= 0 || defender.hp <= 0) return
+      const itemPermission = heldItemMoveAllowed(actor, chosenMove)
+      if (!itemPermission.allowed) {
+        lines.push(`${actor.name} không thể dùng ${chosenMove.name}: ${itemPermission.reason}`)
+        return
+      }
+      Object.assign(actor, lockChoiceMove(actor, chosenMove))
       if (!canActLocal(actor, lines)) return
       const currentWeather = weatherKey()
       if (!moveHitsWithAbilities(chosenMove, actor, defender, currentWeather, actorStages, defenderStages)) {
@@ -766,7 +777,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const moveWeather = moveWeatherKey(chosenMove)
       if (moveWeather) {
         turnEnv = getBattleEnv(moveWeather)
-        turnWeatherTurns = 5
+        turnWeatherTurns = weatherTurnsFromHeldItem(actor, moveWeather, 5)
         lines.push(`${actor.name} dùng ${chosenMove.name} và làm thay đổi thời tiết!`)
       }
 
@@ -783,7 +794,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         if (chosenMove.self?.boosts && Math.random() * 100 < (chosenMove.self.chance ?? 100)) {
           boostLocal(actorStages, chosenMove.self.boosts, actor.name, lines, actor)
         }
-        if (chosenMove.status ?? chosenMove.self?.status) applyStatusLocal(actor, chosenMove.status ?? chosenMove.self?.status, currentWeather, lines, chosenMove)
+        if (chosenMove.status ?? chosenMove.self?.status) {
+          applyStatusLocal(actor, chosenMove.status ?? chosenMove.self?.status, currentWeather, lines, chosenMove)
+          const itemCure = afterStatusHeldItem(actor, hasAbility(defender, 'Unnerve'))
+          Object.assign(actor, itemCure.mon)
+          lines.push(...itemCure.logs)
+        }
         return
       }
 
@@ -794,7 +810,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       let suppressSecondary = false
       let moveImmune = false
       let actualHits = 0
-      const effectiveness = getEffectivenessMulti(chosenMove.type, defender.types)
+      const effectiveness = getEffectivenessMulti(chosenMove.type, defenderTypesWithHeldItem(defender, chosenMove.type))
 
       for (let hit = 0; hit < hits && defender.hp > 0; hit++) {
         let damage = computeDamage(chosenMove, actor, defender, actorStages, defenderStages, currentWeather)
@@ -816,21 +832,44 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           else boostLocal(defenderStages, abilityResult.defenderBoost, defender.name, lines, defender, { fromOpponent: false })
         }
         if (abilityResult.attackerBoost) boostLocal(actorStages, abilityResult.attackerBoost, actor.name, lines, actor)
-        const dealt = Math.min(defender.hp, abilityResult.damage)
-        defender.hp = Math.max(0, defender.hp - abilityResult.damage)
+        const itemBefore = beforeDamageHeldItem({
+          attacker: actor, defender, move: chosenMove, damage: abilityResult.damage, effectiveness, berryBlocked: hasAbility(actor, 'Unnerve'),
+        })
+        Object.assign(defender, itemBefore.defender)
+        lines.push(...itemBefore.logs)
+        moveImmune ||= Boolean(itemBefore.immune)
+        const finalDamage = itemBefore.damage
+        const dealt = Math.min(defender.hp, finalDamage)
+        defender.hp = Math.max(0, defender.hp - finalDamage)
         totalDamage += dealt
-        if (!abilityResult.immune) actualHits += 1
+        if (!abilityResult.immune && !itemBefore.immune) actualHits += 1
+        const itemAfter = afterDamageHeldItem({ attacker: actor, defender, move: chosenMove, damage: dealt, effectiveness, berryBlocked: hasAbility(actor, 'Unnerve') })
+        Object.assign(actor, itemAfter.attacker)
+        Object.assign(defender, itemAfter.defender)
+        if (itemAfter.attackerBoosts?.target === 'defender') {
+          boostLocal(defenderStages, { atk: 2, spa: 2 }, defender.name, lines, defender)
+        }
+        lines.push(...itemAfter.logs)
         // Rough Skin/Iron Barbs/Static... kích hoạt theo TỪNG lần tiếp xúc.
         // Bản cũ chỉ gọi một lần sau cả chuỗi multihit nên chiêu 5 hit bị
         // giảm phản lực sai và có thể tiếp tục đánh dù chính kẻ tấn công đã gục.
         const contact = contactAbilityEffect(actor, defender, chosenMove, dealt)
         if (contact) {
           if (contact.recoil && !hasAbility(actor, 'Magic Guard')) actor.hp = Math.max(0, actor.hp - contact.recoil)
-          if (contact.status && !statusBlocked(actor, contact.status, currentWeather)) actor.status = contact.status
+          if (contact.status && !statusBlocked(actor, contact.status, currentWeather)) {
+            actor.status = contact.status
+            const itemCure = afterStatusHeldItem(actor, hasAbility(defender, 'Unnerve'))
+            Object.assign(actor, itemCure.mon)
+            lines.push(...itemCure.logs)
+          }
           lines.push(contact.log)
         }
         if (abilityResult.immune || actor.hp <= 0) break
       }
+
+      const attackerItemAfter = afterMoveHeldItem({ attacker: actor, move: chosenMove, totalDamage })
+      Object.assign(actor, attackerItemAfter.attacker)
+      lines.push(...attackerItemAfter.logs)
 
       if (chosenMove.power > 0) {
         lines.push(`${actor.name} dùng ${chosenMove.name}! Gây ${totalDamage} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
@@ -852,6 +891,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
       if (defender.hp > 0 && !moveImmune) {
         applyStatusLocal(defender, chosenMove.status ?? (secondaryTriggered ? chosenMove.secondary?.status : null), currentWeather, lines, chosenMove)
+        const itemCure = afterStatusHeldItem(defender, hasAbility(actor, 'Unnerve'))
+        Object.assign(defender, itemCure.mon)
+        lines.push(...itemCure.logs)
       }
 
       if (totalDamage > 0 && chosenMove.drain) {
@@ -877,8 +919,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       void actorSide
     }
 
-    const pAction = { side: 'player', move, priority: movePriorityWithAbility(move, p), speed: effectiveSpeed(p, pStageNow, weatherKey()) }
-    const eAction = { side: 'enemy', move: enemyMove, priority: movePriorityWithAbility(enemyMove, e), speed: effectiveSpeed(e, eStageNow, weatherKey()) }
+    const pAction = { side: 'player', move, priority: movePriorityWithAbility(move, p) + heldItemPriorityPenalty(p), speed: effectiveSpeed(p, pStageNow, weatherKey()) * heldItemSpeedMultiplier(p) }
+    const eAction = { side: 'enemy', move: enemyMove, priority: movePriorityWithAbility(enemyMove, e) + heldItemPriorityPenalty(e), speed: effectiveSpeed(e, eStageNow, weatherKey()) * heldItemSpeedMultiplier(e) }
     const queue = [pAction, eAction].sort((a, b) => b.priority - a.priority || b.speed - a.speed || Math.random() - 0.5)
 
     for (const action of queue) {
@@ -900,6 +942,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const result = endTurnAbilityEffect(mon, effectiveEndWeather)
       Object.assign(mon, result.mon)
       if (result.boosts) boostLocal(stages, result.boosts, mon.name, lines, mon)
+      lines.push(...result.logs)
+    }
+    for (const mon of [p, e]) {
+      const result = endTurnHeldItemEffect(mon, hasAbility(mon === p ? e : p, 'Unnerve'))
+      Object.assign(mon, result.mon)
       lines.push(...result.logs)
     }
 
@@ -1054,6 +1101,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         if (result.boosts) boostLocal(stageMap, result.boosts, mon.name, lines, mon)
         lines.push(...result.logs)
       }
+      for (const mon of [defender, attacker]) {
+        const opponent = mon === defender ? attacker : defender
+        const result = endTurnHeldItemEffect(mon, hasAbility(opponent, 'Unnerve'))
+        Object.assign(mon, result.mon)
+        lines.push(...result.logs)
+      }
       if (nextWeatherTurns !== null) {
         nextWeatherTurns -= 1
         if (nextWeatherTurns <= 0) {
@@ -1080,13 +1133,15 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     }
 
     if (!canActLocal(attacker, lines)) return finishFreeTurn()
-    const enemyMove = (attacker.moves ?? [])[Math.floor(Math.random() * Math.max(1, attacker.moves?.length ?? 0))]
+    const enemyMovePool = (attacker.moves ?? []).filter((candidate) => heldItemMoveAllowed(attacker, candidate).allowed)
+    const enemyMove = enemyMovePool[Math.floor(Math.random() * Math.max(1, enemyMovePool.length))]
     if (!enemyMove) return finishFreeTurn()
+    Object.assign(attacker, lockChoiceMove(attacker, enemyMove))
 
     const moveWeather = moveWeatherKey(enemyMove)
     if (moveWeather) {
       activeEnv = getBattleEnv(moveWeather)
-      nextWeatherTurns = 5
+      nextWeatherTurns = weatherTurnsFromHeldItem(attacker, moveWeather, 5)
       lines.push(`${attacker.name} dùng ${enemyMove.name} và làm thay đổi thời tiết!`)
     }
     const weatherKey = effectiveWeather()
@@ -1103,6 +1158,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         boostLocal(eStageNow, enemyMove.self.boosts, attacker.name, lines, attacker)
       }
       applyStatusLocal(attacker, enemyMove.status ?? enemyMove.self?.status, weatherKey, lines)
+      const itemCure = afterStatusHeldItem(attacker, hasAbility(defender, 'Unnerve'))
+      Object.assign(attacker, itemCure.mon)
+      lines.push(...itemCure.logs)
       return finishFreeTurn()
     }
 
@@ -1114,7 +1172,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const hits = Array.isArray(enemyMove.multihit)
       ? enemyMove.multihit[0] + Math.floor(Math.random() * (enemyMove.multihit[1] - enemyMove.multihit[0] + 1))
       : Number.isFinite(enemyMove.multihit) ? enemyMove.multihit : 1
-    const effectiveness = getEffectivenessMulti(enemyMove.type, defender.types)
+    const effectiveness = getEffectivenessMulti(enemyMove.type, defenderTypesWithHeldItem(defender, enemyMove.type))
     let totalDealt = 0
     let actualHits = 0
     let suppressSecondary = false
@@ -1140,17 +1198,35 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       }
       if (abilityResult.attackerBoost) boostLocal(eStageNow, abilityResult.attackerBoost, attacker.name, lines, attacker)
       if (abilityResult.immune) break
-      const dealt = Math.min(defender.hp, abilityResult.damage)
-      defender.hp = Math.max(0, defender.hp - abilityResult.damage)
+      const itemBefore = beforeDamageHeldItem({ attacker, defender, move: enemyMove, damage: abilityResult.damage, effectiveness, berryBlocked: hasAbility(attacker, 'Unnerve') })
+      Object.assign(defender, itemBefore.defender)
+      lines.push(...itemBefore.logs)
+      if (itemBefore.immune) { moveImmune = true; break }
+      const dealt = Math.min(defender.hp, itemBefore.damage)
+      defender.hp = Math.max(0, defender.hp - itemBefore.damage)
       totalDealt += dealt
       actualHits += 1
+      const itemAfter = afterDamageHeldItem({ attacker, defender, move: enemyMove, damage: dealt, effectiveness, berryBlocked: hasAbility(attacker, 'Unnerve') })
+      Object.assign(attacker, itemAfter.attacker)
+      Object.assign(defender, itemAfter.defender)
+      if (itemAfter.attackerBoosts?.target === 'defender') boostLocal(pStageNow, { atk: 2, spa: 2 }, defender.name, lines, defender)
+      lines.push(...itemAfter.logs)
       const contact = contactAbilityEffect(attacker, defender, enemyMove, dealt)
       if (contact) {
         if (contact.recoil && !hasAbility(attacker, 'Magic Guard')) attacker.hp = Math.max(0, attacker.hp - contact.recoil)
-        if (contact.status && !statusIsBlocked(attacker, contact.status, weatherKey)) attacker.status = contact.status
+        if (contact.status && !statusIsBlocked(attacker, contact.status, weatherKey)) {
+          attacker.status = contact.status
+          const itemCure = afterStatusHeldItem(attacker, hasAbility(defender, 'Unnerve'))
+          Object.assign(attacker, itemCure.mon)
+          lines.push(...itemCure.logs)
+        }
         lines.push(contact.log)
       }
     }
+
+    const attackerItemAfter = afterMoveHeldItem({ attacker, move: enemyMove, totalDamage: totalDealt })
+    Object.assign(attacker, attackerItemAfter.attacker)
+    lines.push(...attackerItemAfter.logs)
 
     lines.push(`${attacker.name} ${prefix}dùng ${enemyMove.name}! Gây ${totalDealt} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
     if (defender.hp > 0 && !moveImmune) {
@@ -1161,6 +1237,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         boostLocal(pStageNow, enemyMove.secondary.boosts, defender.name, lines, defender, { fromOpponent: true })
       }
         applyStatusLocal(defender, enemyMove.status ?? (secondaryTriggered ? enemyMove.secondary?.status : null), weatherKey, lines, enemyMove)
+        const itemCure = afterStatusHeldItem(defender, hasAbility(attacker, 'Unnerve'))
+        Object.assign(defender, itemCure.mon)
+        lines.push(...itemCure.logs)
     } else if (defender.hp <= 0) {
       const knockout = knockoutAbilityEffect(attacker)
       if (knockout && attacker.hp > 0) {
@@ -1316,10 +1395,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       ? `${playerMon.name} không thể chiến đấu nữa! Bạn tung ${target.name} ra trận!`
       : `Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
     // Regenerator/Natural Cure kích hoạt khi rút về; lưu snapshot đó vào đội.
-    const withdrawn = switchOutAbility(playerMon)
+    const withdrawn = clearHeldItemVolatile(switchOutAbility(playerMon))
     setParty((cur) => syncMonInParty(cur, withdrawn))
     participantsRef.current.add(participantKey(target))
-    setPlayerMon({ ...target })
+    setPlayerMon(clearHeldItemVolatile({ ...target }))
     // Bậc chỉ số reset khi đổi Pokémon (đúng luật game gốc).
     setPStages({ ...STAGE_ZERO })
     applyEntryAbility(target, 'player')
@@ -1376,15 +1455,19 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           ...base,
           hp: Math.min(playerMon.dyna ? Math.round(playerMon.hp / 2) : playerMon.hp, base.maxHp),
           status: playerMon.status,
+          heldItem: playerMon.heldItem ?? null,
+          consumedHeldItem: playerMon.consumedHeldItem,
+          knockedOffHeldItem: playerMon.knockedOffHeldItem,
           ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
         }
       : {
           ...playerMon,
           ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
         }
-    const persistedMon = clearBattleVolatile(finalMon)
-    const finalParty = syncMonInParty(party, persistedMon)
-    const finalEnemy = clearBattleVolatile(enemyMon)
+    const persistedMon = restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(finalMon)))
+    const restoredParty = (party ?? []).map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(mon))))
+    const finalParty = syncMonInParty(restoredParty, persistedMon)
+    const finalEnemy = restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(enemyMon)))
     preGimmickRef.current = null
     setPlayerMon(persistedMon)
     // Đồng bộ máu/trạng thái về ĐỘI HÌNH — nếu không, HUD vẫn hiện máu đầy
@@ -1489,13 +1572,19 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                 busy={busy || battleOver}
                 options={{
                   mega: {
-                    available: megaFormes.length > 0 && (devUnlockGimmicks || hasGimmickItem(inventory, 'mega')),
-                    reason: megaFormes.length === 0 ? 'loài này không có forme Mega' : 'cần Key Stone + Mega Stone (chưa có trong túi)',
-                    onPick: () => (megaFormes.length === 1 ? doMega(megaFormes[0]) : setMegaPickOpen(true)),
+                    available: megaFormes.some((form) => canUseMegaWithItems(playerMon, form, inventory, devUnlockGimmicks).ok),
+                    reason: megaFormes.length === 0
+                      ? 'loài này không có forme Mega'
+                      : (canUseMegaWithItems(playerMon, megaFormes[0], inventory, devUnlockGimmicks).reason || 'không cầm đúng Mega Stone'),
+                    onPick: () => {
+                      const usable = megaFormes.filter((form) => canUseMegaWithItems(playerMon, form, inventory, devUnlockGimmicks).ok)
+                      if (usable.length === 1) doMega(usable[0])
+                      else setMegaPickOpen(true)
+                    },
                   },
                   zmove: {
-                    available: playerMon.moves.some((m) => m.power > 0) && (devUnlockGimmicks || hasGimmickItem(inventory, 'zmove')),
-                    reason: playerMon.moves.some((m) => m.power > 0) ? 'cần Z-Ring + Z-Crystal (chưa có trong túi)' : 'không có chiêu sát thương để phóng Z',
+                    available: canUseZMoveWithItems(playerMon, inventory, devUnlockGimmicks).ok,
+                    reason: canUseZMoveWithItems(playerMon, inventory, devUnlockGimmicks).reason,
                     onPick: () => {
                       setZArmed(true)
                       setGimmickOpen(false)
@@ -1503,12 +1592,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                     },
                   },
                   dynamax: {
-                    available: devUnlockGimmicks || hasGimmickItem(inventory, 'dynamax'),
+                    available: devUnlockGimmicks || trainerHasGear(inventory, 'dynamax'),
                     reason: 'cần Dynamax Band (chỉ có ở Galar) — chưa có trong túi',
                     onPick: doDynamax,
                   },
                   tera: {
-                    available: devUnlockGimmicks || hasGimmickItem(inventory, 'tera'),
+                    available: devUnlockGimmicks || trainerHasGear(inventory, 'tera'),
                     reason: 'cần Tera Orb (chỉ có ở Paldea) — chưa có trong túi',
                     color: TYPE_COLORS[playerMon.types[0]] ?? '#5fd7e8',
                     onPick: doTera,
@@ -1530,30 +1619,34 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             {/* Popup chọn Mega X/Y cho loài có 2 forme */}
             {megaPickOpen && (
               <div className="panel" style={{ position: 'absolute', top: 40, left: 0, zIndex: 5, padding: 8, display: 'flex', gap: 6 }}>
-                {megaFormes.map((f) => (
-                  <button key={f.name} className="btn" style={{ fontSize: 11 }} onClick={() => doMega(f)}>
-                    {f.name}
-                  </button>
-                ))}
+                {megaFormes.map((f) => {
+                  const permission = canUseMegaWithItems(playerMon, f, inventory, devUnlockGimmicks)
+                  return (
+                    <button key={f.name} className="btn" disabled={!permission.ok} title={permission.reason} style={{ fontSize: 11 }} onClick={() => doMega(f)}>
+                      {f.name} · {f.requiredItem ?? 'Mega Stone'}
+                    </button>
+                  )
+                })}
                 <button className="btn" style={{ fontSize: 11 }} onClick={() => setMegaPickOpen(false)}>✕</button>
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
               {playerMon.moves.map((move) => {
-                const zTarget = zArmed && move.power > 0
-                const zDisabled = zArmed && move.power <= 0
+                const zTarget = zArmed && (devUnlockGimmicks ? move.power > 0 : zCrystalMatchesMove(playerMon, move))
+                const zDisabled = (zArmed && !zTarget) || !heldItemMoveAllowed(playerMon, move).allowed
                 return (
                   <button
                     key={move.name}
                     className="btn"
                     disabled={busy || battleOver || zDisabled}
+                    title={!heldItemMoveAllowed(playerMon, move).allowed ? heldItemMoveAllowed(playerMon, move).reason : (zArmed && !zTarget ? 'Chiêu không cùng hệ với Z-Crystal đang cầm.' : '')}
                     onClick={() => {
                       if (zTarget) {
                         // Phóng Z-Move: bản Z của chiêu này, power theo bảng, dùng 1 lần.
                         setZArmed(false)
                         setGimmickUsed('zmove')
                         pushLog(`✦ ${playerMon.name} phóng Z-MOVE: Z-${move.name}!!`)
-                        handleMove({ ...move, name: `Z-${move.name}`, power: zPower(move.power) })
+                        handleMove({ ...move, baseMoveName: move.name, isZMove: true, name: `Z-${move.name}`, power: zPower(move.power) })
                       } else {
                         handleMove(move)
                       }

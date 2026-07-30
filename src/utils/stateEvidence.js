@@ -96,6 +96,8 @@ const ACQUIRE = [
 ]
 const LEVEL_UP = ['lên cấp', 'tăng cấp', 'level up', 'rare candy', 'kẹo hiếm', 'đạt lv', 'đạt level', 'cấp độ tăng', 'mạnh lên một bậc']
 const EVOLVE = ['tiến hóa', 'evolve', 'hóa thành', 'biến đổi thành', 'lột xác thành']
+const EQUIP_ITEM = ['đeo', 'trang bị', 'cho cầm', 'đưa cho giữ', 'gắn vào', 'trao cho cầm', 'cầm lấy', 'giữ trên người', 'cầm', 'mang theo']
+const UNEQUIP_ITEM = ['tháo', 'gỡ', 'cất lại', 'thu hồi', 'lấy lại', 'bỏ trang bị', 'không còn cầm']
 const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho']
 const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn']
 const MOVE = [
@@ -227,6 +229,16 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     return ok
   })
   next.moves = next.moveDirectives.map((entry) => entry.place)
+  next.equipment = (parsed?.equipment ?? []).filter((entry) => {
+    const ok = storySentences(prose).some((line) => {
+      const targetOk = genericMonTarget(entry.target) || mentions(line, entry.target)
+      const itemOk = entry.mode === 'unequip' || mentions(line, entry.item)
+      const actionOk = hasAny(line, entry.mode === 'unequip' ? UNEQUIP_ITEM : EQUIP_ITEM)
+      return targetOk && itemOk && actionOk && !hasFutureOrConditional(line) && !hasNegation(line)
+    })
+    if (!ok) reject(rejected, 'equipment', entry, `chính văn chưa xác nhận ${entry.mode === 'unequip' ? 'tháo trang bị khỏi' : 'trang bị cho'} ${entry.target}`)
+    return ok
+  })
   next.friendships = (parsed?.friendships ?? []).filter((entry) => {
     const ok = sentenceEvidence(prose, entry.target, entry.delta > 0 ? BOND_POSITIVE : BOND_NEGATIVE, { allowGeneric: true, allowNegation: entry.delta < 0 })
     if (!ok) reject(rejected, 'friendship', entry, `chính văn chưa thể hiện rõ độ thân mật của ${entry.target} thay đổi`)
@@ -292,6 +304,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.items = dedupeEntries(next.items, 'item', rejected)
   next.moveDirectives = dedupeEntries(next.moveDirectives, 'move', rejected)
   next.moves = next.moveDirectives.map((entry) => entry.place)
+  next.equipment = dedupeEntries(next.equipment, 'equipment', rejected)
   next.friendships = dedupeEntries(next.friendships, 'friendship', rejected)
   next.rel = dedupeEntries(next.rel, 'rel', rejected)
   next.body = dedupeEntries(next.body, 'body', rejected)

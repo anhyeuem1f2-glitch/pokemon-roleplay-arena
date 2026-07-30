@@ -228,7 +228,9 @@ export function modifyDamageByAbilities({ damage, move, attacker, defender, weat
   }
 
   if (!bypass) {
-    if (moveType === 'ground' && hasAbility(defender, 'Levitate')) {
+    const defenderHeldId = String(defender?.heldItem?.id ?? defender?.heldItem?.name ?? defender?.heldItem ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const groundedByIronBall = defenderHeldId === 'ironball' && !hasAbility(defender, 'Klutz')
+    if (moveType === 'ground' && hasAbility(defender, 'Levitate') && !groundedByIronBall) {
       logs.push(`${defender.name} miễn nhiễm chiêu hệ Đất nhờ Levitate!`)
       return { damage: 0, immune: true, healDefender, attackerBoost, defenderBoost, logs, suppressSecondary, sturdy }
     }

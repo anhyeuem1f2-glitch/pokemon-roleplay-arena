@@ -24,6 +24,7 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - CHỈ khi nhân vật đã THỰC SỰ BƯỚC VÀO BÊN TRONG cửa hàng, đang đứng trước quầy/kệ và lượt kể dừng để người chơi chọn mua: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật. Đi tới một thành phố, đi ngang/nhìn thấy cửa hàng, nhắc tên trung tâm mua sắm, hoặc chỉ nói “sẵn tiện mua sau” thì TUYỆT ĐỐI KHÔNG dùng SHOP. Chính văn phải nói rõ nhân vật đã vào trong; đừng tự liệt kê hàng, chỉ tả không khí rồi dừng.
 - Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. KHÔNG dùng POKEMON cho tiến hoá. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
 - Pokémon đang sở hữu TIẾN HOÁ thành loài khác: [[EVOLVE Tên hiện tại | Tên sau tiến hoá]]. Đây là CÙNG MỘT CÁ THỂ: app giữ uid/IV/EV/nature/EXP và thay hình ảnh/chỉ số loài; tuyệt đối không dùng [[POKEMON loài mới]] vì sẽ tạo bản sao. Nếu tiến hoá xảy ra đúng lúc lên cấp, khai cả [[LEVEL tên cũ | +1]] rồi [[EVOLVE tên cũ | tên mới]].
+- Pokémon đang sở hữu THỰC SỰ ĐƯỢC CHO CẦM trang bị trong chính văn: [[EQUIP Tên Pokémon | Tên vật phẩm]]. Vật phẩm phải đang có trong túi, phải là held item hợp lệ; EQUIP tự chuyển đúng 1 món khỏi túi nên KHÔNG xuất thêm [[ITEM ... | -1]] cho cùng hành động; nếu thay món cũ, app tự cất món cũ lại túi. Khi nhân vật tháo/cất trang bị: [[UNEQUIP Tên Pokémon]]. Key Stone, Z-Ring, Dynamax Band và Tera Orb là thiết bị của HUẤN LUYỆN VIÊN, không dùng EQUIP cho Pokémon.
 - Độ THÂN MẬT của một Pokémon đang sở hữu thay đổi RÕ RÀNG vì hành động trong chính văn: [[FRIEND Tên Pokémon | +5 | lý do ngắn]] hoặc số âm khi niềm tin bị tổn thương. Chỉ dùng khi truyện thực sự thể hiện Pokémon được chăm sóc, được cứu, được khen/tặng món yêu thích, cùng vượt khó, bị bỏ rơi/ngược đãi hoặc mất niềm tin; KHÔNG cộng chỉ vì đi bộ, nói chuyện xã giao hay xuất hiện cùng nhau. Mỗi lượt thường trong ±1-10, sự kiện rất lớn tối đa ±30; app kẹp tổng 0-255.
 - Nhân vật NHẬN ĐƯỢC hoặc MẤT ĐI vật phẩm (được tặng, nhặt được, dùng hết, bị lấy mất): [[ITEM Tên vật phẩm | số lượng]] — số lượng âm là mất đi, bỏ trống là 1. VD: [[ITEM Potion | 2]], [[ITEM Kẹo Hiếm]], [[ITEM Poké Ball | -1]]. CHỈ dùng khi truyện THỰC SỰ trao/lấy đồ; đừng tự phát đồ cho người chơi vô cớ. Nếu NĂNG LỰC ĐẶC BIỆT của người chơi (mục SIÊU NĂNG LỰC ĐẶC BIỆT ở trên) nói rằng họ có sẵn hay tạo ra được một loại vật phẩm nào đó, thì hãy DÙNG TAG NÀY để biến điều đó thành thật trong túi đồ, thay vì chỉ kể suông rồi để số liệu đứng yên.
 - Pokémon TĂNG CẤP TRỰC TIẾP vì Kẹo Hiếm hoặc một năng lực đặc biệt (không phải EXP trận/luyện tập): [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]]. Dùng +N khi tăng N cấp, dùng LvN khi truyện chốt cấp đích. Nếu dùng Kẹo Hiếm hữu hạn thì khai thêm [[ITEM Kẹo Hiếm | -1]]; nếu năng lực ghi Kẹo Hiếm vô hạn thì KHÔNG trừ. TUYỆT ĐỐI không dùng [[POKEMON]] để báo một Pokémon cũ lên cấp, và không dùng [[LEVEL]] sau trận thường hay [[TRAIN]] vì app đã tự tính EXP.
@@ -48,6 +49,8 @@ const EVOLVE_RE = /\[\[\s*(?:EVOLVE|EVOLUTION|TIẾN\s*(?:H[ÓO]A|HO[ÁA])|TIEN\
 // lạm dụng [[POKEMON Froakie | Lv11]], app hiểu là nhận con mới rồi bỏ qua vì
 // trùng loài — lời kể lên cấp nhưng biến đứng yên.
 const LEVEL_RE = /\[\[\s*(?:LEVEL|LV|CẤP|CAP)\s+([^\]|]+?)\s*\|\s*(?:Lv\.?\s*)?([+-]?\d+)\s*\]\]/gi
+const EQUIP_RE = /\[\[\s*(?:EQUIP|HOLD|TRANG\s*BỊ|TRANG\s*BI)\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
+const UNEQUIP_RE = /\[\[\s*(?:UNEQUIP|UNHOLD|THÁO\s*TRANG\s*BỊ|THAO\s*TRANG\s*BI)\s+([^\]]+?)\s*\]\]/gi
 const FRIEND_RE = /\[\[\s*(?:FRIEND|FRIENDSHIP|BOND|THÂN\s*MẬT|THAN\s*MAT)\s+([^\]|]+?)\s*\|\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi
 const DATE_ADV_RE = /\[\[\s*DATE\s*\+\s*(\d+)\s*\]\]/gi
 // Đợt 67: buổi luyện tập có chủ đích → EXP cho Pokémon. cường độ 1-3.
@@ -77,7 +80,7 @@ const POKECENTER_RE = /\[\[\s*POKECENTER(?:\s+([^\]]+?))?\s*\]\]/gi
  * Regex không neo dòng: model thực tế thường nhét tag giữa câu.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], equipment: [], hunger: [], moves: [], moveDirectives: [], items: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
   const moneyEntries = []
   const rel = []
@@ -177,6 +180,16 @@ export function parseStoryStateTags(text) {
       target: m[1].trim(), delta, note: (m[3] ?? '').trim() || null,
     })
   }
+  const equipment = []
+  for (const m of text.matchAll(EQUIP_RE)) {
+    const target = m[1].trim()
+    const item = m[2].trim()
+    if (target && item) equipment.push({ target, item, mode: 'equip' })
+  }
+  for (const m of text.matchAll(UNEQUIP_RE)) {
+    const target = m[1].trim()
+    if (target) equipment.push({ target, item: null, mode: 'unequip' })
+  }
   for (const m of text.matchAll(DATE_ADV_RE)) dateAdvance += parseInt(m[1], 10)
   for (const m of text.matchAll(TRAIN_RE)) {
     const n = parseInt((m[1] ?? '').trim(), 10)
@@ -225,6 +238,8 @@ export function parseStoryStateTags(text) {
     .replace(EVOLVE_RE, '')
     .replace(LEVEL_RE, '')
     .replace(FRIEND_RE, '')
+    .replace(EQUIP_RE, '')
+    .replace(UNEQUIP_RE, '')
     .replace(DATE_ADV_RE, '')
     .replace(TRAIN_RE, '')
     .replace(DATE_PART_RE, '')
@@ -239,7 +254,7 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, hunger, moves, moveDirectives, items, dateAdvance,
+  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, equipment, hunger, moves, moveDirectives, items, dateAdvance,
     training, datePart, pokecenter, cleaned }
 }
 

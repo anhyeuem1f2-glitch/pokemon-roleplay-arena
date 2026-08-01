@@ -2617,3 +2617,28 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `test-dot*.mjs`, ZIP bàn giao hoặc các file khác.
+
+## Cập nhật (đợt 94) — tương thích regex preset và quét lại biến
+
+**SỬA LỖI TAWA NUỐT MẤT CHÍNH VĂN.** Nguyên nhân là engine cũ lấy regex từ block phụ nhưng bỏ mất `placement`, `promptOnly`, `markdownOnly`, `minDepth` và `maxDepth`. Regex dùng để rút gọn lịch sử xa vì vậy bị chạy nhầm lên câu trả lời mới; riêng Tawa có script chỉ giữ `<meow_FM>`, khiến phần truyện biến mất và màn hình còn các khối `<user_input>` rỗng. Engine mới đọc cả `extensions.regex_scripts` lẫn `SPresetSettings`, nhận cả regex literal và regex chuỗi trần, loại trùng theo id, rồi áp đúng vai trò/phạm vi/độ sâu như SillyTavern.
+
+**CHỐT CHỐNG NUỐT Ở PHÍA APP.** Dù preset khai sai, regex làm reply hợp lệ thành rỗng hoặc chỉ giữ một mẩu status quá nhỏ cũng bị app bỏ kết quả xử lý và quay về reply gốc. Pipeline hiểu thêm `<story_scene>`, `<main_text>`, khối status của Tawa/Mie/Minh Nguyệt/Ako và gỡ echo `<user_input>/<interactive_input>` khỏi chính văn. Tag state nằm ngoài `<content>` vẫn được vớt riêng để cập nhật save, nhưng tag viết trong thinking/comment/input echo bị loại, tránh áp nhầm suy luận hậu trường.
+
+**MACRO VÀ LỊCH SỬ PRESET ĐƯỢC XỬ LÝ ĐÚNG.** `{{lastUserMessage}}`, `{{user}}` và `{{char}}` được thay trước khi gửi API; input mới nhất có chốt bất khả mất nếu regex dọn lịch sử cố xoá nó. Save preset nhập từ bản cũ không có metadata regex vẫn tương thích ở lớp hiển thị và không được tự ý sửa prompt; nạp lại file preset một lần sẽ lấy đủ scope mới.
+
+**BỐN PRESET ĐÃ ĐƯỢC MÔ PHỎNG TRỰC TIẾP.** Tawa Ω đọc 22 regex hợp lệ; Mie Mie đọc 43 regex thực thi và bỏ 7 dòng tiêu đề rỗng; Minh Nguyệt đọc 8; Ako đọc 14. Cùng một reply thử có thinking, content, status và input wrapper đều giữ nguyên chính văn, không mất input và không còn lộ status vào truyện.
+
+**THÊM “BIẾN PRESET” CHỈ DÙNG CHO GIAO DIỆN.** Trong bảng 🧬 của mỗi lượt có tab `Biến preset`: tự điền các ô từ văn gốc, cho thêm/sửa/xoá và lưu cách hiển thị của lượt. Lớp này tuyệt đối không có quyền sửa tiền, Pokémon, vật phẩm, vị trí hay save thật, đúng yêu cầu dùng để nhìn vui mắt ngay cả khi preset/SillyTavern không thực thi biến riêng.
+
+**THÊM “QUÉT LẠI BIẾN THẬT”.** Nút trong tab `Biến cập nhật` gọi lại State API trên chính văn đã lưu, bổ sung directive còn thiếu rồi đi qua cùng evidence validator, luật chế độ Thực tế, cổng tìm Pokémon và pipeline áp state chính. Mỗi tin lưu một ledger `appliedState`; lần quét sau biết rõ thay đổi nào đã áp, còn khóa đồng thời ngăn quét nền và quét tay cộng tiền/vật phẩm hai lần. Đây là đường sửa các ca như mua/nhận Ralts nhưng model quên xuất tag, không phải nút cheat biến.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–94 đều PASS (22/22), 63 module `.js` qua kiểm tra cú pháp. Test đợt 94 bao phủ regex trần/literal, scope và depth của Tawa, input mới nhất bất khả mất, fallback chống xoá toàn văn, save preset cũ, story scene, input echo, macro, biến giao diện, state tag ngoài content và loại state tag trong thinking. Bốn preset người dùng gửi cũng đã chạy qua mô phỏng tích hợp riêng.
+
+### File cần cập nhật lên GitHub sau đợt 94
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/` (đặc biệt các file nhạc nặng), `test-dot*.mjs`, bốn file preset JSON, ảnh báo lỗi hay ZIP bàn giao. ZIP đợt 94 chỉ chứa đúng `src/` và `README.md`.

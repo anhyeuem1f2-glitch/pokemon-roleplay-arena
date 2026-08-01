@@ -11,11 +11,11 @@ import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './brows
 // cho 1 số loài nhất định, và những loài đó ĐÃ nằm sẵn trong dữ liệu tải về.
 
 const POKEDEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
-// v14 giữ dữ liệu tiến hoá/sinh sản/catch rate và sửa kế thừa Friendship cho
-// các forme. Cache cũ đã gán 70 quá sớm nên Mega/forme có thể mất mức thân
-// mật gốc của loài cơ sở.
-const CACHE_KEY = 'trainer-arena:pokedex-cache-v14'
+// v15 buộc cache cũ tải lại metadata giới tính/ratio đầy đủ để migration save
+// không phải đoán 50/50 cho loài có tỉ lệ lệch, chỉ đực/cái hoặc vô giới tính.
+const CACHE_KEY = 'trainer-arena:pokedex-cache-v15'
 const LEGACY_CACHE_KEYS = [
+  'trainer-arena:pokedex-cache-v14',
   'trainer-arena:pokedex-cache-v13',
   'trainer-arena:pokedex-cache-v12',
   'trainer-arena:pokedex-cache-v11',

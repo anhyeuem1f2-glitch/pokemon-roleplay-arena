@@ -2571,3 +2571,49 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `test-dot*.mjs`, ZIP bàn giao hoặc các file khác.
+
+## Cập nhật (đợt 92) — nhận/mua Pokémon qua PC cập nhật đúng biến
+
+**SỬA CA RALTS ĐÃ NHẬN QUA PC NHƯNG ĐỘI HÌNH VẪN TRỐNG.** State API thực tế đã bóc đúng `POKEMON Ralts`, nhưng lớp evidence cũ chỉ chấp nhận khi tên loài và một cụm máy móc như “gia nhập đội/được tặng/thu phục” nằm trong cùng một câu. Văn nhập vai thường nhắc `Ralts` ở đoạn giao dịch, sau đó dùng “nó/quả Poké Ball” ở đoạn PC nhận hàng, nên tag bị bác oan. Validator mới hiểu cả câu trực tiếp “đã nhận Poké Ball chứa Ralts”, mua bán đã hoàn tất, và chuỗi nhiều câu gồm: loài gắn với giao dịch → PC/Box xác nhận chuyển giao → nhân vật thực sự lấy/cầm Poké Ball.
+
+**KHÔNG NỚI THÀNH CHEAT.** Lời hứa “sẽ gửi”, ý định mua, kiện chưa tiếp nhận, câu phủ định, lời rao bán hoặc chỉ nhắc tên loài ở nơi khác vẫn không cấp Pokémon. Cổng tìm Pokémon của chế độ Thực tế tiếp tục chặn tuyệt đối ở lượt tìm chung, kể cả khi model cố dựng một chuỗi nhận hàng giả.
+
+**SỬA LỖI MẤT DẤU TIẾNG VIỆT TRONG EVIDENCE.** Bộ kiểm tra cũ bỏ dấu trước khi tìm từ phủ định/tương lai, khiến `chứa` bị coi là `chưa`, `dính` bị coi là `định`, và `hay` có thể bị coi là `hãy`. Riêng hai nhóm từ mang ý nghĩa logic này nay được so theo Unicode có dấu; các bước nhận Poké Ball không còn bị từ chối vì câu văn tự nhiên.
+
+**PROMPT TRÍCH XUẤT ĐƯỢC ĐỒNG BỘ.** Cả model chính và State API được dặn dùng `POKEMON` cho mua/nhận qua PC sau khi giao hàng đã hoàn tất, nhưng không dùng khi người bán mới hứa gửi hoặc giao dịch thất bại.
+
+**MUA SẮM NHIỀU CÂU CŨNG ĐƯỢC ĐỐI CHIẾU ĐÚNG.** Tiền viết bằng chữ tiếng Việt như “một trăm mười một ngàn, bảy trăm sáu mươi” và “ba mươi ngàn” được đổi đúng sang `111760`/`30000`. Validator cho phép câu báo tổng giá và câu quẹt thẻ cách nhau tối đa vài câu, nhưng vẫn bác báo giá chưa trả, dự định hoặc phủ định. Danh sách vật phẩm có thể được gọi ở đầu đoạn rồi thanh toán/đóng gói ở cuối; tên và số lượng từng món vẫn phải khớp. State API bị cấm gom hàng mua thành `LOOT` ngẫu nhiên và phải xuất từng `ITEM` thật.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–92 đều PASS (20/20). Test đợt 92 bao phủ đúng đoạn Ralts qua PC của tester, câu nhận trực tiếp, mua hoàn tất, `chứa/dính` có dấu, tiền và bảy loại hàng trong chính văn mẫu; đồng thời bác nhận đòn, tương lai, phủ định, kiện không liên kết, sai số lượng/chưa thanh toán và xác nhận cổng tìm kiếm Thực tế vẫn ưu tiên chặn.
+
+### File cần cập nhật lên GitHub sau đợt 92
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, ZIP bàn giao hoặc các file khác.
+
+## Cập nhật (đợt 93) — audit toàn diện evidence và văn phong cập nhật biến
+
+**KHÔNG CÒN ÉP MỘT CÂU MÁY MÓC CHỨA ĐỦ TÊN + ĐỘNG TỪ + KẾT QUẢ.** Lớp evidence nay ghép một sự kiện trong cửa sổ các câu liền nhau: tên Pokémon/vật phẩm/địa danh có thể nằm ở câu trước, câu sau dùng đại từ hoặc mô tả kết quả. MOVE, LEVEL, EVOLVE, EQUIP/UNEQUIP, BADGE, QUEST, REL/FRIEND, BODY, REP, Ribbon/Mark và nhận Pokémon đều dùng cùng nguyên tắc liên kết này. Cửa sổ vẫn ngắn để một cái tên ở đầu chương không vô tình xác nhận hành động khác ở cuối chương.
+
+**PHỦ ĐỊNH VÀ TƯƠNG LAI ĐƯỢC XÉT THEO MỆNH ĐỀ.** Trước đây chỉ cần cả câu có chữ “không”, hành động thật như “không do dự, nhận lấy Poké Ball” cũng bị bác. Nay app xét đúng mệnh đề chứa hành động, gỡ các cụm thái độ không phủ định kết quả, nhưng vẫn chặn “không nhận”, “ngày mai sẽ trao”, “có thể là Eevee” và nhiệm vụ mới chỉ được hứa. Trường hợp “không còn cầm” được hiểu đúng là UNEQUIP; “không ghét” không còn bị hiểu sai thành hảo cảm giảm.
+
+**SỐ LƯỢNG VÀ GIAO DỊCH ĐƯỢC ĐỐI CHIẾU CHẶT HƠN.** ITEM x20 bắt buộc chính văn phải có đúng 20 bằng số hoặc chữ; một câu nhận một món không thể làm sinh hai mươi món. Ngược lại, hai lần trả cùng 500 trong hai sự kiện độc lập được cộng thành -1000 thay vì lần thứ hai bị gắn nhãn tag lặp. API cập nhật biến phụ được cấp tối đa 12.000 ký tự chính văn thay vì chỉ 4.000 ký tự đầu, đồng thời biết số bằng chứng tiền đã được luồng chính sử dụng để không áp trùng.
+
+**POKÉ BALL CHƯA XÁC ĐỊNH LÀ MỘT STATE RIÊNG.** Khi nhân vật nhặt/lấy/trộm một quả bóng chưa kiểm tra, app không bịa loài Pokémon và không biến nó thành Poké Ball rỗng. Tag `[[ITEM Poké Ball chưa xác định | 1]]` tạo vật chứa đặc biệt trong mục Đặc biệt; FACT lưu nguồn gốc/sự kiện pháp lý. Khi chính văn thực sự mở hoặc quét bóng và xác nhận loài, `[[POKEMON Loài | LvN]]` mới tạo cá thể và app tự tiêu thụ một vật chứa. Nếu kiểm tra thấy bóng trống còn dùng được, giao thức đổi `Poké Ball chưa xác định -1` thành `Poké Ball +1`; nếu bóng hỏng, bị trả hoặc bị tịch thu thì chỉ trừ vật chứa. Ở Thực tế, hành vi trộm vẫn chỉ tăng truy nã khi chính văn xác nhận có nhân chứng, bằng chứng hoặc phản ứng pháp luật — không tự biết một tội kín chưa bị phát hiện.
+
+**VẪN GIỮ CỔNG CHỐNG BỊA.** Tag, input người chơi và suy đoán không phải bằng chứng. Ý định tương lai, lời rao bán, vật chưa nhận, loài chỉ được đoán, số lượng sai, giao dịch chưa trả và Pokémon do lượt tìm đích danh bị khóa ở Thực tế vẫn không được áp. Kiến trúc tiếp tục dùng hai lớp: model chính/State API hiểu ngữ nghĩa và đề xuất directive; app đối chiếu lại bằng sự kiện nhìn thấy trong chính văn trước khi ghi save.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–93 đều PASS (21/21). Test đợt 93 bao phủ bóng bị trộm chưa rõ nội dung, chặn biến thành bóng rỗng/Eevee suy đoán, mở bóng qua ba câu để nhận Ralts, bóng trống chuyển thành bóng dùng được, đại từ/liên câu, “không do dự” so với phủ định thật, MOVE/EVOLVE/EQUIP/UNEQUIP/BADGE/BODY, số lượng ITEM và hai giao dịch trùng số tiền. Toàn bộ module `.js` tiếp tục được kiểm tra cú pháp riêng vì gói nguồn rút gọn không có `package.json` để chạy build chính thức.
+
+### File cần cập nhật lên GitHub sau đợt 93
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, ZIP bàn giao hoặc các file khác.

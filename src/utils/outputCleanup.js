@@ -1,4 +1,4 @@
-import { parseRegexLiteral } from './presetImport.js'
+import { applyPresetRegex, parseRegexLiteral } from './presetImport.js'
 import { stripActionChoiceBlocks } from './actionChoices.js'
 
 // Làm sạch nội dung AI trả về TRƯỚC khi hiển thị/lưu.
@@ -33,6 +33,14 @@ function extractContent(text) {
   return null // KHÔNG có content
 }
 
+function extractStoryScene(text) {
+  const parts = []
+  const re = /<(?:story_scene|main_text|正文)\b[^>]*>\s*([\s\S]*?)\s*<\/(?:story_scene|main_text|正文)\s*>/gi
+  let match
+  while ((match = re.exec(text)) !== null) if (match[1].trim()) parts.push(match[1].trim())
+  return parts.length ? parts.join('\n\n') : null
+}
+
 // Khi KHÔNG có <content> (preset thường / không preset): chỉ gỡ các block CoT
 // + hậu kỳ đã biết, giữ phần còn lại.
 const STRIP_BLOCKS = [
@@ -43,6 +51,9 @@ const STRIP_BLOCKS = [
   /<disclaimer>[\s\S]*?<\/disclaimer>/gi,
   /<parallel_world>[\s\S]*?<\/parallel_world>/gi,
   /<recap>[\s\S]*?<\/recap>/gi,
+  /<meow_FM\b[^>]*>[\s\S]*?<\/meow_FM>/gi,
+  /<Bảng trạng thái nhân vật\b[^>]*>[\s\S]*?<\/Bảng trạng thái nhân vật>/gi,
+  /<(?:character_status|status_panel|calendar_widget|author_note|profile|tableThink|tableEdit|hc)\b[^>]*>[\s\S]*?<\/(?:character_status|status_panel|calendar_widget|author_note|profile|tableThink|tableEdit|hc)>/gi,
   /<theater>[\s\S]*?<\/theater>/gi,
   /<schedule[^>]*>[\s\S]*?<\/schedule[^>]*>/gi,
   /<(?:actions?|action_choices?|choices?|choice|selection)\b[^>]*>[\s\S]*?<\/(?:actions?|action_choices?|choices?|choice|selection)\s*>/gi,
@@ -121,7 +132,17 @@ function stripPresetScaffold(text) {
 export function cleanAiOutput(text, customScripts) {
   if (!text) return text
 
-  const extracted = extractContent(text)
+  // Regex của preset phải chạy đúng scope/depth. Chốt chống nuốt: nếu một
+  // script lỗi biến reply có chữ thành rỗng, bỏ kết quả script và giữ reply gốc.
+  const regexProcessed = applyPresetRegex(text, customScripts, {
+    phase: 'display', role: 'assistant', depth: 0,
+  })
+  const originalHasProseBlock = /<(?:content|story_scene|main_text|正文)\b/i.test(text)
+  const regexKeptProseBlock = /<(?:content|story_scene|main_text|正文)\b/i.test(regexProcessed)
+  const suspiciousLoss = regexProcessed.trim().length < Math.min(240, text.trim().length * 0.18)
+    && originalHasProseBlock && !regexKeptProseBlock
+  const working = regexProcessed.trim() && !suspiciousLoss ? regexProcessed : text
+  const extracted = extractContent(working) ?? extractStoryScene(working)
   let cleaned
   if (extracted !== null) {
     // CÓ <content>: chính văn là phần trong đó. Vẫn gỡ nốt vài thẻ lồng
@@ -130,22 +151,16 @@ export function cleanAiOutput(text, customScripts) {
     // FIX đợt 45: regex script của preset trước đây CHỈ chạy ở nhánh không
     // có <content> → scaffold nằm TRONG content (jp/vn, comment vòng lặp...)
     // không bao giờ được gỡ. Giờ chạy ở CẢ 2 nhánh.
-    const customInContent = customScripts?.filter((s) => s.enabled) ?? []
-    for (const s of customInContent) {
-      const regex = parseRegexLiteral(s.findRegexRaw)
-      if (!regex) continue
-      try { cleaned = cleaned.replace(regex, s.replaceString ?? '') } catch { /* bỏ qua */ }
-    }
     for (const re of STRIP_BLOCKS) cleaned = cleaned.replace(re, '')
   } else {
     // KHÔNG có <content>: gỡ block CoT/hậu kỳ, giữ phần còn lại.
-    cleaned = text
-    const custom = customScripts?.filter((s) => s.enabled) ?? []
-    const scripts = custom.length ? custom : DEFAULT_SCRIPTS
-    for (const s of scripts) {
-      const regex = parseRegexLiteral(s.findRegexRaw)
-      if (!regex) continue
-      try { cleaned = cleaned.replace(regex, s.replaceString ?? '') } catch { /* bỏ qua */ }
+    cleaned = working
+    if (!(customScripts ?? []).some((script) => script.enabled)) {
+      for (const s of DEFAULT_SCRIPTS) {
+        const regex = parseRegexLiteral(s.findRegexRaw)
+        if (!regex) continue
+        try { cleaned = cleaned.replace(regex, s.replaceString ?? '') } catch { /* bỏ qua */ }
+      }
     }
     for (const re of STRIP_BLOCKS) cleaned = cleaned.replace(re, '')
   }
@@ -163,10 +178,20 @@ export function cleanAiOutput(text, customScripts) {
   cleaned = cleaned.replace(/<\/?safe>/gi, '')
   // Gỡ mọi thẻ lẻ còn sót của các block đã biết (phòng lệch cặp / thẻ mở đơn).
   cleaned = cleaned
-    .replace(/<\/?(?:content|thinking|Technical_Footer|danmu|disclaimer|parallel_world|recap|theater|jp|vn)>/gi, '')
+    // Preset đôi khi làm model lặp input trong reply. Đây không phải chính văn.
+    .replace(/<(?:user_input|interactive_input)\b[^>]*>[\s\S]*?<\/(?:user_input|interactive_input)\s*>/gi, '')
+    .replace(/<\/?(?:content|thinking|Technical_Footer|danmu|disclaimer|parallel_world|recap|theater|jp|vn|story_scene|main_text|正文|user_input|interactive_input)>/gi, '')
     .replace(/<\/?\s*Thúc đẩy đồng nhân\s*>/gi, '')
 
   return cleaned.replace(/\n{3,}/g, '\n\n').trim()
+}
+
+export function extractStateTags(raw) {
+  const eligible = String(raw ?? '')
+    .replace(/<(?:thinking|suy_nghĩ|suy_nghi|tableThink)\b[^>]*>[\s\S]*?<\/(?:thinking|suy_nghĩ|suy_nghi|tableThink)>/gi, '')
+    .replace(/<(?:user_input|interactive_input)\b[^>]*>[\s\S]*?<\/(?:user_input|interactive_input)>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+  return eligible.match(STATE_TAG_RE) ?? []
 }
 
 
@@ -189,6 +214,40 @@ export function extractThinking(raw) {
   const ci = raw.search(/<content>/i)
   if (ci > 0) return raw.slice(0, ci).trim()
   return ''
+}
+
+// Biến/trạng thái riêng của preset chỉ là lớp trình bày. Chúng KHÔNG được
+// quyền ghi vào save thật; state thật luôn đi qua giao thức [[...]] + validator.
+export function extractPresetUiVariables(raw) {
+  if (!raw) return []
+  const results = []
+  const seen = new Set()
+  const blocked = new Set([
+    'content', 'thinking', 'story_scene', 'main_text', 'user_input', 'interactive_input',
+    'jp', 'vn', 'safe', 'details', 'summary', 'style', 'script',
+  ])
+  const push = (key, value, group = 'Preset') => {
+    const cleanKey = String(key ?? '').replace(/[_-]+/g, ' ').trim()
+    const cleanValue = String(value ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!cleanKey || !cleanValue || cleanValue.length > 300 || blocked.has(cleanKey.toLowerCase())) return
+    const token = `${cleanKey.toLowerCase()}|${cleanValue}`
+    if (seen.has(token)) return
+    seen.add(token)
+    results.push({ key: cleanKey, value: cleanValue, group })
+  }
+
+  // XML leaf phổ biến của Tawa/Mie/Minh Nguyệt/Ako.
+  const leaf = /<([\p{L}][\p{L}\p{N}_-]{1,50})\b[^>]*>\s*([^<>\r\n]{1,300})\s*<\/\1\s*>/gu
+  let match
+  while ((match = leaf.exec(raw)) !== null && results.length < 80) push(match[1], match[2], 'XML preset')
+
+  // Status compact: [Tên|giá trị|ghi chú]. Loại trừ tag metadata/state của app.
+  const pipeLine = /^\s*\[([^\]\n|]{1,60})\|([^\]\n]{1,300})\]\s*$/gm
+  while ((match = pipeLine.exec(raw)) !== null && results.length < 80) {
+    if (/^(?:ChapterInfo|Metadata|MONEY|REL|BODY|SHOP|LOOT|POKEMON|ITEM|FACT|MOVE|QUEST|BADGE)$/i.test(match[1].trim())) continue
+    push(match[1], match[2].split('|').join(' · '), 'Bảng preset')
+  }
+  return results
 }
 
 // ============ CẮT CHÍNH VĂN TẠI ĐIỂM CHỜ NGƯỜI CHƠI (đợt 66) ============

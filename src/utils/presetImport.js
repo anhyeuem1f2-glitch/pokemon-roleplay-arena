@@ -44,13 +44,21 @@ function normalizeOrder(data) {
 // Chuyển 1 chuỗi regex literal kiểu JS ("/pattern/flags") thành RegExp thật.
 // Trả về null nếu không parse được (regex lỗi, tránh crash cả app).
 export function parseRegexLiteral(str) {
-  if (typeof str !== 'string' || !str.startsWith('/')) return null
-  const lastSlash = str.lastIndexOf('/')
-  if (lastSlash <= 0) return null
-  const pattern = str.slice(1, lastSlash)
-  const flags = str.slice(lastSlash + 1)
+  if (typeof str !== 'string' || !str.trim()) return null
+  const source = str.trim()
+  let pattern = source
+  let flags = 'g'
+  // SillyTavern chấp nhận cả literal `/.../gi` lẫn chuỗi regex trần.
+  // Nhiều preset Trung/Việt dùng dạng trần, trước đây app âm thầm bỏ qua.
+  if (source.startsWith('/')) {
+    const lastSlash = source.lastIndexOf('/')
+    if (lastSlash <= 0) return null
+    pattern = source.slice(1, lastSlash)
+    flags = source.slice(lastSlash + 1).trim()
+  }
+  flags = [...new Set(`${flags}g`.split('').filter((flag) => 'dgimsuvy'.includes(flag)))].join('')
   try {
-    return new RegExp(pattern, flags.includes('g') ? flags : flags + 'g')
+    return new RegExp(pattern, flags)
   } catch {
     return null
   }
@@ -61,21 +69,25 @@ export function parseRegexLiteral(str) {
 // đặc biệt identifier "SPresetSettings" chứa JSON con `RegexBinding.regexes`.
 // Đọc ra để người dùng tự bật/tắt từng script trong trang Cài đặt.
 function extractRegexScripts(data) {
+  const candidates = []
+  if (Array.isArray(data.extensions?.regex_scripts)) candidates.push(...data.extensions.regex_scripts)
   const settingsBlock = data.prompts.find((p) => p.identifier === 'SPresetSettings')
-  if (!settingsBlock?.content) return []
-  let inner
-  try {
-    inner = JSON.parse(settingsBlock.content)
-  } catch {
-    return []
+  if (settingsBlock?.content) {
+    try {
+      const inner = JSON.parse(settingsBlock.content)
+      if (Array.isArray(inner?.RegexBinding?.regexes)) candidates.push(...inner.RegexBinding.regexes)
+    } catch {
+      // Preset vẫn dùng được dù block thiết lập phụ bị hỏng JSON.
+    }
   }
-  const regexes = inner?.RegexBinding?.regexes
-  if (!Array.isArray(regexes)) return []
-
-  return regexes
+  const seen = new Set()
+  return candidates
     .map((r) => {
       const regex = parseRegexLiteral(r.findRegex)
       if (!regex) return null
+      const dedupeKey = r.id ? `id:${r.id}` : `${r.scriptName ?? ''}|${r.findRegex}|${r.replaceString ?? ''}`
+      if (seen.has(dedupeKey)) return null
+      seen.add(dedupeKey)
       const replaceString = r.replaceString ?? ''
       // Script "làm đẹp" thường chèn HTML/CSS dài (<style>, <div>...) — app
       // này hiện chỉ render text thuần (.story-text), chưa render HTML, nên
@@ -84,15 +96,73 @@ function extractRegexScripts(data) {
       // sách để bạn tự bật lại nếu muốn (VD sau này app hỗ trợ render HTML).
       const isDecorative = /<style|<div|<button|class="/i.test(replaceString)
       return {
-        id: r.id || r.scriptName,
-        scriptName: r.scriptName,
+        id: r.id || r.scriptName || `regex-${seen.size}`,
+        scriptName: r.scriptName || r.id || `Regex ${seen.size}`,
         findRegexRaw: r.findRegex,
         replaceString,
+        placement: Array.isArray(r.placement) ? r.placement.map(Number).filter(Number.isFinite) : [2],
+        minDepth: r.minDepth !== null && r.minDepth !== undefined && r.minDepth !== '' && Number.isFinite(Number(r.minDepth)) ? Number(r.minDepth) : null,
+        maxDepth: r.maxDepth !== null && r.maxDepth !== undefined && r.maxDepth !== '' && Number.isFinite(Number(r.maxDepth)) ? Number(r.maxDepth) : null,
+        markdownOnly: Boolean(r.markdownOnly),
+        promptOnly: Boolean(r.promptOnly),
         isDecorative,
         enabled: !r.disabled && !isDecorative,
       }
     })
     .filter(Boolean)
+}
+
+function isInDepth(script, depth) {
+  if (script.minDepth !== null && depth < script.minDepth) return false
+  if (script.maxDepth !== null && depth > script.maxDepth) return false
+  return true
+}
+
+/** Áp regex đúng phạm vi SillyTavern: placement 1=user, 2=assistant. */
+export function applyPresetRegex(text, scripts, { phase = 'display', role = 'assistant', depth = 0 } = {}) {
+  let out = String(text ?? '')
+  const placement = role === 'user' ? 1 : 2
+  for (const script of scripts ?? []) {
+    if (!script?.enabled || !isInDepth(script, depth)) continue
+    const legacyScript = script.promptOnly === undefined && script.markdownOnly === undefined
+      && script.placement === undefined && script.minDepth === undefined && script.maxDepth === undefined
+    // Save từ bản cũ chỉ lưu regex output, không lưu scope. Không được tự
+    // đem chúng sang sửa prompt vì có thể xoá input. Nạp lại preset sẽ có đủ
+    // metadata mới và chạy đúng cả hai pha.
+    if (phase === 'prompt' && legacyScript) continue
+    if (script.placement?.length && !script.placement.includes(placement)) continue
+    // promptOnly: chỉ sửa bản gửi model; markdownOnly: chỉ sửa bản hiển thị.
+    // Cả hai false nghĩa là dùng được ở cả hai pha như SillyTavern.
+    if (phase === 'display' && script.promptOnly && !script.markdownOnly) continue
+    if (phase === 'prompt' && script.markdownOnly && !script.promptOnly) continue
+    const regex = parseRegexLiteral(script.findRegexRaw)
+    if (!regex) continue
+    try { out = out.replace(regex, script.replaceString ?? '') } catch { /* bỏ regex preset lỗi */ }
+  }
+  return out
+}
+
+/** Chạy regex lịch sử mà không cho preset xoá mất input mới nhất của người chơi. */
+export function applyPresetRegexToMessages(messages, scripts) {
+  const eligible = messages
+    .map((message, index) => ({ message, index }))
+    .filter(({ message }) =>
+      (message?.role === 'user' || message?.role === 'assistant')
+      && !String(message.content ?? '').startsWith('[Hệ thống'),
+    )
+  const depthByIndex = new Map(eligible.slice().reverse().map(({ index }, depth) => [index, depth]))
+  return messages.map((message, index) => {
+    if (!depthByIndex.has(index) || String(message.content ?? '').startsWith('[Hệ thống')) return message
+    const depth = depthByIndex.get(index)
+    const original = String(message.content ?? '')
+    let content = applyPresetRegex(original, scripts, { phase: 'prompt', role: message.role, depth })
+    // Lịch sử cũ được phép bị preset rút gọn; riêng user input mới nhất là dữ
+    // liệu bất khả mất. Nếu regex dọn lịch sử nuốt nó, bọc lại theo giao thức chung.
+    if (message.role === 'user' && depth === 0 && !content.trim() && original.trim()) {
+      content = `<user_input>\n${original}\n</user_input>`
+    }
+    return { ...message, content }
+  })
 }
 
 export async function importMainPreset(file) {
@@ -185,7 +255,11 @@ export function buildPresetPrompt(blocks, dynamic) {
     .map((b) => (b.marker ? markerMap[b.identifier] ?? '' : b.content))
     .join('\n\n')
 
-  const resolved = resolveSetvarMacros(raw)
+  const commonMacros = raw
+    .replace(/\{\{lastUserMessage\}\}/gi, dynamic.lastUserMessage ?? '')
+    .replace(/\{\{user\}\}/gi, dynamic.user ?? dynamic.playerName ?? '')
+    .replace(/\{\{char\}\}/gi, dynamic.char ?? dynamic.characterName ?? '')
+  const resolved = resolveSetvarMacros(commonMacros)
 
   const idx = resolved.indexOf(CHAT_HISTORY_SENTINEL)
   if (idx === -1) {

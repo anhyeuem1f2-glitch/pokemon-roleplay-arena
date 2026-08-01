@@ -1,7 +1,7 @@
 import { getActiveLoreEntries } from './lorebook.js'
 import { getActiveWorldbook } from './worldbook.js'
 import { buildCanonTrainerNote } from '../data/canonTrainers.js'
-import { buildPresetPrompt } from './presetImport.js'
+import { applyPresetRegexToMessages, buildPresetPrompt } from './presetImport.js'
 import { buildSystemPrompt, applyPlaceholders, BATTLE_INSTRUCTION } from './promptBuilder.js'
 import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
 import { DIRECTOR_WORLD_INSTRUCTION } from '../data/storyDirector.js'
@@ -32,7 +32,7 @@ function buildLoreWikiNote(wbActive, canonNote) {
   return parts.join('\n\n')
 }
 
-export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '' }) {
+export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '', lastUserMessage = '' }) {
   // WORLDBOOK (đợt 41) — nguồn thông tin CHÍNH của người dùng; gộp với
   // lorebook cũ của character (nếu có). Đưa vào worldInfoBefore + system.
   const wbActive = getActiveWorldbook(worldbook?.entries ?? [], scanText)
@@ -51,10 +51,16 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       scenario: applyPlaceholders(character.scenario, character.name, playerName),
       worldInfoBefore: activeLore.join('\n'),
       dialogueExamples: character.mes_example || '',
+      lastUserMessage: lastUserMessage || [...history].reverse().find((message) =>
+        message.role === 'user' && !String(message.content ?? '').startsWith('[Hệ thống'),
+      )?.content || '',
+      playerName,
+      characterName: character.name,
     })
+    const presetHistory = applyPresetRegexToMessages(history, mainPreset.regexScripts)
     const apiMessages = [
       { role: 'system', content: beforeHistory },
-      ...history,
+      ...presetHistory,
       ...(afterHistory ? [{ role: 'system', content: afterHistory }] : []),
       { role: 'system', content: BATTLE_INSTRUCTION },
       { role: 'system', content: STORY_STATE_INSTRUCTION },

@@ -206,13 +206,13 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
   return (
     <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
       <label>
-        Regex xử lý output ({mainPreset.regexScripts.filter((s) => s.enabled).length}/
+        Regex preset: prompt + hiển thị ({mainPreset.regexScripts.filter((s) => s.enabled).length}/
         {mainPreset.regexScripts.length} đang bật)
       </label>
       <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '4px 0 10px' }}>
-        Đây là bộ regex nhúng sẵn trong preset của bạn (VD ẩn chuỗi suy nghĩ, ẩn/hiện thanh trạng
-        thái đồng nhân...). Script gắn nhãn "HTML" tạo ra định dạng đẹp trong SillyTavern nhưng app
-        này chưa render HTML nên mặc định tắt — tự bật nếu bạn vẫn muốn thử.
+        App tôn trọng placement, promptOnly/markdownOnly và min/max depth như SillyTavern; regex dọn
+        lịch sử không còn được chạy nhầm lên chính văn mới. Script "HTML" vẫn mặc định tắt vì màn
+        truyện render text an toàn, không thực thi HTML/CSS của preset.
       </p>
       <div style={{ maxHeight: 320, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
         {mainPreset.regexScripts.map((s) => (
@@ -233,6 +233,11 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
               <PokemonToggle compact checked={s.enabled} onChange={() => toggle(s.id)} label={s.scriptName} />
             </div>
             {s.isDecorative && <span className="status-pill">HTML</span>}
+            {s.promptOnly && <span className="status-pill">PROMPT</span>}
+            {s.markdownOnly && <span className="status-pill">HIỂN THỊ</span>}
+            {(s.minDepth !== null || s.maxDepth !== null) && (
+              <span className="status-pill">D{s.minDepth ?? 0}–{s.maxDepth ?? '∞'}</span>
+            )}
           </div>
         ))}
       </div>

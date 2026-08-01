@@ -14,7 +14,7 @@ import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../da
 import { applyPerksToMon, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
-import { cleanAiOutput } from '../utils/outputCleanup.js'
+import { cleanAiOutput, extractStateTags } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea } from '../data/regions.js'
 import { applyStoryState, parseStoryStateTags } from '../utils/storyStateProtocol.js'
@@ -402,6 +402,7 @@ export default function IntroScreen({ onOpenSettings }) {
         identityContext: `THÂN PHẬN NHÂN VẬT CHÍNH (cố định, phải nhất quán xuyên suốt): ${identity.name} — ${identity.desc}`,
         worldbook,
         toneNote: buildToneNote(storyTone),
+        lastUserMessage: directive,
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -411,7 +412,8 @@ export default function IntroScreen({ onOpenSettings }) {
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
       }
-      let parsed = parseStoryStateTags(cleaned)
+      const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
+      let parsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
       parsed = validateStateAgainstProse(parsed, parsed.cleaned, {
         playerName: finalName,
         party: [],

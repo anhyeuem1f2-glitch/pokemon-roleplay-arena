@@ -13,7 +13,7 @@ import {
   applyPerksToMon, trainingExpMultiplier, battleExpMultiplier,
   sharesBattleExpWithParty, syncTraitGrantedItems,
 } from '../data/playerPerks.js'
-import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
+import { cleanAiOutput, extractPresetUiVariables, extractStateTags, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
@@ -357,6 +357,38 @@ function filterSupplementalDuplicates(extra, applied) {
   }
 }
 
+const STATE_ARRAY_FIELDS = [
+  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'levels', 'evolutions',
+  'friendships', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items', 'badges',
+  'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards',
+]
+
+function compactStateManifest(parsed) {
+  const manifest = {
+    money: Number(parsed?.money) || 0,
+    moneyEntries: [...(parsed?.moneyEntries ?? [])],
+    dateAdvance: Number(parsed?.dateAdvance) || 0,
+    training: Number(parsed?.training) || 0,
+    datePart: parsed?.datePart ?? null,
+    pokecenter: parsed?.pokecenter ?? null,
+  }
+  for (const field of STATE_ARRAY_FIELDS) manifest[field] = [...(parsed?.[field] ?? [])]
+  return manifest
+}
+
+function mergeStateManifests(base, extra) {
+  const merged = compactStateManifest(base)
+  const next = compactStateManifest(extra)
+  merged.money += next.money
+  merged.moneyEntries.push(...next.moneyEntries)
+  merged.dateAdvance += next.dateAdvance
+  merged.training += next.training
+  merged.datePart = next.datePart ?? merged.datePart
+  merged.pokecenter = next.pokecenter ?? merged.pokecenter
+  for (const field of STATE_ARRAY_FIELDS) merged[field].push(...next[field])
+  return merged
+}
+
 function scheduleIdleStateTask(task) {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     return window.requestIdleCallback(() => task(), { timeout: 2500 })
@@ -527,6 +559,7 @@ export default function RoleplayChat() {
   // đang rảnh thay vì dồn mọi lượt vào API chính. Mỗi lượt chỉ gọi MỘT API.
   const stateApiRoundRobinRef = useRef(0)
   const actionChoiceApiRoundRobinRef = useRef(0)
+  const stateScanLocksRef = useRef(new Set())
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
   useEffect(() => { latestPartyRef.current = party }, [party])
   useEffect(() => { latestPcBoxRef.current = pcBox }, [pcBox])
@@ -1417,6 +1450,7 @@ export default function RoleplayChat() {
         worldbook,
         canonNote,
         toneNote: buildToneNote(storyTone),
+        lastUserMessage: currentVisibleInput,
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -1468,7 +1502,10 @@ export default function RoleplayChat() {
       // do AI khai báo ở cuối tin — áp vào state thật (tiền, hảo cảm, thương
       // tích trên HUD cập nhật ngay), gỡ tag khỏi văn bản hiển thị. Tag
       // [[SHOP Tên]] gắn shopName lên message để hiện nút mở giỏ hàng.
-      let stateParsed = parseStoryStateTags(cleaned)
+      // <content> chỉ chứa chính văn, còn nhiều preset đặt tag state ở ngoài.
+      // Vớt tag từ reply gốc cho parser nhưng không trả chúng lại UI.
+      const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
+      let stateParsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
       // Chỉ phần chính văn người chơi THỰC SỰ nhìn thấy mới được làm bằng
       // chứng. Model viết lén kết quả sau [[BATTLE]] sẽ bị cắt trước khi xét
       // tag, tránh cộng tiền/cấp/vật phẩm của một trận chưa hề diễn ra.
@@ -1577,6 +1614,10 @@ export default function RoleplayChat() {
       const turnMeta = {
         raw: (reply ?? '').slice(0, META_CLIP),
         thinking: extractThinking(reply).slice(0, META_CLIP),
+        evidenceText: stateEvidenceText.slice(0, META_CLIP),
+        appliedState: compactStateManifest(stateParsed),
+        presetUiVariables: extractPresetUiVariables(reply),
+        blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
         changes: [
           ...describeParsedChanges(stateParsed, movedTo, '', mainApplyReport),
           ...(displayText !== stateEvidenceText ? ['✍ Văn đã qua API chau chuốt văn phong'] : []),
@@ -1689,24 +1730,12 @@ export default function RoleplayChat() {
         stateApiRoundRobinRef.current += 1
       }
       if (stateCfg?.baseUrl && stateCfg?.model) {
+        stateScanLocksRef.current.add(turnMessageId)
         scheduleIdleStateTask(() => {
           extractMissingStateTags(stateCfg, {
             storyText: stateEvidenceText,
             userText: stateUserText,
-            appliedTags: {
-              money: stateParsed.money, moneyEntries: stateParsed.moneyEntries, rel: stateParsed.rel, body: stateParsed.body,
-              pokemons: stateParsed.pokemons, levels: stateParsed.levels,
-              evolutions: stateParsed.evolutions, items: stateParsed.items, loots: stateParsed.loots, equipment: stateParsed.equipment,
-              friendships: stateParsed.friendships, hunger: stateParsed.hunger,
-              dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
-              training: stateParsed.training, moves: stateParsed.moveDirectives,
-              npcs: (stateParsed.npcs ?? []).map((n) => n.name),
-              facts: (stateParsed.facts ?? []).map((f) => f.key),
-              badges: stateParsed.badges, quests: stateParsed.quests,
-              reputations: stateParsed.reputations, wanted: stateParsed.wanted,
-              legendaryAccess: stateParsed.legendaryAccess,
-              collectionAwards: stateParsed.collectionAwards,
-            },
+            appliedTags: compactStateManifest(stateParsed),
             hasPokemon: Boolean(latestPlayerMonRef.current) || (stateParsed.pokemons ?? []).length > 0,
           })
             .then((extraTagsText) => {
@@ -1762,6 +1791,7 @@ export default function RoleplayChat() {
                     meta: {
                       ...(current.meta ?? {}),
                       changes: [...(current.meta?.changes ?? []), ...extraLines],
+                      appliedState: mergeStateManifests(current.meta?.appliedState ?? stateParsed, extra),
                     },
                   }
                   return msgs.map((m2, index) => (index === at ? updated : m2))
@@ -1769,6 +1799,7 @@ export default function RoleplayChat() {
               }
             })
             .catch((e2) => console.warn('[state-api] bỏ qua:', e2.message))
+            .finally(() => stateScanLocksRef.current.delete(turnMessageId))
         })
       }
       // Tóm tắt cốt truyện (đợt 30): tự cập nhật nền khi đủ tin mới.
@@ -1793,6 +1824,96 @@ export default function RoleplayChat() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Quét lại BIẾN THẬT từ chính văn đã lưu. Đây là luồng có validator và
+  // ledger chống áp trùng; khác hoàn toàn bảng biến preset chỉ để trình bày.
+  async function rerollStateForMessage(messageIndex) {
+    const source = latestMessagesRef.current[messageIndex]
+    if (!source || source.role !== 'assistant') throw new Error('Không tìm thấy lượt AI cần quét.')
+    const sourceKey = source.id || `assistant-legacy-${messageIndex}`
+    if (stateScanLocksRef.current.has(sourceKey)) {
+      return { ok: true, message: 'Lượt này đang được hệ thống tự quét nền; hãy đợi vài giây rồi mở lại để xem kết quả.' }
+    }
+    const storyText = source.meta?.evidenceText || source.content || ''
+    if (!storyText.trim()) throw new Error('Lượt này không có chính văn để quét.')
+    const userText = latestMessagesRef.current.slice(0, messageIndex).reverse()
+      .find((message) => message.role === 'user' && !message.hidden)?.content ?? ''
+    // Tin mới có ledger chính xác. Tin cũ lấy tag từ văn gốc làm mốc bảo thủ.
+    const rawBaseline = compactStateManifest(parseStoryStateTags(source.meta?.raw ?? ''))
+    const applied = source.meta?.appliedState ?? rawBaseline
+    const dedicated = stateApiConfig?.baseUrl && stateApiConfig?.model
+      ? { ...apiConfig, ...stateApiConfig }
+      : null
+    const spare = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
+      .find((cfg) => cfg?.baseUrl && cfg?.model)
+    const cfg = dedicated ?? (spare ? { ...apiConfig, ...spare } : apiConfig)
+    if (!cfg?.baseUrl || !cfg?.model) throw new Error('Chưa cấu hình API để quét lại biến.')
+
+    stateScanLocksRef.current.add(sourceKey)
+    try {
+      const tagsText = await extractMissingStateTags(cfg, {
+        storyText,
+        userText,
+        appliedTags: applied,
+        hasPokemon: Boolean(latestPlayerMonRef.current) || (applied.pokemons ?? []).length > 0,
+      })
+      if (!tagsText?.trim()) return { ok: true, message: 'Đã quét xong: không phát hiện biến thật nào còn thiếu.' }
+
+      let parsed = filterSupplementalDuplicates(parseStoryStateTags(tagsText), applied)
+      parsed = {
+        ...parsed,
+        shops: (parsed.shops ?? []).filter((shop) => detectInteractiveShop(storyText, shop.name, userText).inside),
+      }
+      const evidence = validateStateAgainstProse(parsed, storyText, {
+        playerName: playerName || playerProfile?.name,
+        party: latestPartyRef.current,
+        mode: normalizeGameMode(storyTone), adminMode,
+        inventory: latestInventoryRef.current,
+        location: latestPlayerLocationRef.current,
+        blockPokemonAcquisition: Boolean(source.meta?.blockPokemonAcquisition
+          || (source.realisticSearch && !source.realisticSearch.encounterEligible)),
+        alreadyApplied: applied,
+      })
+      const extra = evidence.parsed
+      if (extra.money || extra.rel.length || extra.body.length) {
+        applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
+      }
+      const report = applyParsedState(extra, messageIndex, storyText, sourceKey)
+      report.lines.push(...describeRejectedState(evidence.rejected))
+      const movedTo = resolveMoveLocation(extra, latestPlayerLocationRef.current)
+      if (movedTo && proseSupportsMove(storyText, extra.moveDirectives?.at(-1)?.place)) {
+        latestPlayerLocationRef.current = movedTo
+        setPlayerLocation(movedTo)
+      }
+      const lines = describeParsedChanges(extra, movedTo, '(quét lại)', report)
+      setMessages((currentMessages) => currentMessages.map((message, index) => index === messageIndex ? {
+        ...message,
+        ...(extra.shops?.[0] ? { shop: extra.shops[0], shopName: extra.shops[0].name, shopValidated: true } : {}),
+        ...(extra.pokecenter ? { pokecenter: extra.pokecenter.name } : {}),
+        meta: {
+          ...(message.meta ?? {}),
+          evidenceText: storyText.slice(0, META_CLIP),
+          appliedState: mergeStateManifests(applied, extra),
+          changes: [...(message.meta?.changes ?? []), ...lines],
+        },
+      } : message))
+      return {
+        ok: true,
+        message: lines.length
+          ? `Đã quét và xử lý ${lines.length} thay đổi. Xem danh sách bên dưới.`
+          : 'Đã quét xong: không có thay đổi hợp lệ nào còn thiếu.',
+      }
+    } finally {
+      stateScanLocksRef.current.delete(sourceKey)
+    }
+  }
+
+  function savePresetUiVariables(messageIndex, variables) {
+    setMessages((currentMessages) => currentMessages.map((message, index) => index === messageIndex ? {
+      ...message,
+      meta: { ...(message.meta ?? {}), presetUiVariables: variables },
+    } : message))
   }
 
   // index tin AI cuối cùng (để chỉ hiện Reroll ở đó).
@@ -2508,7 +2629,12 @@ ${m.content}`
         })()}
 
         {turnInfoIndex !== null && messages[turnInfoIndex] && (
-          <TurnInfoModal message={messages[turnInfoIndex]} onClose={() => setTurnInfoIndex(null)} />
+          <TurnInfoModal
+            message={messages[turnInfoIndex]}
+            onClose={() => setTurnInfoIndex(null)}
+            onRerollState={() => rerollStateForMessage(turnInfoIndex)}
+            onSavePresetVariables={(variables) => savePresetUiVariables(turnInfoIndex, variables)}
+          />
         )}
 
         {/* Menu chuột phải trên Ô NHẬP (đợt 61). */}

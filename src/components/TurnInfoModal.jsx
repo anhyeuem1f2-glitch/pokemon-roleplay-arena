@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { extractPresetUiVariables } from '../utils/outputCleanup.js'
 
 // ============ CHI TIẾT LƯỢT AI (đợt 74) ============
 // DNA không còn là bản sao tag. Dòng ✅ là app đã tìm được target và gửi
@@ -7,6 +8,7 @@ import React, { useMemo, useState } from 'react'
 
 const TABS = [
   { key: 'changes', icon: '🧬', label: 'Biến cập nhật', note: 'Kết quả áp state' },
+  { key: 'preset', icon: '🎛', label: 'Biến preset', note: 'Lớp giao diện' },
   { key: 'thinking', icon: '🧠', label: 'Suy nghĩ', note: 'Phần model suy luận' },
   { key: 'raw', icon: '📝', label: 'Văn gốc', note: 'Trước khi làm sạch' },
 ]
@@ -52,14 +54,35 @@ function ChangeCard({ line }) {
   )
 }
 
-export default function TurnInfoModal({ message, onClose }) {
+export default function TurnInfoModal({ message, onClose, onRerollState, onSavePresetVariables }) {
   const [tab, setTab] = useState('changes')
+  const [rerolling, setRerolling] = useState(false)
+  const [scanStatus, setScanStatus] = useState('')
   const meta = message?.meta ?? {}
+  const [presetVariables, setPresetVariables] = useState(meta.presetUiVariables ?? [])
+  useEffect(() => {
+    setPresetVariables(message?.meta?.presetUiVariables ?? extractPresetUiVariables(message?.meta?.raw ?? ''))
+    setScanStatus('')
+  }, [message?.id])
   const changes = meta.changes ?? []
   const counts = useMemo(() => changes.reduce((acc, line) => {
     acc[changeKind(line)] += 1
     return acc
   }, { success: 0, warning: 0, info: 0, normal: 0 }), [changes])
+
+  async function handleRerollState() {
+    if (!onRerollState || rerolling) return
+    setRerolling(true)
+    setScanStatus('')
+    try {
+      const result = await onRerollState()
+      setScanStatus(result?.message || 'Đã quét lại biến.')
+    } catch (error) {
+      setScanStatus(`Không quét được: ${error.message}`)
+    } finally {
+      setRerolling(false)
+    }
+  }
 
   return (
     <div
@@ -83,7 +106,7 @@ export default function TurnInfoModal({ message, onClose }) {
           .turn-info-layout { display:grid; grid-template-columns:190px minmax(0,1fr); min-height:460px; }
           @media (max-width: 680px) {
             .turn-info-layout { grid-template-columns:1fr; min-height:0; }
-            .turn-info-tabs { display:grid !important; grid-template-columns:repeat(3,1fr); border-right:0 !important; border-bottom:1px solid var(--line); }
+            .turn-info-tabs { display:grid !important; grid-template-columns:repeat(2,1fr); border-right:0 !important; border-bottom:1px solid var(--line); }
             .turn-info-tab-note { display:none; }
           }
         `}</style>
@@ -143,10 +166,19 @@ export default function TurnInfoModal({ message, onClose }) {
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button className="btn btn--primary" onClick={handleRerollState} disabled={rerolling}>
+                      {rerolling ? 'Đang quét…' : '↻ Quét lại biến thật'}
+                    </button>
                     {counts.success > 0 && <span style={{ color: 'var(--mint)', fontSize: 10, border: '1px solid var(--mint)', borderRadius: 999, padding: '4px 8px' }}>✓ {counts.success} đã áp</span>}
                     {counts.warning > 0 && <span style={{ color: '#e9a06b', fontSize: 10, border: '1px solid #e9a06b', borderRadius: 999, padding: '4px 8px' }}>! {counts.warning} lỗi</span>}
                   </div>
                 </div>
+
+                {scanStatus && (
+                  <div style={{ marginBottom: 12, padding: '9px 11px', border: '1px solid var(--mint)', borderRadius: 9, color: 'var(--mint)', fontSize: 11.5 }}>
+                    {scanStatus}
+                  </div>
+                )}
 
                 {changes.length === 0 ? (
                   <div style={{ padding: 22, border: '1px dashed var(--line)', borderRadius: 11, textAlign: 'center' }}>
@@ -157,6 +189,37 @@ export default function TurnInfoModal({ message, onClose }) {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {changes.map((line, index) => <ChangeCard key={`${index}-${line}`} line={line} />)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'preset' && (
+              <div>
+                <div style={{ padding: 12, borderRadius: 10, border: '1px solid #9a7bd4', background: 'rgba(154,123,212,.07)', marginBottom: 12 }}>
+                  <div style={{ color: '#c5a9f2', fontWeight: 800, fontSize: 12 }}>Biến trang trí của preset</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65, marginTop: 4 }}>
+                    Bạn có thể sửa để bảng trông đúng ý. Các ô này chỉ lưu trong giao diện của lượt, không được phép sửa tiền, Pokémon, vật phẩm hay save thật. Muốn sửa state thật hãy dùng “Quét lại biến thật”.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <button className="btn" onClick={() => setPresetVariables(extractPresetUiVariables(meta.raw ?? ''))}>⟳ Tự điền từ văn gốc</button>
+                  <button className="btn" onClick={() => setPresetVariables((current) => [...current, { key: 'Biến mới', value: '', group: 'Tự nhập' }])}>+ Thêm ô</button>
+                  <button className="btn btn--primary" onClick={() => onSavePresetVariables?.(presetVariables)}>Lưu giao diện</button>
+                </div>
+                {presetVariables.length === 0 ? (
+                  <div style={{ padding: 22, border: '1px dashed var(--line)', borderRadius: 11, textAlign: 'center', color: 'var(--text-dim)', fontSize: 11.5 }}>
+                    Preset không xuất bảng biến riêng trong lượt này. Điều này không ảnh hưởng hệ thống tự cập nhật state.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {presetVariables.map((entry, index) => (
+                      <div key={`${index}-${entry.key}`} style={{ display: 'grid', gridTemplateColumns: 'minmax(110px,.7fr) minmax(150px,1.3fr) auto', gap: 7 }}>
+                        <input value={entry.key} onChange={(event) => setPresetVariables((current) => current.map((item, at) => at === index ? { ...item, key: event.target.value } : item))} />
+                        <input value={entry.value} onChange={(event) => setPresetVariables((current) => current.map((item, at) => at === index ? { ...item, value: event.target.value } : item))} />
+                        <button className="btn" title="Xoá ô giao diện" onClick={() => setPresetVariables((current) => current.filter((_, at) => at !== index))}>×</button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

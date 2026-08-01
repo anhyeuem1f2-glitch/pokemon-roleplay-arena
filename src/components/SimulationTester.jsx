@@ -3,7 +3,7 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
-import { cleanAiOutput } from '../utils/outputCleanup.js'
+import { cleanAiOutput, extractStateTags } from '../utils/outputCleanup.js'
 import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { buildMonSmart } from '../data/pokemonSpecies.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea, detectLocationFromMetadata } from '../data/regions.js'
@@ -129,6 +129,7 @@ export default function SimulationTester({ onEnterGame }) {
         identityContext: `THÂN PHẬN NHÂN VẬT CHÍNH: ${identity.name} — ${identity.desc}`,
         worldbook,
         toneNote: buildToneNote(storyTone),
+        lastUserMessage: directive,
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -136,7 +137,8 @@ export default function SimulationTester({ onEnterGame }) {
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) throw new Error('AI chỉ trả CoT, chưa ra chính văn — thử lại hoặc tăng max tokens.')
 
-      const parsed = parseStoryStateTags(cleaned)
+      const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
+      const parsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
       setMessages([
         { role: 'user', hidden: true, resultLabel: 'Giả lập: ' + scenario.trim().slice(0, 40), content: directive },
         { role: 'assistant', content: parsed.cleaned },

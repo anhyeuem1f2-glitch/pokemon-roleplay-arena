@@ -2554,3 +2554,20 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `test-dot*.mjs` hay các file nguồn khác. ZIP bàn giao đợt 90 cũng chỉ chứa đúng hai phần trên.
+
+## Cập nhật (đợt 91) — khóa thiên phú sau khi bắt đầu và sửa tầng hiển thị lựa chọn
+
+**TÍNH CÁCH/THIÊN PHÚ ĐƯỢC CHỐT CÙNG HỒ SƠ KHỞI ĐẦU.** Nút `Sửa` trên HUD trong màn chơi đã bị gỡ hoàn toàn và thay bằng nhãn `🔒 Đã khóa`; không còn đường mở bảng đổi năng lực giữa hành trình để sửa luật hoặc bật cheat sau khi đã thấy diễn biến. Component sửa cũ cũng có chốt phòng thủ riêng: nếu một màn hình thử nghiệm vô tình gọi nó khi game đang chạy, bảng chỉ báo hồ sơ đã khóa và không cho lưu thay đổi. Muốn chọn bộ khác phải bắt đầu hành trình mới.
+
+**LỰA CHỌN HÀNH ĐỘNG KHÔNG CÒN ĐÈ LÊN CÁC BẢNG.** Nguyên nhân không nằm ở kích thước thẻ lựa chọn mà ở stacking context: các modal hồ sơ Pokémon, ảnh đại diện, bản đồ, save, sổ tay, Pokédex, nhật ký, đời sống và trao đổi từng nằm bên trong sidebar `sticky`, nên nội dung ở cột chính có thể được trình duyệt vẽ lên trên dù modal dùng `z-index` cao. Toàn bộ overlay của cả HUD trái và phải nay được portal thẳng lên `document.body`, thoát khỏi tầng sidebar; chính văn và bốn lựa chọn luôn nằm dưới modal.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–91 đều PASS (19/19). Test đợt 91 xác nhận HUD không còn import/mở bảng sửa, modal cũ tự khóa khi game đã bắt đầu, toàn bộ overlay hai sidebar nằm trong portal gốc và action choices không tự dùng `fixed`/`absolute`/`z-index`.
+
+### File cần cập nhật lên GitHub sau đợt 91
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, ZIP bàn giao hoặc các file khác.

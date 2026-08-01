@@ -9,7 +9,7 @@ import {
 } from '../data/playerPerks.js'
 import { normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 
-// ============ SỬA TÍNH CÁCH & NĂNG LỰC GIỮA TRUYỆN (đợt 74) ============
+// ============ CHỌN TÍNH CÁCH & NĂNG LỰC TRƯỚC HÀNH TRÌNH ============
 // Toàn bộ hiệu ứng sửa số liệu chỉ được nhận từ ô "Tự mô tả…". Các lựa chọn
 // dựng sẵn chỉ là chất liệu roleplay; không còn nút bật Max IV/EV/EXP/catch
 // riêng để tránh người chơi vô tình kích hoạt cheat.
@@ -49,7 +49,7 @@ function SectionHeading({ eyebrow, title, note }) {
 }
 
 export default function TraitsModal({ onClose }) {
-  const { playerTraits, setPlayerTraits, party, setParty, setPlayerMon, setInventory, storyTone } = useGame()
+  const { playerTraits, setPlayerTraits, party, setParty, setPlayerMon, setInventory, storyTone, gameStarted } = useGame()
   const realistic = normalizeGameMode(storyTone) === 'realistic'
   const [draft, setDraft] = useState(() => ({
     personality: playerTraits?.personality ?? [],
@@ -73,6 +73,27 @@ export default function TraitsModal({ onClose }) {
   const safeDraft = sanitizeTraitsForMode(draft, storyTone)
   const detectedCustom = describeCustomMechanicEffects(safeDraft)
   const resolvedEffects = resolveMechanicEffects(safeDraft)
+
+  // Chốt an toàn ở chính component: kể cả một màn hình cũ hoặc code thử
+  // nghiệm vô tình mở lại modal sau khi vào truyện, người chơi vẫn không có
+  // đường sửa tính cách/thiên phú của hành trình đang diễn ra.
+  if (gameStarted) {
+    return (
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 95, padding: 18, display: 'grid', placeItems: 'center', background: 'rgba(3,8,12,.82)', backdropFilter: 'blur(8px)' }}
+      >
+        <div onClick={(event) => event.stopPropagation()} className="panel" style={{ width: 'min(460px, 94vw)', textAlign: 'center' }}>
+          <div style={{ fontSize: 30, marginBottom: 8 }}>🔒</div>
+          <div className="page-title" style={{ margin: '0 0 8px' }}>Hồ sơ đã được chốt</div>
+          <p style={{ color: 'var(--text-mid)', fontSize: 12.5, lineHeight: 1.7 }}>
+            Tính cách và thiên phú chỉ được chọn trước khi bắt đầu hành trình, không thể sửa giữa lúc chơi.
+          </p>
+          <button className="btn" style={{ marginTop: 8 }} onClick={onClose}>Đóng</button>
+        </div>
+      </div>
+    )
+  }
 
   function save() {
     const nextTraits = sanitizeTraitsForMode(draft, storyTone)

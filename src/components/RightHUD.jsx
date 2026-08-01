@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 import SaveModal from './SaveModal.jsx'
 import { useGame } from '../context/GameContext.jsx'
 import { getArea, getRegion } from '../data/regions.js'
@@ -35,6 +36,7 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const dexProgress = pokedexProgress(pokedexRecords, pokedexSpecies)
 
   return (
+    <>
     <aside
       style={{
         // Đợt 53: mobile → panel tràn ngang, cao tự nhiên, KHÔNG sticky/100vh
@@ -144,12 +146,16 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => setSaveOpen(true)}>
         💾 Lưu / Tải game
       </button>
-      {saveOpen && <SaveModal onClose={() => setSaveOpen(false)} />}
 
       <button className="btn" style={{ width: '100%' }} onClick={onHome}>
         ⌂ Màn hình chính
       </button>
+    </aside>
 
+    {/* Các modal không được nằm trong stacking context của HUD sticky. Đưa
+        chúng lên document.body để chính văn và lựa chọn hành động luôn ở dưới. */}
+    {typeof document !== 'undefined' && createPortal(<>
+      {saveOpen && <SaveModal onClose={() => setSaveOpen(false)} />}
       {notebookOpen && <NotebookModal onClose={() => setNotebookOpen(false)} />}
       {pokedexOpen && <PokedexModal onClose={() => setPokedexOpen(false)} />}
       {progressOpen && <WorldProgressModal onClose={() => setProgressOpen(false)} />}
@@ -197,6 +203,7 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
           </div>
         </div>
       )}
-    </aside>
+    </>, document.body)}
+    </>
   )
 }

@@ -1,10 +1,10 @@
 import React, { useState, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { useGame } from '../context/GameContext.jsx'
 import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
 import AvatarPicker from './AvatarPicker.jsx'
-import TraitsModal from './TraitsModal.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { describeCustomMechanicEffects } from '../data/playerPerks.js'
 import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
@@ -67,12 +67,10 @@ export default function PlayerHUD({ mobile = false }) {
   const [infoMon, setInfoMon] = useState(null)
   // Đợt 54: bấm khung avatar để đổi ảnh ngay giữa truyện.
   const [avatarOpen, setAvatarOpen] = useState(false)
-  // Đợt 70: mở bảng sửa tính cách/thiên phú GIỮA TRUYỆN (tester báo
-  // "cái này là không chỉnh sửa được hà Red").
-  const [traitsOpen, setTraitsOpen] = useState(false)
   const customMechanics = describeCustomMechanicEffects(playerTraits)
 
   return (
+    <>
     <aside
       style={{
         // Đợt 53: mobile → panel tràn ngang, cao tự nhiên, KHÔNG sticky/100vh
@@ -153,13 +151,12 @@ export default function PlayerHUD({ mobile = false }) {
       <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <SectionTitle>Tính cách &amp; Thiên phú</SectionTitle>
-            <button
-              onClick={() => setTraitsOpen(true)}
-              title="Sửa tính cách / thiên phú"
-              style={{ background: 'transparent', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text-dim)', fontSize: 10, padding: '1px 7px', cursor: 'pointer', marginTop: 12 }}
+            <span
+              title="Tính cách và thiên phú đã được chốt khi bắt đầu hành trình"
+              style={{ border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text-dim)', fontSize: 9.5, padding: '1px 7px', marginTop: 12, whiteSpace: 'nowrap' }}
             >
-              Sửa
-            </button>
+              🔒 Đã khóa
+            </span>
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.7, marginBottom: 10 }}>
             {playerTraits?.personality?.length > 0 && (
@@ -186,7 +183,7 @@ export default function PlayerHUD({ mobile = false }) {
             {!(playerTraits?.personality?.length > 0)
               && (!playerTraits?.superpower || playerTraits.superpower === 'none')
               && customMechanics.length === 0 && (
-              <div style={{ color: 'var(--text-dim)' }}>Chưa chọn — bấm “Sửa” để thiết lập.</div>
+              <div style={{ color: 'var(--text-dim)' }}>Không chọn trong hồ sơ khởi đầu.</div>
             )}
           </div>
         </>
@@ -307,6 +304,12 @@ export default function PlayerHUD({ mobile = false }) {
         </div>
       )}
 
+    </aside>
+
+    {/* Modal phải thoát khỏi stacking context của sidebar sticky. Nếu để bên
+        trong <aside>, nội dung cột truyện (đặc biệt lựa chọn hành động) có thể
+        được trình duyệt vẽ đè lên cửa sổ Pokémon dù modal có z-index cao. */}
+    {typeof document !== 'undefined' && createPortal(<>
       {avatarOpen && (
         <div
           onClick={() => setAvatarOpen(false)}
@@ -327,10 +330,9 @@ export default function PlayerHUD({ mobile = false }) {
         </div>
       )}
 
-      {traitsOpen && <TraitsModal onClose={() => setTraitsOpen(false)} />}
-
       {infoMon && <PokemonInfoModal mon={infoMon} party={party} activeMon={playerMon} hunger={hunger.mon} onSelect={setInfoMon} onClose={() => setInfoMon(null)} />}
-    </aside>
+    </>, document.body)}
+    </>
   )
 }
 

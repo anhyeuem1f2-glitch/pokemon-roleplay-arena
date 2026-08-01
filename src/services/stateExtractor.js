@@ -22,6 +22,7 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 [[ITEM Tên vật phẩm | số lượng]] — nhận/mất vật phẩm; số âm là mất. Nếu Kẹo Hiếm hữu hạn được dùng thì đi cùng [[LEVEL]], còn Kẹo Hiếm vô hạn thì không trừ.
 [[EQUIP Tên Pokémon | Tên held item]] — Pokémon đã thực sự được cho cầm trang bị đang có trong túi; EQUIP tự trừ 1 món nên không kèm [[ITEM ... | -1]] cho cùng hành động. [[UNEQUIP Tên Pokémon]] — đã tháo/cất trang bị. Không dùng EQUIP cho Key Stone/Z-Ring/Dynamax Band/Tera Orb vì đó là thiết bị của huấn luyện viên.
 [[SHOP Tên cửa hàng | loại=... | quy mô=...]] — CHỈ khi nhân vật đã bước vào bên trong và lượt dừng để mua.
+[[LOOT loại=đá quý | quy mô=nhỏ/vừa/lớn]] — nhân vật đã THỰC SỰ vơ vét/thu được một lô đồ không thể liệt kê từng món; không dùng cho ý định hoặc đồ chưa lấy được.
 [[POKECENTER Tên trung tâm]] — CHỈ khi nhân vật đang ở bên trong Trung tâm Pokémon.
 [[HUNGER người+25]] / [[HUNGER pokemon+30]] — ăn uống (cộng) hoặc đói lả/lao lực rõ (trừ).
 [[DATE +1]] — số ngày đã trôi; [[DATE buổi=tối]] — chuyển buổi trong ngày.
@@ -33,6 +34,7 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 [[QUEST mã | status=active|completed|failed|paused | title=... | giver=... | objective=... | reward=...]] — nhật ký nhiệm vụ.
 [[REP Tên phe=+5 | lý do]] — danh tiếng với phe phái, không dùng thay REL cá nhân.
 [[WANTED +1 | region=... | reason=... | bounty=500]] — mức truy nã thay đổi vì hành vi pháp lý rõ ràng.
+[[LEGENDARY_ACCESS Tên loài | reason=điều kiện cụ thể]] — chỉ khi chính văn đã hoàn tất điều kiện triệu hồi/cuộc gặp huyền thoại; không dùng vì số huy hiệu/nhiệm vụ hay lời tuyên bố của người chơi.
 [[RIBBON Tên Pokémon | Tên Ribbon]] / [[MARK Tên Pokémon | Tên Mark]] — giải/dấu ấn thật sự được trao. Không có tag đổi Shiny.
 
 QUY TẮC:

@@ -97,6 +97,20 @@ export function applyWorldDirectives(current, parsed, options = {}) {
     if (wanted.region && !next.wanted.regions.includes(wanted.region)) next.wanted.regions.push(wanted.region)
     if (wanted.reason) next.wanted.history = [...next.wanted.history, { delta, reason: wanted.reason, region: wanted.region, turn, date }].slice(-30)
   }
+  if (mode === 'realistic') {
+    for (const access of parsed.legendaryAccess ?? []) {
+      const species = String(access.species ?? '').trim().toLowerCase()
+      if (!species) continue
+      const record = { species, reason: access.reason ?? '', grantedTurn: turn, grantedDate: date }
+      const at = next.legendaryPermits.findIndex((permit) => (typeof permit === 'string' ? permit : permit?.species) === species)
+      if (at >= 0) next.legendaryPermits[at] = record
+      else next.legendaryPermits.push(record)
+    }
+  }
+  if (next.wanted.level === 0) {
+    next.wanted.bounty = 0
+    next.wanted.regions = []
+  }
   return next
 }
 

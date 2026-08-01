@@ -15,13 +15,14 @@ import {
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
-import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget, resolveOwnedSpeciesTarget } from '../utils/ownedMonTarget.js'
+import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
-import { buildMonSmart, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution } from '../data/pokemonSpecies.js'
+import { buildMonSmart, buildWildMon, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, normalizeAcquiredMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements } from '../data/pokemonSpecies.js'
 import { detectMentionedArea, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectDoubleBattle, detectPokecenter, detectInteractiveShop, inferInteractiveShop } from '../data/storyScenes.js'
 import { resolveItemByName } from '../data/shopItems.js'
+import { generateLootItems } from '../data/shopGenerator.js'
 import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
@@ -50,10 +51,14 @@ import { envFromWeather } from '../data/battleEnvironments.js'
 import { buildFestivalLine } from '../data/festivals.js'
 import { buildCanonNote } from '../services/wikiLookup.js'
 import { buildModeRulesNote, legendaryAccess, normalizeGameMode } from '../data/gameModes.js'
+import { restoreTurnCheckpoint, saveTurnCheckpoint } from '../utils/saveManager.js'
 import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
 import { addCollectionAward } from '../data/pokemonLife.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
-import { buildInputAdjudicationNote } from '../data/inputAdjudicator.js'
+import {
+  buildSearchGateCorrection, buildSearchGateFallback, classifyRealisticInput,
+  responseViolatesSearchGate,
+} from '../data/inputAdjudicator.js'
 
 // Cửa sổ gần luôn có trần. Phần cũ được truy hồi từ biên niên sử chính xác;
 // embedding/rerank là lớp tăng cường tùy chọn, không còn là điều kiện để nhớ.
@@ -309,6 +314,8 @@ function filterSupplementalDuplicates(extra, applied) {
   const appliedQuests = new Set((applied?.quests ?? []).map((entry) => entry.id))
   const appliedReps = new Set((applied?.reputations ?? []).map((entry) => monKey(entry.name)))
   const appliedAwards = new Set((applied?.collectionAwards ?? []).map((entry) => `${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`))
+  const appliedLegendaryAccess = new Set((applied?.legendaryAccess ?? []).map((entry) => monKey(entry.species)))
+  const appliedLoots = new Set((applied?.loots ?? []).map((entry) => `${monKey(entry.type)}|${monKey(entry.size)}`))
   const appliedMoneyEntries = applied?.moneyEntries?.length
     ? applied.moneyEntries.map(Number)
     : applied?.money ? [Number(applied.money)] : []
@@ -328,6 +335,7 @@ function filterSupplementalDuplicates(extra, applied) {
       !appliedEvolutionTargets.has(monKey(entry.from)) && !appliedEvolutionTargets.has(monKey(entry.to)),
     ),
     items: (extra?.items ?? []).filter((entry) => !appliedItems.has(itemKey(entry.name))),
+    loots: (extra?.loots ?? []).filter((entry) => !appliedLoots.has(`${monKey(entry.type)}|${monKey(entry.size)}`)),
     friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriends.has(monKey(entry.target))),
     equipment: (extra?.equipment ?? []).filter((entry) => !appliedEquipment.has(`${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`)),
     pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(monKey(entry.species))),
@@ -345,6 +353,7 @@ function filterSupplementalDuplicates(extra, applied) {
     quests: (extra?.quests ?? []).filter((entry) => !appliedQuests.has(entry.id)),
     reputations: (extra?.reputations ?? []).filter((entry) => !appliedReps.has(monKey(entry.name))),
     wanted: (applied?.wanted ?? []).length ? [] : (extra?.wanted ?? []),
+    legendaryAccess: (extra?.legendaryAccess ?? []).filter((entry) => !appliedLegendaryAccess.has(monKey(entry.species))),
     collectionAwards: (extra?.collectionAwards ?? []).filter((entry) => !appliedAwards.has(`${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`)),
     shops: (applied?.shops ?? []).length ? [] : (extra?.shops ?? []),
     pokecenter: applied?.pokecenter ? null : (extra?.pokecenter ?? null),
@@ -471,7 +480,7 @@ export default function RoleplayChat() {
     playerCharacter,
     storyDate,
     advanceStoryDate,
-    party,
+    party, pcBox,
     setParty, setPcBox, storyTone, storageFull, playerTraits,
     hunger,
     adjustHunger,
@@ -511,6 +520,7 @@ export default function RoleplayChat() {
   // closure cũ. Không lấy kết quả ra khỏi state updater.
   const latestPlayerMonRef = useRef(playerMon)
   const latestPartyRef = useRef(party)
+  const latestPcBoxRef = useRef(pcBox)
   const latestInventoryRef = useRef(inventory)
   const latestPlayerLocationRef = useRef(playerLocation)
   // API phụ chạy trễ phải kiểm tra tin gốc vẫn còn và chưa bị sửa/reroll.
@@ -522,14 +532,31 @@ export default function RoleplayChat() {
   const actionChoiceApiRoundRobinRef = useRef(0)
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
   useEffect(() => { latestPartyRef.current = party }, [party])
+  useEffect(() => { latestPcBoxRef.current = pcBox }, [pcBox])
   useEffect(() => { latestInventoryRef.current = inventory }, [inventory])
   useEffect(() => { latestPlayerLocationRef.current = playerLocation }, [playerLocation])
   useEffect(() => { latestMessagesRef.current = messages }, [messages])
   // Save từ các bản trước chưa có IndexedDB exact: chép nền một lần ngay khi
   // vào màn chơi. Không chờ embedding và không chặn giao diện.
   useEffect(() => {
-    backfillArchiveFromMessages(messages).catch((error) => console.warn('[archive] backfill bỏ qua:', error.message))
+    backfillArchiveFromMessages(messages, trainerId).catch((error) => console.warn('[archive] backfill bỏ qua:', error.message))
     // Chỉ backfill snapshot lúc mount; lượt mới được archiveExchange tự ghi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Reroll phục hồi checkpoint rồi reload để mọi React state đọc lại đúng snapshot.
+  // Cờ session chỉ sống qua đúng lần reload này và bị xoá trước khi gọi API.
+  useEffect(() => {
+    let pending = null
+    try {
+      pending = JSON.parse(sessionStorage.getItem('trainer-arena:pending-reroll') || 'null')
+      if (pending) sessionStorage.removeItem('trainer-arena:pending-reroll')
+    } catch { /* ignore */ }
+    if (!pending || pending.trainerId !== trainerId || loading) return
+    const restored = latestMessagesRef.current
+    const timer = setTimeout(() => { void callAI(restored, pending.userText ?? '') }, 80)
+    return () => clearTimeout(timer)
+    // Chỉ kiểm tra một lần sau reload; callAI là function declaration ổn định trong lượt mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -539,17 +566,17 @@ export default function RoleplayChat() {
     resetChat()
     closeIndexBoundUi()
     try { clearMemory() } catch { /* ignore */ }
-    void clearArchive()
+    void clearArchive(trainerId)
     try { clearSummary() } catch { /* ignore */ }
   }
 
-  function cleanupMemoryFor(idxs, newCount) {
+  async function cleanupMemoryFor(idxs, newCount) {
     if (idxs.length) {
       const lo = Math.min(...idxs)
       // Xoá từ nhánh bị cắt tới cuối. Giữ ký ức phía sau sẽ làm một timeline
       // đã reroll/xoá quay lại như canon dù index của nó đã thay đổi.
       forgetMemoriesInTurnRange(lo, Number.MAX_SAFE_INTEGER)
-      void forgetArchiveRange(lo, Number.MAX_SAFE_INTEGER)
+      await forgetArchiveRange(lo, Number.MAX_SAFE_INTEGER, trainerId)
     }
     // Kéo coverage tóm tắt về, để lần tóm tắt sau không nhắc nội dung đã xoá.
     trimSummaryCoverage(newCount)
@@ -584,11 +611,9 @@ export default function RoleplayChat() {
         ? 'Xoá lượt này (tin của bạn + phần AI trả lời)? Ký ức và phần tóm tắt liên quan cũng được dọn theo. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.'
         : 'Xoá tin nhắn này khỏi truyện? Ký ức/tóm tắt liên quan cũng được dọn. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.',
     )) return
-    setMessages((msgs) => {
-      const next = msgs.filter((_, idx) => !idxs.includes(idx))
-      cleanupMemoryFor(idxs, next.length)
-      return next
-    })
+    const next = messages.filter((_, idx) => !idxs.includes(idx))
+    setMessages(next)
+    void cleanupMemoryFor(idxs, next.length)
     closeIndexBoundUi()
   }
 
@@ -676,10 +701,16 @@ export default function RoleplayChat() {
   // dưới từ trước; hàm này lo POKEMON / LEVEL / ITEM / DATE / TRAIN /
   // HUNGER / NPC / FACT. LEVEL là đường chính thức cho Kẹo Hiếm/năng lực;
   // POKEMON trùng loài chỉ còn là nhánh tương thích model cũ.
-  function applyParsedState(parsed, turnNow, storyText = '') {
+  function applyParsedState(parsed, turnNow, storyText = '', sourceMessageId = '') {
     const report = { lines: [] }
     let previewActive = latestPlayerMonRef.current
     let previewParty = [...(latestPartyRef.current ?? [])]
+    const evolutionDebits = new Map()
+    const appliedFriendshipDirectives = new Set()
+    // Cho phép một lượt hợp lệ vừa hoàn tất nghi thức, vừa gặp/thuyết phục
+    // huyền thoại. Dùng bản tiến trình dự kiến đã qua evidence thay vì closure
+    // worldProgress cũ chưa kịp rerender.
+    const prospectiveWorldProgress = applyWorldDirectives(worldProgress, parsed, { mode: storyTone, turn: turnNow, date: storyDate })
 
     function replacePreviewMon(identity, transform) {
       if (previewActive && monIdentityMatches(previewActive, identity)) previewActive = transform(previewActive)
@@ -688,8 +719,6 @@ export default function RoleplayChat() {
 
     try {
       const findSpeciesEntry = (value) => findEvolutionSpeciesEntry(pokedexSpecies, value)
-      const evolvedTargets = new Set()
-
       const evolveOne = (targetMon, targetEntry, source = 'tag') => {
         const fromName = targetMon.name
         const identity = { uid: targetMon.uid, name: targetMon.name }
@@ -701,7 +730,6 @@ export default function RoleplayChat() {
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? transform() : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? transform() : mon)))
         replacePreviewMon(identity, transform)
-        evolvedTargets.add(normalizeMonTarget(targetEntry.name))
         report.lines.push(`✅ Tiến hoá: ${fromName} → ${targetEntry.name} · Lv.${targetMon.level ?? 1}${source === 'inferred' ? ' (app xác nhận từ chính văn)' : ''}`)
       }
 
@@ -709,6 +737,17 @@ export default function RoleplayChat() {
       // [[LEVEL Fletchling | +1]] và [[EVOLVE Fletchling | Fletchinder]];
       // nếu đổi tên trước thì tag LEVEL tên cũ sẽ mất target.
       const realisticMode = normalizeGameMode(storyTone) === 'realistic' && !adminMode
+      const reserveEvolutionItem = (targetEntry) => {
+        if (!realisticMode || !String(targetEntry?.evoType ?? '').toLowerCase().includes('useitem') || !targetEntry.evoItem) return { ok: true }
+        const item = resolveItemByName(targetEntry.evoItem)
+        if (!item) return { ok: false, reason: `vật phẩm tiến hoá ${targetEntry.evoItem} chưa có trong danh mục` }
+        const stock = (latestInventoryRef.current ?? []).filter((entry) => entry.id === item.id)
+          .reduce((sum, entry) => sum + (entry.infinite ? 999999 : Math.max(0, Number(entry.qty) || 0)), 0)
+        const reserved = evolutionDebits.get(item.id) ?? 0
+        if (stock <= reserved) return { ok: false, reason: `không còn ${item.name} để tiêu thụ cho lần tiến hoá này` }
+        evolutionDebits.set(item.id, reserved + 1)
+        return { ok: true, item }
+      }
       const candyStock = (latestInventoryRef.current ?? []).filter((item) => /rare\s*candy|kẹo\s*hiếm/i.test(`${item.name} ${item.id}`))
         .reduce((sum, item) => sum + Math.max(0, Number(item.qty) || 0), 0)
       const candyDebit = (parsed.items ?? []).filter((item) => item.qty < 0 && /rare\s*candy|kẹo\s*hiếm/i.test(item.name))
@@ -754,6 +793,22 @@ export default function RoleplayChat() {
         report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
       }
 
+      // FRIEND phải có hiệu lực trước EVOLVE trong cùng lượt. Nếu không, một
+      // cảnh đạt ngưỡng thân mật rồi tiến hoá vẫn bị kiểm tra bằng friendship cũ.
+      for (const [index, directive] of (parsed.friendships ?? []).entries()) {
+        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        if (!targetMon) continue // Có thể là Pokémon mới nhận ở phần POKEMON bên dưới.
+        const before = Number.isFinite(targetMon.friendship) ? targetMon.friendship : 70
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const apply = (mon) => adjustFriendship(mon, directive.delta)
+        const after = apply(targetMon).friendship
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        replacePreviewMon(identity, apply)
+        appliedFriendshipDirectives.add(index)
+        report.lines.push(`✅ Thân mật ${targetMon.name}: ${before} → ${after}${directive.note ? ` (${directive.note})` : ''}`)
+      }
+
       for (const evolution of parsed.evolutions ?? []) {
         const targetMon = resolveOwnedMonTarget(evolution.from, previewActive, previewParty)
         if (!targetMon) {
@@ -766,23 +821,27 @@ export default function RoleplayChat() {
           report.lines.push(`⚠ Không tiến hoá ${targetMon.name}: không tìm thấy loài “${evolution.to}” trong Pokédex`)
           continue
         }
-        const relationKnown = Boolean(targetEntry.prevo || (fromEntry?.evos ?? []).length)
-        if (relationKnown && !isDirectEvolution(fromEntry, targetEntry)) {
-          report.lines.push(`⚠ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: không phải nhánh tiến hoá trực tiếp`)
-          continue
-        }
-        if (normalizeGameMode(storyTone) === 'realistic' && !adminMode && Number.isFinite(targetEntry.evoLevel) && (targetMon.level ?? 1) < targetEntry.evoLevel) {
-          report.lines.push(`⛔ Chế độ Thực tế chặn tiến hoá ${targetMon.name} → ${targetEntry.name}: cần Lv.${targetEntry.evoLevel}, hiện Lv.${targetMon.level ?? 1}`)
+        const evolutionCheck = validateEvolutionRequirements(targetMon, fromEntry, targetEntry, {
+          mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
+          storyText, storyDate, location: latestPlayerLocationRef.current,
+        })
+        if (!evolutionCheck.ok) {
+          report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${evolutionCheck.reason}`)
           continue
         }
         if (normalizeMonTarget(targetMon.species ?? targetMon.name) === normalizeMonTarget(targetEntry.species ?? targetEntry.name)) {
           report.lines.push(`ℹ ${targetMon.name} đã ở đúng dạng ${targetEntry.name} — không đổi biến`)
           continue
         }
+        const itemReservation = reserveEvolutionItem(targetEntry)
+        if (!itemReservation.ok) {
+          report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${itemReservation.reason}`)
+          continue
+        }
         evolveOne(targetMon, targetEntry, evolution.inferred ? 'inferred' : 'tag')
       }
 
-      for (const pk of parsed.pokemons ?? []) {
+      for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
         const entry = findSpeciesEntry(pk.species)
         if (!entry) {
           console.warn('[pokemon-tag] Không tìm thấy loài trong pokedex:', pk.species)
@@ -790,39 +849,25 @@ export default function RoleplayChat() {
           continue
         }
 
-        const access = legendaryAccess(entry, worldProgress, storyTone, adminMode)
+        const access = legendaryAccess(entry, prospectiveWorldProgress, storyTone, adminMode)
         if (!access.allowed) {
           report.lines.push(`⛔ Không cấp ${entry.name}: cổng tiến trình ${access.tier?.label ?? 'huyền thoại'} chưa mở — ${access.reason}`)
           continue
         }
 
-        // Tương thích model cũ 1: POKEMON trùng loài đang có = yêu cầu nâng
-        // cấp. Nếu vừa EVOLVE sang đúng loài này trong cùng lượt thì bỏ tag
-        // POKEMON dư, không tạo thêm dòng DNA gây hiểu nhầm.
-        const existing = resolveOwnedSpeciesTarget(pk.species, previewActive, previewParty)
-        if (existing) {
-          const before = existing.level ?? 1
-          const after = Math.max(before, Math.min(100, Number(pk.level) || before))
-          if (after <= before) {
-            if (!evolvedTargets.has(normalizeMonTarget(entry.name))) {
-              report.lines.push(`ℹ ${existing.name} đang Lv.${before} — tag Lv.${pk.level} không làm thay đổi biến`)
-            }
-            continue
-          }
-          if (realisticMode) {
-            report.lines.push(`⛔ Chế độ Thực tế không cho dùng POKEMON để nâng ${existing.name} Lv.${before} → Lv.${after}; phải qua EXP/Kẹo Hiếm hợp lệ`)
-            continue
-          }
-          const identity = { uid: existing.uid, name: existing.name }
-          const raise = (mon) => raiseMonToLevel(mon, after, movesDb)
-          setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
-          setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
-          replacePreviewMon(identity, raise)
-          report.lines.push(`✅ ${existing.name}: Lv.${before} → Lv.${after}`)
+        // Idempotency theo đúng tin AI + vị trí tag. Reload/callback nền có
+        // chạy lại cùng response cũng không thể sinh thêm một uid mới.
+        const acquisitionSourceId = sourceMessageId
+          ? `${sourceMessageId}:pokemon:${normalizeMonTarget(pk.species)}:${pokemonIndex}`
+          : ''
+        const alreadyApplied = acquisitionSourceId && [previewActive, ...previewParty, ...(latestPcBoxRef.current ?? [])]
+          .some((mon) => mon?.acquisitionSourceId === acquisitionSourceId)
+        if (alreadyApplied) {
+          report.lines.push(`ℹ Bỏ qua ${entry.name}: thay đổi từ tin này đã được áp trước đó`)
           continue
         }
 
-        // Tương thích model cũ 2: model kể Fletchling tiến hoá nhưng vẫn dùng
+        // Tương thích model cũ: model kể Fletchling tiến hoá nhưng vẫn dùng
         // [[POKEMON Fletchinder | Lv19]]. Nếu Pokédex xác nhận quan hệ trực
         // tiếp VÀ chính văn khẳng định tiến hoá đã xảy ra, thay đúng cá thể
         // cũ thay vì thêm “con chim cấp 2” thứ hai.
@@ -852,12 +897,36 @@ export default function RoleplayChat() {
             report.lines.push(`✅ ${prevo.name}: Lv.${beforeLevel} → Lv.${requestedLevel}`)
             }
           }
+          const fromEntry = findSpeciesEntry(current.species ?? current.name)
+          const inferredCheck = validateEvolutionRequirements(current, fromEntry, entry, {
+            mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
+            storyText, storyDate, location: latestPlayerLocationRef.current,
+          })
+          if (!inferredCheck.ok) {
+            report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${inferredCheck.reason}`)
+            continue
+          }
+          const itemReservation = reserveEvolutionItem(entry)
+          if (!itemReservation.ok) {
+            report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${itemReservation.reason}`)
+            continue
+          }
           evolveOne(current, entry, 'inferred')
           continue
         }
 
-        const saneLv = receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-        const newMon = ensurePokemonIdentity(applyPerksToMon(buildMonSmart(entry, saneLv, movesDb), playerTraits), trainerId)
+        // Thực tế mới nắn level theo sinh thái. Anime/Sảng văn phải giữ đúng
+        // level người chơi/AI đã tuyên bố và không biến Pokémon sở hữu thành boss.
+        const saneLv = realisticMode
+          ? receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
+          : Math.max(1, Math.min(100, Math.floor(Number(pk.level) || 1)))
+        const builtMon = realisticMode
+          ? buildMonSmart(entry, saneLv, movesDb)
+          : buildWildMon(entry, saneLv, movesDb)
+        const newMon = ensurePokemonIdentity({
+          ...applyPerksToMon(normalizeAcquiredMon(builtMon), playerTraits),
+          ...(acquisitionSourceId ? { acquisitionSourceId } : {}),
+        }, trainerId)
         if (previewParty.length < 6) {
           setParty((cur) => {
             const next = [...(cur ?? [])]
@@ -875,7 +944,8 @@ export default function RoleplayChat() {
         }
       }
 
-      for (const directive of parsed.friendships ?? []) {
+      for (const [index, directive] of (parsed.friendships ?? []).entries()) {
+        if (appliedFriendshipDirectives.has(index)) continue
         const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
         if (!targetMon) {
           report.lines.push(`⚠ Không áp thân mật “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
@@ -915,7 +985,14 @@ export default function RoleplayChat() {
         const entry = resolveItemByName(raw.name)
         let qty = raw.qty
         let absorbedByEquip = 0
+        let absorbedByEvolution = 0
         if (entry && qty < 0) {
+          const pendingEvolution = evolutionDebits.get(entry.id) ?? 0
+          absorbedByEvolution = Math.min(Math.abs(qty), pendingEvolution)
+          if (absorbedByEvolution > 0) {
+            qty += absorbedByEvolution
+            evolutionDebits.set(entry.id, pendingEvolution - absorbedByEvolution)
+          }
           const pending = equipDebits.get(entry.id) ?? 0
           absorbedByEquip = Math.min(Math.abs(qty), pending)
           if (absorbedByEquip > 0) {
@@ -923,17 +1000,63 @@ export default function RoleplayChat() {
             equipDebits.set(entry.id, pending - absorbedByEquip)
           }
         }
-        return { entry, qty, raw, absorbedByEquip }
+        return { entry, qty, raw, absorbedByEquip, absorbedByEvolution }
       })
       let previewInventory = [...(latestInventoryRef.current ?? [])]
+      let lootChanged = false
 
-      for (const { entry, qty, raw, absorbedByEquip } of itemChanges) {
+      for (const [lootIndex, loot] of (parsed.loots ?? []).entries()) {
+        const lootSourceId = sourceMessageId
+          ? `${sourceMessageId}:loot:${normalizeMonTarget(loot.type)}:${lootIndex}`
+          : `turn-${turnNow}:loot:${normalizeMonTarget(loot.type)}:${lootIndex}`
+        if (previewInventory.some((item) => (item.lootSourceIds ?? []).includes(lootSourceId))) {
+          report.lines.push(`ℹ Bỏ qua chiến lợi phẩm ${loot.type}: sự kiện này đã được áp trước đó`)
+          continue
+        }
+        const generatedLoot = generateLootItems(loot, lootSourceId)
+        for (const award of generatedLoot) {
+          const at = previewInventory.findIndex((item) => item.id === award.id)
+          if (at < 0) {
+            previewInventory.push({ ...award, lootSourceIds: [lootSourceId] })
+          } else {
+            const current = previewInventory[at]
+            previewInventory[at] = {
+              ...award,
+              ...current,
+              qty: current.infinite ? current.qty : (Number(current.qty) || 0) + award.qty,
+              lootSourceIds: [...new Set([...(current.lootSourceIds ?? []), lootSourceId])],
+            }
+          }
+        }
+        lootChanged = generatedLoot.length > 0 || lootChanged
+        report.lines.push(`✅ Chiến lợi phẩm (${loot.type}, ${loot.size}): ${generatedLoot.map((item) => `${item.name} x${item.qty}`).join(', ')}`)
+      }
+
+      // Tiến hoá bằng đá/vật phẩm luôn tiêu đúng một món, kể cả model quên
+      // xuất ITEM -1. Nếu model có xuất, phần trên đã hấp thụ debit để không
+      // bị trừ hai lần.
+      for (const [itemId, remaining] of evolutionDebits) {
+        const totalNeeded = remaining + itemChanges.reduce((sum, change) => sum + (change.entry?.id === itemId ? change.absorbedByEvolution : 0), 0)
+        if (totalNeeded <= 0) continue
+        const at = previewInventory.findIndex((item) => item.id === itemId)
+        if (at < 0 || previewInventory[at].infinite) continue
+        const left = Math.max(0, (Number(previewInventory[at].qty) || 0) - totalNeeded)
+        const label = previewInventory[at].name
+        if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
+        else previewInventory.splice(at, 1)
+        report.lines.push(`✅ Tiêu thụ vật phẩm tiến hoá: ${label} x${totalNeeded}`)
+      }
+
+      for (const { entry, qty, raw, absorbedByEquip, absorbedByEvolution } of itemChanges) {
         if (!entry) {
           report.lines.push(`⚠ Không áp vật phẩm “${raw.name}”: không có trong danh mục`)
           continue
         }
         if (absorbedByEquip > 0) {
           report.lines.push(`ℹ ${entry.name} x${absorbedByEquip} sẽ được trừ bởi lệnh trang bị, không trừ lặp bằng ITEM`)
+        }
+        if (absorbedByEvolution > 0) {
+          report.lines.push(`ℹ ${entry.name} x${absorbedByEvolution} đã được trừ bởi tiến hoá, không trừ lặp bằng ITEM`)
         }
         if (qty === 0) continue
         const at = previewInventory.findIndex((it) => it.id === entry.id)
@@ -955,7 +1078,7 @@ export default function RoleplayChat() {
         }
       }
 
-      const validItemChanges = itemChanges.filter((x) => x.entry && (x.qty !== 0 || x.absorbedByEquip > 0))
+      const validItemChanges = itemChanges.filter((x) => x.entry && (x.qty !== 0 || x.absorbedByEquip > 0 || x.absorbedByEvolution > 0))
       let equipmentChanged = false
 
       const addPreviewItem = (entry) => {
@@ -1017,7 +1140,7 @@ export default function RoleplayChat() {
         report.lines.push(`✅ Trang bị: ${targetMon.name} cầm ${entry.name}${oldItem && !targetMon.heldItem?.fromInfinite ? ` · ${oldItem.name} được cất lại` : ''}`)
       }
 
-      if (validItemChanges.length > 0 || equipmentChanged) {
+      if (validItemChanges.length > 0 || equipmentChanged || evolutionDebits.size > 0 || lootChanged) {
         const finalInventory = syncTraitGrantedItems(previewInventory, playerTraits)
         setInventory(finalInventory)
         setParty(previewParty)
@@ -1073,12 +1196,13 @@ export default function RoleplayChat() {
     } catch (e2) { console.warn('[state] NPC/FACT lỗi:', e2.message) }
 
     try {
-      if ((parsed.badges?.length ?? 0) || (parsed.quests?.length ?? 0) || (parsed.reputations?.length ?? 0) || (parsed.wanted?.length ?? 0)) {
+      if ((parsed.badges?.length ?? 0) || (parsed.quests?.length ?? 0) || (parsed.reputations?.length ?? 0) || (parsed.wanted?.length ?? 0) || (parsed.legendaryAccess?.length ?? 0)) {
         setWorldProgress((cur) => applyWorldDirectives(cur, parsed, { mode: storyTone, turn: turnNow, date: storyDate }))
         for (const badge of parsed.badges ?? []) report.lines.push(worldProgress.badgeTracking
           ? `🏅 Lưu huy hiệu: ${badge.name}`
           : `ℹ Bỏ qua huy hiệu ${badge.name}: người chơi đã tắt theo dõi Badge Case`)
         for (const quest of parsed.quests ?? []) report.lines.push(`📋 Nhiệm vụ “${quest.title}”: ${quest.status}`)
+        for (const access of parsed.legendaryAccess ?? []) report.lines.push(`🌠 Điều kiện gặp ${access.species} đã được xác lập${access.reason ? ` · ${access.reason}` : ''}`)
         for (const rep of parsed.reputations ?? []) report.lines.push(`⚑ Danh tiếng ${rep.name}: ${rep.delta > 0 ? '+' : ''}${rep.delta}`)
         for (const wanted of parsed.wanted ?? []) report.lines.push(`⚖ Truy nã: ${wanted.delta > 0 ? '+' : ''}${wanted.delta}${wanted.reason ? ` · ${wanted.reason}` : ''}`)
       }
@@ -1123,7 +1247,7 @@ export default function RoleplayChat() {
         try {
           const queryText = lastUserMsg?.content ?? ''
           const transcriptMemories = recallFromTranscript(nextMessages, queryText, { maxTurn: cutoff, topK: 6 })
-          const archivedMemories = await recallArchive({ queryText, maxTurn: cutoff, topK: 6 })
+          const archivedMemories = await recallArchive({ queryText, maxTurn: cutoff, topK: 6, namespace: trainerId })
           let semanticMemories = []
           if (memoryActive) {
             semanticMemories = await recallRelevant({
@@ -1173,6 +1297,7 @@ export default function RoleplayChat() {
       // x/y là phần trăm trên ảnh vùng, không phải km; areaKey vẫn là mốc
       // gameplay để hệ level/nhạc/Safari tương thích với save cũ.
       const currentMapLocation = normalizeMapLocation(playerLocation)
+      const currentMode = normalizeGameMode(storyTone)
       if (currentMapLocation?.regionKey) {
         const regionInfo = getRegion(currentMapLocation.regionKey)
         const areaInfo = getArea(currentMapLocation.regionKey, currentMapLocation.areaKey)
@@ -1187,12 +1312,16 @@ export default function RoleplayChat() {
         // Đợt 86: vị trí không chỉ quyết định level. Sinh cảnh, buổi và thời
         // tiết là luật thế giới thật để model không thả Pokémon ngẫu nhiên từ
         // toàn National Dex vào mọi bụi cỏ.
-        const ecologyNote = buildEcologyNote({
-          location: currentMapLocation,
-          storyDate,
-          weather: getWeather(storyDate, currentMapLocation),
-        })
-        if (ecologyNote) history = [...history, { role: 'system', content: ecologyNote }]
+        if (currentMode === 'realistic') {
+          const ecologyNote = buildEcologyNote({
+            location: currentMapLocation,
+            storyDate,
+            weather: getWeather(storyDate, currentMapLocation),
+          })
+          if (ecologyNote) history = [...history, { role: 'system', content: ecologyNote }]
+        } else if (currentMode === 'anime') {
+          history = [...history, { role: 'system', content: '[Hệ thống — SINH CẢNH ANIME: dùng vùng/thời tiết làm mặc định khi tự chọn Pokémon nền, nhưng không dùng sinh cảnh để bác một cuộc gặp, kỳ tích hay huyền thoại mà người chơi chủ động muốn đưa vào truyện. Không nhắc ghi chú này.]' }]
+        }
       }
 
       // Đợt 87: luật chế độ và tiến trình là system state, không phải gợi ý
@@ -1204,18 +1333,22 @@ export default function RoleplayChat() {
       const currentVisibleInput = nextMessages.at(-1)?.role === 'user' && !nextMessages.at(-1)?.hidden
         ? nextMessages.at(-1).content
         : ''
-      const adjudicationNote = buildInputAdjudicationNote({
+      const inputAdjudication = classifyRealisticInput({
         text: currentVisibleInput,
         mode: storyTone,
         adminMode,
         pokedex: pokedexSpecies,
         worldProgress,
         money: playerProfile.money,
+        inventory,
         location: playerLocation,
-        recentText: nextMessages.slice(-4).map((message) => message.content).join('\n'),
+        // Không cho chính input đang xét tự làm "bằng chứng" cho danh hiệu/cuộc
+        // gặp mà nó vừa tự tuyên bố. Chỉ lịch sử trước input này mới được tính.
+        recentText: nextMessages.slice(0, -1).slice(-4).map((message) => message.content).join('\n'),
         ownedPokemon: [playerMon, ...(party ?? [])].filter(Boolean),
+        searchHistory: nextMessages.slice(0, -1).map((message) => message.realisticSearch).filter(Boolean),
       })
-      if (adjudicationNote) history = [...history, { role: 'system', content: adjudicationNote }]
+      if (inputAdjudication.note) history = [...history, { role: 'system', content: inputAdjudication.note }]
       if (adminMode) {
         history = [...history, { role: 'system', content: '[Hệ thống — PHIÊN ADMIN ĐÃ XÁC THỰC: cho phép lệnh kiểm thử từ input hiện tại bỏ qua giới hạn chế độ và cổng tiến trình. Vẫn dùng tag trạng thái chuẩn để app áp biến; không nhắc mã mở khoá hoặc ghi chú này.]' }]
       }
@@ -1242,16 +1375,21 @@ export default function RoleplayChat() {
       // QUYỀN TỰ DO SÁNG TẠO (đợt 63): người chơi phản ánh AI bị gò bó bởi
       // input — chỉ thuật lại đúng câu lệnh, thế giới đứng im. Nhắc mỗi lượt
       // để AI chủ động dựng cảnh sống động quanh hành động của người chơi.
+      const creativeFreedomNote = currentMode === 'realistic'
+        ? '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO CÓ NHỊP: input của người chơi là HÀNH ĐỘNG/Ý ĐỊNH của nhân vật chính, không phải kịch bản giới hạn và cũng không tự xác lập kết quả ngoài quyền nhân vật. Hãy làm cảnh sống bằng phản ứng hợp logic của NPC/Pokémon, giác quan và hệ quả đã gieo. KHÔNG bắt buộc nhét sự cố, người lạ, tin nghe lỏm hay hook mới vào mỗi lượt; đối thoại, chăm sóc, cắm trại và im lặng có ý nghĩa phải được thở. Ưu tiên nối sợi dây cũ trước khi mở sợi dây mới. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn tạo riêng. Không nhắc tới ghi chú này.]'
+        : currentMode === 'anime'
+          ? '[Hệ thống — QUYỀN TÁC GIẢ ANIME: người chơi được chủ động đặt tiền đề, kỳ tích, cuộc gặp, kết quả cao trào và cả việc huyền thoại xuất hiện/đồng hành như trong anime. Hãy biến điều họ vẽ thành chính văn sống động, vẫn cho NPC/Pokémon có cảm xúc và tính cách riêng nhưng không dùng luật Thực tế, sinh cảnh, huy hiệu, nhiệm vụ hay nghi thức để bác ý muốn đó. Giữ nhịp cảnh tự nhiên; không bắt buộc nhét hook mới. Dùng tag state chuẩn để đồng bộ app. Không nhắc ghi chú này.]'
+          : '[Hệ thống — QUYỀN TÁC GIẢ SẢNG VĂN: tuyên bố của người chơi về cheat, cơ duyên, tài nguyên, năng lực, chiến thắng, triệu hồi/gặp/bắt huyền thoại là chỉ dẫn tác giả được phép thành canon. Thực hiện hào phóng theo đúng ý họ và xuất tag state chuẩn; không áp chống cheat, sinh cảnh, huy hiệu, nhiệm vụ hay nghi thức của Thực tế. Không tự làm yếu hoặc diễn giải lại chỉ dẫn thành nhầm lẫn. Không nhắc ghi chú này.]'
       history = [...history, {
         role: 'user',
-        content: '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO CÓ NHỊP: input của người chơi là HÀNH ĐỘNG/Ý ĐỊNH của nhân vật chính, không phải kịch bản giới hạn và cũng không tự xác lập kết quả ngoài quyền nhân vật. Hãy làm cảnh sống bằng phản ứng hợp logic của NPC/Pokémon, giác quan và hệ quả đã gieo. KHÔNG bắt buộc nhét sự cố, người lạ, tin nghe lỏm hay hook mới vào mỗi lượt; đối thoại, chăm sóc, cắm trại và im lặng có ý nghĩa phải được thở. Ưu tiên nối sợi dây cũ trước khi mở sợi dây mới. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn tạo riêng. Không nhắc tới ghi chú này.]',
+        content: creativeFreedomNote,
       }]
 
       const nudge = maybeMakeNudge({
         identityKey: playerIdentity,
         location: playerLocation,
         turn: nextMessages.length,
-        mode: normalizeGameMode(storyTone),
+        mode: currentMode,
         worldProgress,
         recentText: [...nextMessages].reverse().find((message) => message.role === 'assistant')?.content ?? '',
         userText: currentVisibleInput,
@@ -1276,16 +1414,45 @@ export default function RoleplayChat() {
         assistantPrefill: assistantPrefill?.trim() || null,
       })
 
-      const reply = await chatCompletion(configOverride || apiConfig, apiMessages, callOptions)
+      let reply = await chatCompletion(configOverride || apiConfig, apiMessages, callOptions)
+      let cleaned = cleanAiOutput(reply, regexScripts)
+      // Prompt không phải chốt an toàn đủ mạnh: một số model vẫn biến “đi
+      // tìm Ditto” thành gặp Ditto ngay. Nếu bản nháp phá cổng tìm kiếm của
+      // Thực tế, yêu cầu viết lại đúng một lần. Provider vẫn không tuân thủ
+      // (hoặc lần sửa lỗi thất bại) thì dùng kết quả thất bại cục bộ, bảo đảm
+      // không có BATTLE/POKEMON hay cuộc gặp được canon hoá.
+      if (responseViolatesSearchGate(cleaned, inputAdjudication)) {
+        try {
+          const revised = await chatCompletion(configOverride || apiConfig, [
+            ...apiMessages,
+            { role: 'assistant', content: reply },
+            { role: 'user', content: buildSearchGateCorrection(inputAdjudication) },
+          ], { ...callOptions, assistantPrefill: '' })
+          const revisedCleaned = cleanAiOutput(revised, regexScripts)
+          if (revisedCleaned && !responseViolatesSearchGate(revisedCleaned, inputAdjudication)) {
+            reply = revised
+            cleaned = revisedCleaned
+          } else {
+            reply = buildSearchGateFallback(inputAdjudication, getArea(playerLocation?.regionKey, playerLocation?.areaKey)?.name)
+            cleaned = reply
+          }
+        } catch (searchGateError) {
+          console.warn('[realistic-search-gate] dùng fallback:', searchGateError.message)
+          reply = buildSearchGateFallback(inputAdjudication, getArea(playerLocation?.regionKey, playerLocation?.areaKey)?.name)
+          cleaned = reply
+        }
+      }
       // Đợt 79: preset có thể dùng <choice>, <selection> hoặc <details>. Bóc
       // từ reply GỐC trước khi outputCleanup vứt scaffold hậu kỳ.
       const replyActionChoices = extractActionChoices(reply)
-      const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
         throw new Error(
           'AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset (mục Preset chính văn) hoặc kiểm tra lại preset ở nút Debug.',
         )
       }
+      // ID của lượt phải được chốt TRƯỚC khi áp state để mọi Pokémon/vật phẩm
+      // sinh động có thể mang khoá nguồn idempotent của chính response này.
+      const turnMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       // Giao thức trạng thái: parse tag [[MONEY]]/[[REL]]/[[BODY]]/[[SHOP]]
       // do AI khai báo ở cuối tin — áp vào state thật (tiền, hảo cảm, thương
       // tích trên HUD cập nhật ngay), gỡ tag khỏi văn bản hiển thị. Tag
@@ -1306,9 +1473,23 @@ export default function RoleplayChat() {
         latestPlayerMonRef.current,
         latestPartyRef.current,
       )
+      // Một lượt có thể vừa đặt chân tới địa điểm nghi thức vừa gọi huyền
+      // thoại. Đối chiếu bằng vị trí sắp áp dụng, nhưng chỉ từ MOVE đã có câu
+      // chính văn xác nhận để tag giả không thể tự dịch chuyển người chơi.
+      const evidencedMoveDirectives = (stateParsed.moveDirectives ?? []).filter((directive) =>
+        proseSupportsMove(stateEvidenceText, directive.place),
+      )
+      const prospectiveLocation = resolveMoveLocation(
+        { ...stateParsed, moveDirectives: evidencedMoveDirectives },
+        latestPlayerLocationRef.current,
+      ) ?? latestPlayerLocationRef.current
       const evidenceCheck = validateStateAgainstProse(stateParsed, stateEvidenceText, {
         playerName: playerName || playerProfile?.name,
         party: latestPartyRef.current,
+        mode: normalizeGameMode(storyTone), adminMode,
+        inventory: latestInventoryRef.current,
+        location: prospectiveLocation,
+        blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
       })
       stateParsed = evidenceCheck.parsed
 
@@ -1337,7 +1518,7 @@ export default function RoleplayChat() {
       // Đợt 74: áp POKEMON/LEVEL/ITEM trước khi dựng DNA và lấy báo cáo
       // thực tế. DNA không còn chỉ lặp lại tag rồi tuyên bố nhầm là đã áp.
       const turnNow = nextMessages.length
-      const mainApplyReport = applyParsedState(stateParsed, turnNow, stateEvidenceText)
+      const mainApplyReport = applyParsedState(stateParsed, turnNow, stateEvidenceText, turnMessageId)
       for (const shop of rejectedShops) {
         mainApplyReport.lines.push(`⚠ Bỏ qua cửa hàng “${shop.name}”: chính văn chưa cho nhân vật bước vào bên trong`)
       }
@@ -1393,7 +1574,6 @@ export default function RoleplayChat() {
       // API cập nhật biến chạy nền có thể trả lời sau khi người chơi đã sang
       // lượt kế tiếp. Gắn id cố định để DNA bổ sung quay đúng tin đã sinh ra nó,
       // không đính nhầm vào "tin AI cuối cùng" rồi khiến viewer khó kiểm chứng.
-      const turnMessageId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       setMessages((m) => [
         ...m,
         {
@@ -1403,6 +1583,13 @@ export default function RoleplayChat() {
           meta: turnMeta,
           actionChoices,
           actionChoicesPending,
+          ...(inputAdjudication.searchTargets?.length ? {
+            realisticSearch: {
+              targets: [...inputAdjudication.searchTargets],
+              stage: inputAdjudication.searchStage ?? 1,
+              encounterEligible: Boolean(inputAdjudication.encounterEligible),
+            },
+          } : {}),
           ...(stateParsed.shops.length > 0
             ? { shop: stateParsed.shops[0], shopName: stateParsed.shops[0].name, shopValidated: true }
             : {}),
@@ -1498,7 +1685,7 @@ export default function RoleplayChat() {
             appliedTags: {
               money: stateParsed.money, moneyEntries: stateParsed.moneyEntries, rel: stateParsed.rel, body: stateParsed.body,
               pokemons: stateParsed.pokemons, levels: stateParsed.levels,
-              evolutions: stateParsed.evolutions, items: stateParsed.items, equipment: stateParsed.equipment,
+              evolutions: stateParsed.evolutions, items: stateParsed.items, loots: stateParsed.loots, equipment: stateParsed.equipment,
               friendships: stateParsed.friendships, hunger: stateParsed.hunger,
               dateAdvance: stateParsed.dateAdvance, datePart: stateParsed.datePart,
               training: stateParsed.training, moves: stateParsed.moveDirectives,
@@ -1506,6 +1693,7 @@ export default function RoleplayChat() {
               facts: (stateParsed.facts ?? []).map((f) => f.key),
               badges: stateParsed.badges, quests: stateParsed.quests,
               reputations: stateParsed.reputations, wanted: stateParsed.wanted,
+              legendaryAccess: stateParsed.legendaryAccess,
               collectionAwards: stateParsed.collectionAwards,
             },
             hasPokemon: Boolean(latestPlayerMonRef.current) || (stateParsed.pokemons ?? []).length > 0,
@@ -1529,9 +1717,16 @@ export default function RoleplayChat() {
                 const inferredShop = inferInteractiveShop(stateEvidenceText, stateUserText)
                 if (inferredShop) parsedExtra.shops = [inferredShop]
               }
-              const extraEvidence = validateStateAgainstProse(parsedExtra, stateEvidenceText, { playerName: playerName || playerProfile?.name, party: latestPartyRef.current })
+              const extraEvidence = validateStateAgainstProse(parsedExtra, stateEvidenceText, {
+                playerName: playerName || playerProfile?.name,
+                party: latestPartyRef.current,
+                mode: normalizeGameMode(storyTone), adminMode,
+                inventory: latestInventoryRef.current,
+                location: latestPlayerLocationRef.current,
+                blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
+              })
               const extra = extraEvidence.parsed
-              const extraApplyReport = applyParsedState(extra, turnNow, stateEvidenceText)
+              const extraApplyReport = applyParsedState(extra, turnNow, stateEvidenceText, turnMessageId)
               extraApplyReport.lines.push(...describeRejectedState(extraEvidence.rejected))
               if (extra.money || extra.rel.length || extra.body.length) {
                 applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
@@ -1571,7 +1766,7 @@ export default function RoleplayChat() {
       // Biên niên sử exact luôn ghi, kể cả không cấu hình embedding.
       const lastUser = [...nextMessages].reverse().find((m) => m.role === 'user' && !m.hidden)
       const storyTurnNumber = nextMessages.filter((message) => message.role === 'assistant').length + 1
-      archiveExchange(lastUser?.content ?? '', stripInlineTags(stateEvidenceText), nextMessages.length, storyTurnNumber).catch(
+      archiveExchange(lastUser?.content ?? '', stripInlineTags(stateEvidenceText), nextMessages.length, storyTurnNumber, trainerId).catch(
         (archiveErr) => console.warn('[archive] ghi biên niên sử lỗi (bỏ qua):', archiveErr.message),
       )
       // Vector memory chỉ là lớp bổ sung ngữ nghĩa tùy chọn.
@@ -1597,6 +1792,12 @@ export default function RoleplayChat() {
   async function handleSend() {
     if (!input.trim() || loading) return
     const userMsg = { role: 'user', content: input.trim() }
+    try {
+      await saveTurnCheckpoint(trainerId, messages, userMsg.content)
+    } catch (checkpointError) {
+      setError(checkpointError.message)
+      return
+    }
     const nextMessages = [...messages, userMsg]
     setMessages(nextMessages)
     setInput('')
@@ -1613,11 +1814,15 @@ export default function RoleplayChat() {
       if (messages[i].role === 'assistant') { lastAiIdx = i; break }
     }
     if (lastAiIdx < 0) return
-    const trimmed = messages.slice(0, lastAiIdx) // cắt bỏ tin AI cuối
-    setMessages(trimmed)
-    // scanExtra = nội dung tin user gần nhất (để dò battle/area như lần đầu).
-    const lastUser = [...trimmed].reverse().find((m2) => m2.role === 'user')
-    await callAI(trimmed, lastUser?.content ?? '')
+    const lastUser = [...messages.slice(0, lastAiIdx)].reverse().find((m2) => m2.role === 'user')
+    const restored = await restoreTurnCheckpoint(trainerId, lastUser?.content ?? '', lastAiIdx - 1)
+    if (!restored) {
+      window.alert('Lượt này được tạo trước khi có checkpoint an toàn nên không thể reroll mà không làm lệch state. Hãy gửi một lượt mới trước.')
+      return
+    }
+    await cleanupMemoryFor([lastAiIdx], restored.restoredMessages.length)
+    sessionStorage.setItem('trainer-arena:pending-reroll', JSON.stringify({ trainerId, userText: restored.userText }))
+    window.location.reload()
   }
 
   // GỬI LẠI TỪ TIN NGƯỜI CHƠI (đợt 50): người chơi chuột phải vào TIN CỦA
@@ -1628,9 +1833,14 @@ export default function RoleplayChat() {
     if (loading) return
     const m = messages[idx]
     if (!m || m.role !== 'user') return
-    const trimmed = messages.slice(0, idx + 1)
-    setMessages(trimmed)
-    await callAI(trimmed, m.content ?? '')
+    const restored = await restoreTurnCheckpoint(trainerId, m.content ?? '', idx)
+    if (!restored) {
+      window.alert('Không có checkpoint an toàn cho lượt này; không thể gửi lại mà vẫn hoàn tác chính xác state.')
+      return
+    }
+    await cleanupMemoryFor(messages.slice(idx + 1).map((_, offset) => idx + 1 + offset), restored.restoredMessages.length)
+    sessionStorage.setItem('trainer-arena:pending-reroll', JSON.stringify({ trainerId, userText: restored.userText }))
+    window.location.reload()
   }
 
   // index tin NGƯỜI CHƠI cuối cùng (không tính hidden) — chỉ tin này được
@@ -1644,6 +1854,16 @@ export default function RoleplayChat() {
 
   // SỬA 1 tin (đợt 39): cho phép sửa cả tin người chơi lẫn chính văn AI.
   function handleEditMessage(index, newContent) {
+    const target = messages[index]
+    if (!target) return
+    if (target.role === 'assistant' && (target.meta?.changes?.length ?? 0) > 0) {
+      window.alert('Tin này đã thay đổi state game. Hãy dùng Reroll để app hoàn tác checkpoint trước; sửa riêng câu chữ sẽ làm chính văn lệch dữ liệu.')
+      return
+    }
+    if (index < messages.length - 1 && target.role === 'user') {
+      window.alert('Không sửa trực tiếp input đã có câu trả lời. Hãy dùng “Gửi lại” ở lượt cuối để state và ký ức được hoàn tác cùng nhau.')
+      return
+    }
     setMessages((msgs) => msgs.map((m2, i) => {
       if (i === index) {
         return m2.role === 'assistant'
@@ -1699,13 +1919,16 @@ export default function RoleplayChat() {
       // cho câu chữ trong note nên đọc từ closure là đủ chính xác.
       const newMoney = Math.max(0, Number(playerProfile.money) - total)
       setPlayerProfile((cur) => ({ ...cur, money: Math.max(0, Number(cur.money) - total) }))
-      let inv = [...inventory]
-      for (const b of bought) {
-        const i = inv.findIndex((x) => x.id === b.id)
-        if (i >= 0) inv[i] = { ...inv[i], qty: inv[i].qty + b.qty }
-        else inv.push({ id: b.id, name: b.name, qty: b.qty })
-      }
-      setInventory(inv)
+      setInventory((cur) => {
+        const inv = [...(cur ?? [])]
+        for (const b of bought) {
+          const i = inv.findIndex((x) => x.id === b.id)
+          const { price: _price, gift: _gift, qty, ...itemData } = b
+          if (i >= 0) inv[i] = { ...inv[i], ...itemData, qty: (inv[i].qty ?? 0) + qty }
+          else inv.push({ ...itemData, qty })
+        }
+        return inv
+      })
       const list = bought.map((b) => `${b.name} x${b.qty}`).join(', ')
       const freebies = bought.filter((b) => b.price === 0).map((b) => b.name)
       noteContent = `[Hệ thống — viết tiếp CHÍNH VĂN] Tại ${shopName}, người chơi đã chọn mua: ${list}. Tổng thanh toán ₽${total.toLocaleString('vi-VN')}, tiền còn lại ₽${newMoney.toLocaleString('vi-VN')}.${freebies.length ? ` Chủ quán tặng kèm: ${freebies.join(', ')}.` : ''} Hãy kể lại cảnh MUA HÀNG bằng văn xuôi tự nhiên: nhân vật nói muốn mua gì, tương tác với người bán, trả tiền (nêu rõ nếu có giảm giá/tặng kèm), rồi tiếp diễn câu chuyện. KHÔNG liệt kê kiểu hoá đơn.`
@@ -1719,6 +1942,11 @@ export default function RoleplayChat() {
       resultLabel: bought.length > 0 ? `Đã mua sắm tại ${shopName}` : `Rời ${shopName}`,
       content: noteContent,
     }
+    const baseMessages = messages.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm))
+    // Mua sắm đã đổi tiền/túi trước khi AI kể tiếp. Chờ updater persist rồi
+    // chụp checkpoint ở đúng trạng thái SAU giao dịch, TRƯỚC các tag mới.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
     // Functional update (đợt 64): STATE phải dựng từ bản MỚI NHẤT, tránh
     // closure cũ xoá mất cập nhật chạy nền (meta biến của API phụ...).
     // LƯU Ý: React chạy hàm cập nhật ở pha render, KHÔNG đồng bộ tại đây —
@@ -1728,10 +1956,7 @@ export default function RoleplayChat() {
       ...cur.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm)),
       note,
     ])
-    const nextMessages = [
-      ...messages.map((mm, i) => (i === idx ? { ...mm, shopUsed: true } : mm)),
-      note,
-    ]
+    const nextMessages = [...baseMessages, note]
     await callAI(nextMessages)
   }
 
@@ -1751,8 +1976,11 @@ export default function RoleplayChat() {
     // Khoá nút của tin đó lại để không bấm đi bấm lại vô hạn.
     const markUsed = (arr) =>
       idx !== null ? arr.map((mm, i) => (i === idx ? { ...mm, pokecenter: undefined } : mm)) : arr
+    const baseMessages = markUsed(messages)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
     setMessages((cur) => [...markUsed(cur), note])
-    await callAI([...markUsed(messages), note])
+    await callAI([...baseMessages, note])
   }
 
   async function handleBattleEnd(outcome, details = null) {
@@ -1863,8 +2091,11 @@ export default function RoleplayChat() {
           battleRuntime: undefined, doubleBattleRuntime: undefined,
         } : message)
       : arr
+    const baseMessages = markUsed(messages)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
     setMessages((cur) => [...markUsed(cur), note])
-    const nextMessages = [...markUsed(messages), note]
+    const nextMessages = [...baseMessages, note]
     const override = outcome === 'escaped' ? outcomeApiConfig.escaped : outcome === 'lose' ? outcomeApiConfig.lose : null
     await callAI(nextMessages, '', override)
   }
@@ -2075,7 +2306,7 @@ ${m.content}`
                         entry, levelFor(entry, index === 1 ? 1 : 0), movesDb, playerMon?.types, true,
                       )))
                       setEnemyMon(duo[0])
-                      if (npcProfile) recordNpcBattle(npcProfile.id, npcProfile.team)
+                      if (npcProfile) recordNpcBattle(npcProfile.id, duo)
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
                         ...mm, battleStarted: true, battleMode: 'double', doubleReason: doubleCtx.reason,
                         trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase,
@@ -2094,7 +2325,7 @@ ${m.content}`
                       ))
                       const enemyTeam = fullEnemyTeam.length ? fullEnemyTeam : [mon]
                       setEnemyMon(mon)
-                      if (npcProfile) recordNpcBattle(npcProfile.id, npcProfile.team)
+                      if (npcProfile) recordNpcBattle(npcProfile.id, enemyTeam)
                       setMessages((msgs) => msgs.map((mm, idx) => idx === i ? {
                         ...mm, battleStarted: true, battleMode: 'single',
                         trainerTier: battleCtx.tier, trainerTeamSlot: leagueSlotBase, trainerTeamCount: enemyTeam.length,
@@ -2289,11 +2520,9 @@ ${m.content}`
                     const idxs = [ai]
                     if (messages[ai - 1]?.role === 'user') idxs.push(ai - 1)
                     if (!window.confirm('Xoá lượt gần nhất (bạn + AI)? Ký ức/tóm tắt liên quan cũng được dọn.')) return
-                    setMessages((msgs) => {
-                      const next = msgs.filter((_, idx) => !idxs.includes(idx))
-                      cleanupMemoryFor(idxs, next.length)
-                      return next
-                    })
+                    const next = messages.filter((_, idx) => !idxs.includes(idx))
+                    setMessages(next)
+                    void cleanupMemoryFor(idxs, next.length)
                     closeIndexBoundUi()
                   },
                 },

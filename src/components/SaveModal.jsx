@@ -85,12 +85,28 @@ export default function SaveModal({ onClose }) {
 
   async function doImport(file) {
     setErr(null)
+    if (!window.confirm('Nạp file save này? Ván đang chơi sẽ bị thay thế. Trang sẽ tự tải lại.')) return
+    setBusy(true)
     try {
-      if (!window.confirm('Nạp file save này? Ván đang chơi sẽ bị thay thế. Trang sẽ tự tải lại.')) return
       await importSaveFile(file)
       window.location.reload()
     } catch (e) {
       setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function doExport() {
+    setErr(null)
+    setBusy(true)
+    try {
+      await exportSaveFile()
+      setMsg('Đã xuất file save kèm toàn bộ Biên niên sử.')
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -163,7 +179,7 @@ export default function SaveModal({ onClose }) {
         })}
 
         <div className="btn-row" style={{ gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <button className="btn" style={{ fontSize: 12 }} onClick={() => { exportSaveFile(); setMsg('Đã xuất file save.') }}>
+          <button className="btn" style={{ fontSize: 12 }} onClick={doExport} disabled={busy}>
             ⬇ Xuất ra file
           </button>
           <label className="btn" style={{ fontSize: 12, cursor: 'pointer' }}>

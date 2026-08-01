@@ -60,7 +60,7 @@ function AffinityBar({ value }) {
 
 export default function PlayerHUD({ mobile = false }) {
   const {
-    playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger, playerTraits,
+    playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger, setHunger, playerTraits,
     party, setParty, playerMon, setPlayerMon,
     relationships, inventory, setInventory, movesDb,
   } = useGame()
@@ -280,6 +280,8 @@ export default function PlayerHUD({ mobile = false }) {
         setPlayerMon={setPlayerMon}
         bodyStatus={bodyStatus}
         setBodyStatus={setBodyStatus}
+        hunger={hunger}
+        setHunger={setHunger}
         movesDb={movesDb}
       />
 
@@ -339,11 +341,16 @@ export default function PlayerHUD({ mobile = false }) {
 //   cả trạng thái, Revive chỉ dùng cho con đã gục).
 // - Đồ cho người: chọn bộ phận cơ thể để giảm thương tích (băng gạc -10,
 //   túi cứu thương -30).
-// - Bóng/chữa trạng thái/tiện ích: dùng trong trận/truyện (sẽ nối sau).
+// - Thuốc chữa trạng thái dùng được cả ngoài trận; bóng và tiện ích theo ngữ
+//   cảnh trận đấu/chính văn tương ứng.
 const HEAL_AMOUNTS = { potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30 }
-const HUMAN_HEAL = { bandage: 10, medkit: 30 }
+const STATUS_CURES = {
+  antidote: ['psn', 'tox'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
+  iceheal: ['frz'], fullheal: ['psn', 'tox', 'par', 'slp', 'brn', 'frz'],
+}
+const HUMAN_HEAL = { bandage: 10, firstaidkit: 18, medkit: 30 }
 
-function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, setPlayerMon, bodyStatus, setBodyStatus, movesDb }) {
+function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, setPlayerMon, bodyStatus, setBodyStatus, hunger, setHunger, movesDb }) {
   const [openCat, setOpenCat] = useState('heal')
   const [openItem, setOpenItem] = useState(null) // item id đang mở chi tiết
   const [feedback, setFeedback] = useState(null)
@@ -352,7 +359,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
   const grouped = useMemo(() => {
     const g = {}
     for (const it of (inventory ?? [])) {
-      const cat = catalog[it.id]?.category ?? resolveHeldItemByName(it)?.category ?? 'misc'
+      const cat = catalog[it.id]?.category ?? resolveHeldItemByName(it)?.category ?? it.category ?? 'misc'
       ;(g[cat] ??= []).push(it)
     }
     return g
@@ -391,18 +398,36 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       setFeedback(`${mon.name} đã gục — cần Revive trước.`)
       return
     }
+    if (!isRevive && mon.hp >= mon.maxHp && (!isFull || !mon.status)) {
+      setFeedback(`${mon.name} không cần dùng ${item.name} lúc này.`)
+      return
+    }
     let newHp
-    if (isRevive) newHp = Math.floor(mon.maxHp / 2)
+    if (isRevive) newHp = Math.max(1, Math.floor(mon.maxHp / 2))
     else if (isFull) newHp = mon.maxHp
     else newHp = Math.min(mon.maxHp, mon.hp + (HEAL_AMOUNTS[item.id] ?? 20))
-    const updated = { ...mon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined } : {}) }
+    const updated = { ...mon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined, toxicCounter: undefined } : {}) }
     setParty(party.map((m, i) => (i === monIndex ? updated : m)))
     // Đồng bộ đúng CÁ THỂ đang ra trận (ưu tiên uid, save cũ mới lùi về tên).
     if (playerMon && isSameMon(playerMon, mon)) {
-      setPlayerMon({ ...playerMon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined } : {}) })
+      setPlayerMon({ ...playerMon, hp: newHp, ...(isFull ? { status: null, sleepTurns: undefined, toxicCounter: undefined } : {}) })
     }
     consume(item.id)
     setFeedback(`Đã dùng ${item.name} cho ${mon.name} → HP ${newHp}/${mon.maxHp}.`)
+  }
+
+  function curePartyMon(item, monIndex) {
+    const mon = party[monIndex]
+    const cures = STATUS_CURES[item.id] ?? []
+    if (!mon || mon.hp <= 0 || !mon.status || !cures.includes(mon.status)) {
+      setFeedback(`${item.name} không chữa được trạng thái hiện tại của ${mon?.name ?? 'Pokémon này'}.`)
+      return
+    }
+    const updated = { ...mon, status: null, sleepTurns: undefined, toxicCounter: undefined }
+    setParty(party.map((entry, index) => index === monIndex ? updated : entry))
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon({ ...playerMon, status: null, sleepTurns: undefined, toxicCounter: undefined })
+    consume(item.id)
+    setFeedback(`Đã dùng ${item.name}; ${mon.name} khỏi trạng thái xấu.`)
   }
 
   // ===== KẸO HIẾM (đợt 72) =====
@@ -472,12 +497,49 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
   }
 
   function healBodyPart(item, partKey) {
-    const amount = HUMAN_HEAL[item.id] ?? 10
+    const amount = Number(item.humanHeal) || HUMAN_HEAL[item.id] || 10
+    if ((bodyStatus[partKey] ?? 0) <= 0) {
+      setFeedback(`${BODY_PARTS.find((b) => b.key === partKey)?.label} không bị thương; không cần dùng ${item.name}.`)
+      return
+    }
     const next = { ...bodyStatus, [partKey]: Math.max(0, (bodyStatus[partKey] ?? 0) - amount) }
     setBodyStatus(next)
     consume(item.id)
     const label = BODY_PARTS.find((b) => b.key === partKey)?.label
     setFeedback(`Đã dùng ${item.name} cho ${label} → thương tích còn ${next[partKey]}/100.`)
+  }
+
+  function feedPlayer(item) {
+    const gain = Math.max(0, Number(item.hungerPlayer) || 0)
+    if (!gain) return
+    if ((hunger?.player ?? 100) >= 100) {
+      setFeedback('Nhân vật đang no; chưa cần dùng món này.')
+      return
+    }
+    const nextValue = Math.min(100, (hunger?.player ?? 0) + gain)
+    setHunger((cur) => ({ ...cur, player: nextValue }))
+    consume(item.id)
+    setFeedback(`Đã dùng ${item.name}: độ no người ${hunger?.player ?? 0} → ${nextValue}.`)
+  }
+
+  function feedPokemon(item, monIndex) {
+    const mon = party[monIndex]
+    const gain = Math.max(0, Number(item.hungerMon) || 0)
+    if (!mon || !gain) return
+    if ((hunger?.mon ?? 100) >= 100 && !(Number(item.friendship) > 0)) {
+      setFeedback('Pokémon đang no; chưa cần dùng món này.')
+      return
+    }
+    const friendshipGain = Math.max(0, Number(item.friendship) || 0)
+    const updated = friendshipGain ? { ...mon, friendship: Math.min(255, (Number(mon.friendship) || 70) + friendshipGain) } : mon
+    if (updated !== mon) {
+      setParty(party.map((entry, index) => index === monIndex ? updated : entry))
+      if (playerMon && isSameMon(playerMon, mon)) setPlayerMon(updated)
+    }
+    const nextValue = Math.min(100, (hunger?.mon ?? 0) + gain)
+    setHunger((cur) => ({ ...cur, mon: nextValue }))
+    consume(item.id)
+    setFeedback(`Đã cho ${mon.name} dùng ${item.name}: độ no Pokémon ${hunger?.mon ?? 0} → ${nextValue}${friendshipGain ? `, thân mật +${friendshipGain}` : ''}.`)
   }
 
   if ((inventory ?? []).length === 0 && !party.some((mon) => mon?.heldItem)) {
@@ -529,10 +591,13 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {grouped[openCat].map((it) => {
-            const info = catalog[it.id] ?? resolveHeldItemByName(it)
+            const info = catalog[it.id] ?? resolveHeldItemByName(it) ?? it
             const isOpen = openItem === it.id
-            const canHealMon = openCat === 'heal' && (it.id in HEAL_AMOUNTS || it.id === 'fullrestore' || it.id === 'revive')
-            const canHealHuman = openCat === 'human' && it.id in HUMAN_HEAL
+            const canHealMon = it.id in HEAL_AMOUNTS || it.id === 'fullrestore' || it.id === 'revive'
+            const canCureMon = Boolean(STATUS_CURES[it.id])
+            const canHealHuman = it.id in HUMAN_HEAL || Number(info?.humanHeal) > 0
+            const canFeedPlayer = Number(info?.hungerPlayer) > 0
+            const canFeedMon = Number(info?.hungerMon) > 0
             const canEquip = isHoldableItem(info)
             const trainerGear = isTrainerGear(info)
             return (
@@ -577,6 +642,18 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         </div>
                       </div>
                     )}
+                    {canCureMon && (
+                      <div>
+                        <div style={{ marginBottom: 4 }}>Chữa trạng thái cho:</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {party.map((mon, i) => (
+                            <button key={mon.uid ?? i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => curePartyMon(info, i)}>
+                              {mon.name} {mon.status ? `[${mon.status.toUpperCase()}]` : '· bình thường'}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {canHealHuman && (
                       <div>
                         <div style={{ marginBottom: 4 }}>Sơ cứu bộ phận:</div>
@@ -586,6 +663,19 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                               {b.label} ({bodyStatus[b.key] ?? 0})
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    )}
+                    {canFeedPlayer && (
+                      <button className="btn" style={{ fontSize: 10, padding: '3px 9px' }} onClick={() => feedPlayer(info)}>
+                        Ăn / uống · độ no người {hunger?.player ?? 0}/100
+                      </button>
+                    )}
+                    {canFeedMon && (
+                      <div>
+                        <div style={{ marginBottom: 4 }}>Cho Pokémon dùng:</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {party.map((mon, index) => <button key={mon.uid ?? index} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => feedPokemon(info, index)}>{mon.name}</button>)}
                         </div>
                       </div>
                     )}
@@ -605,7 +695,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                     {trainerGear && (
                       <div style={{ color: 'var(--text-dim)' }}>Thiết bị này nằm trong túi của huấn luyện viên và tự được kiểm tra khi dùng Mega/Z/Dynamax/Tera; không cho Pokémon cầm.</div>
                     )}
-                    {!canHealMon && !canHealHuman && !canEquip && !trainerGear && it.id !== 'rarecandy' && (
+                    {!canHealMon && !canCureMon && !canHealHuman && !canFeedPlayer && !canFeedMon && !canEquip && !trainerGear && it.id !== 'rarecandy' && (
                       <div style={{ color: 'var(--text-dim)' }}>Vật phẩm này chưa có thao tác trực tiếp trong giao diện.</div>
                     )}
                   </div>

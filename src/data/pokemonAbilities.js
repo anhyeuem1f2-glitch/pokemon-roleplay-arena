@@ -113,7 +113,7 @@ export function blocksStatus(mon, status, weatherKey = null) {
   if (status === 'brn' && hasAbility(mon, 'Water Veil', 'Water Bubble')) return true
   if (status === 'par' && hasAbility(mon, 'Limber')) return true
   if (status === 'slp' && hasAbility(mon, 'Insomnia', 'Vital Spirit', 'Sweet Veil')) return true
-  if (status === 'psn' && hasAbility(mon, 'Immunity', 'Pastel Veil')) return true
+  if ((status === 'psn' || status === 'tox') && hasAbility(mon, 'Immunity', 'Pastel Veil')) return true
   if (status === 'frz' && hasAbility(mon, 'Magma Armor')) return true
   if (weatherKey === 'sun' && hasAbility(mon, 'Leaf Guard')) return true
   return false
@@ -125,7 +125,7 @@ export function statusIsBlocked(mon, status, weatherKey = null) {
   const types = mon.types ?? []
   if (status === 'brn' && types.includes('fire')) return true
   if (status === 'par' && types.includes('electric')) return true
-  if (status === 'psn' && (types.includes('poison') || types.includes('steel'))) return true
+  if ((status === 'psn' || status === 'tox') && (types.includes('poison') || types.includes('steel'))) return true
   if (status === 'frz' && types.includes('ice')) return true
   return blocksStatus(mon, status, weatherKey)
 }
@@ -380,8 +380,11 @@ export function endTurnStatusEffect(mon) {
     const tick = Math.max(1, Math.round(next.maxHp / 16))
     next.hp = Math.max(0, next.hp - tick)
     logs.push(`${next.name} bị bỏng, mất ${tick} HP.`)
-  } else if (next.status === 'psn' && !hasAbility(next, 'Poison Heal')) {
-    const tick = Math.max(1, Math.round(next.maxHp / 8))
+  } else if ((next.status === 'psn' || next.status === 'tox') && !hasAbility(next, 'Poison Heal')) {
+    if (next.status === 'tox') next.toxicCounter = Math.max(1, (next.toxicCounter ?? 0) + 1)
+    const tick = next.status === 'tox'
+      ? Math.max(1, Math.floor(next.maxHp * next.toxicCounter / 16))
+      : Math.max(1, Math.round(next.maxHp / 8))
     next.hp = Math.max(0, next.hp - tick)
     logs.push(`${next.name} bị nhiễm độc, mất ${tick} HP.`)
   }
@@ -442,7 +445,7 @@ export function endTurnAbilityEffect(mon, weatherKey = null) {
     delete next.sleepTurns
     logs.push(`${next.name} lột bỏ trạng thái xấu nhờ Shed Skin.`)
   }
-  if (next.status === 'psn' && hasAbility(mon, 'Poison Heal')) heal(Math.max(1, Math.round(next.maxHp / 8)), 'Poison Heal')
+  if ((next.status === 'psn' || next.status === 'tox') && hasAbility(mon, 'Poison Heal')) heal(Math.max(1, Math.round(next.maxHp / 8)), 'Poison Heal')
   if (hasAbility(mon, 'Speed Boost')) boosts = { spe: 1 }
   if (weatherKey === 'rain' && hasAbility(mon, 'Rain Dish')) heal(Math.max(1, Math.round(next.maxHp / 16)), 'Rain Dish')
   if (weatherKey === 'rain' && hasAbility(mon, 'Dry Skin')) heal(Math.max(1, Math.round(next.maxHp / 8)), 'Dry Skin')

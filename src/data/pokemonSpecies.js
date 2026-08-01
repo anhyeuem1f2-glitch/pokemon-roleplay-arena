@@ -3,7 +3,7 @@
 // species = slug khớp sprite Pokémon Showdown (ani/{species}.gif, ani-back/...).
 import { getBossTier } from './bossTiers.js'
 import { createStableId, publicPokemonCode } from './persistentIdentity.js'
-import { getEffectivenessMulti } from './pokemonTypes.js'
+import { ALL_TYPES, getEffectivenessMulti } from './pokemonTypes.js'
 import { resolveAbilityForEntry } from './pokemonAbilities.js'
 import { DEFAULT_FRIENDSHIP, friendshipTier, normalizeFriendship } from './pokemonFriendship.js'
 
@@ -266,7 +266,31 @@ export function recomputeMonStats(mon) {
   if (!stats) return mon
   const newMax = mon.bossBars ? Math.round(stats.hp * (1 + 0.5 * (mon.bossBars - 1))) : stats.hp
   const hpDelta = newMax - (mon.maxHp ?? newMax)
-  return { ...mon, stats, maxHp: newMax, hp: Math.max(1, Math.min(newMax, (mon.hp ?? newMax) + Math.max(0, hpDelta))) }
+  const wasFainted = Number(mon.hp) <= 0
+  const adjustedHp = (mon.hp ?? newMax) + hpDelta
+  return { ...mon, stats, maxHp: newMax, hp: wasFainted ? 0 : Math.max(1, Math.min(newMax, adjustedHp)) }
+}
+
+function rollGenderForSpecies(speciesEntry) {
+  if (speciesEntry?.gender === 'N') return 'unknown'
+  if (speciesEntry?.gender === 'M') return 'male'
+  if (speciesEntry?.gender === 'F') return 'female'
+  const maleChance = Number(speciesEntry?.genderRatio?.M)
+  if (Number.isFinite(maleChance)) return Math.random() < maleChance ? 'male' : 'female'
+  return Math.random() < 0.5 ? 'male' : 'female'
+}
+
+function rollTeraType(speciesEntry) {
+  const native = (speciesEntry?.types ?? []).filter(Boolean)
+  // Tera Type là thuộc tính cố định của cá thể. Phần lớn hoang dã mang hệ gốc,
+  // nhưng vẫn có một phần nhỏ mang hệ khác để Tera không bị khóa vào types[0].
+  if (native.length && Math.random() < 0.8) return native[Math.floor(Math.random() * native.length)]
+  return ALL_TYPES[Math.floor(Math.random() * ALL_TYPES.length)] ?? native[0] ?? 'normal'
+}
+
+function withMovePp(move) {
+  const maxPp = Math.max(1, Number(move?.maxPp ?? move?.pp) || 35)
+  return { ...move, maxPp, currentPp: Math.max(0, Math.min(maxPp, Number(move?.currentPp ?? maxPp))) }
 }
 
 const EV_TOTAL_CAP = 510
@@ -416,7 +440,7 @@ export function repairOwnedMonMoves(mon, movesDb) {
     if (!id || seen.has(id)) continue
     const full = movesDb.allMoves[id]
     normalized.push(full
-      ? { ...full, id }
+      ? withMovePp({ ...full, id, currentPp: raw?.currentPp })
       : (typeof raw === 'string' ? { id, name: raw, type: 'normal', category: 'Status', power: 0 } : { ...raw, id }))
     seen.add(id)
     if (normalized.length >= 4) break
@@ -431,7 +455,7 @@ export function repairOwnedMonMoves(mon, movesDb) {
       const move = fullMoveFromDb(entry, movesDb)
       const id = moveId(move)
       if (!move || !id || seen.has(id)) continue
-      normalized.push(move)
+      normalized.push(withMovePp(move))
       seen.add(id)
     }
   }
@@ -642,9 +666,10 @@ export function repairEncounterMonMoves(mon, speciesEntry, movesDb, opponentType
   })
   if (same && metadataComplete && mon.movesetDataVersion === ENCOUNTER_MOVESET_VERSION) return mon
 
+  const currentById = new Map((mon.moves ?? []).map((move) => [moveId(move), move]))
   return {
     ...mon,
-    moves: expected,
+    moves: expected.map((move) => withMovePp({ ...move, currentPp: currentById.get(moveId(move))?.currentPp })),
     movesetSource: mon.isTrainerMon ? 'trainer-level-aware' : 'wild-level-up',
     movesetDataVersion: ENCOUNTER_MOVESET_VERSION,
   }
@@ -740,7 +765,13 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     // Biến cá thể đời sống: shiny đúng tỉ lệ cơ bản 1/4096, giới tính/kích
     // thước cố định và Mark hiếm. Tất cả persist theo đúng cá thể.
     shiny: Math.random() < 1 / 4096,
-    gender: Math.random() < 0.5 ? 'male' : 'female',
+    gender: rollGenderForSpecies(speciesEntry),
+    genderRatio: speciesEntry.genderRatio ? { ...speciesEntry.genderRatio } : null,
+    eggGroups: [...(speciesEntry.eggGroups ?? [])],
+    eggSpecies: speciesEntry.eggSpecies ?? speciesEntry.species,
+    eggSpeciesName: speciesEntry.eggSpeciesName ?? speciesEntry.name,
+    teraType: rollTeraType(speciesEntry),
+    gmaxFactor: false,
     sizeClass: Math.random() < 0.06 ? 'tiny' : Math.random() > 0.94 ? 'jumbo' : 'average',
     ribbons: [],
     marks: randomMark ? [randomMark] : [],
@@ -752,6 +783,7 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
       ? speciesEntry.baseFriendship
       : DEFAULT_FRIENDSHIP,
     baseStats: speciesEntry.baseStats ?? null,
+    catchRate: Number.isFinite(speciesEntry.catchRate) ? speciesEntry.catchRate : 120,
     // Held item Eviolite và forme battle cần biết cá thể còn tiến hoá được.
     hasEvo: Boolean(speciesEntry.hasEvo),
     hasPrevo: Boolean(speciesEntry.hasPrevo),
@@ -763,7 +795,7 @@ export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentT
     isTrainerMon: Boolean(isTrainerMon),
     maxHp,
     hp: maxHp,
-    moves,
+    moves: moves.map(withMovePp),
     movesetSource: movesDb?.learnsets ? (isTrainerMon ? 'trainer-level-aware' : 'wild-level-up') : 'fallback',
     movesetDataVersion: movesDb?.learnsets ? ENCOUNTER_MOVESET_VERSION : 0,
   }
@@ -821,6 +853,74 @@ export function isDirectEvolution(fromEntry, toEntry) {
   return false
 }
 
+function evolutionTextId(value) {
+  return String(value ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '')
+}
+
+/** Kiểm tra điều kiện tiến hoá được giữ từ Pokédex Showdown. */
+export function validateEvolutionRequirements(mon, fromEntry, targetEntry, context = {}) {
+  if (!mon || !targetEntry) return { ok: false, reason: 'thiếu dữ liệu Pokémon/loài đích' }
+  if (targetEntry.battleOnly || targetEntry.changesFrom || /(?:mega|gmax|primal|eternamax|ultra)$/i.test(String(targetEntry.forme ?? ''))) {
+    return { ok: false, reason: `${targetEntry.name} là dạng chiến đấu tạm thời, không phải tiến hoá vĩnh viễn` }
+  }
+  if (!context.adminMode && !isDirectEvolution(fromEntry, targetEntry)) {
+    return { ok: false, reason: 'không phải nhánh tiến hoá trực tiếp' }
+  }
+  if (context.adminMode || context.mode !== 'realistic') return { ok: true, reason: '' }
+
+  if (Number.isFinite(targetEntry.evoLevel) && (mon.level ?? 1) < targetEntry.evoLevel) {
+    return { ok: false, reason: `cần Lv.${targetEntry.evoLevel}, hiện Lv.${mon.level ?? 1}` }
+  }
+  const knownMoves = new Set((mon.moves ?? []).map((move) => evolutionTextId(move.name ?? move.id)))
+  if (targetEntry.evoMove && !knownMoves.has(evolutionTextId(targetEntry.evoMove))) {
+    return { ok: false, reason: `cần biết chiêu ${targetEntry.evoMove}` }
+  }
+  const evoType = String(targetEntry.evoType ?? '').toLowerCase()
+  if (evoType.includes('friendship') && Number(mon.friendship ?? 70) < 220) {
+    return { ok: false, reason: `cần Friendship tối thiểu 220, hiện ${mon.friendship ?? 70}` }
+  }
+  const heldName = evolutionTextId(mon.heldItem?.name ?? mon.heldItem?.id)
+  if (evoType.includes('hold') && targetEntry.evoItem && heldName !== evolutionTextId(targetEntry.evoItem)) {
+    return { ok: false, reason: `cần cầm ${targetEntry.evoItem}` }
+  }
+  if (evoType.includes('trade') && !(mon.tradeHistory ?? []).length) {
+    return { ok: false, reason: 'cần tiến hoá qua một giao dịch Pokémon hợp lệ' }
+  }
+  if (evoType.includes('trade') && targetEntry.evoItem && heldName !== evolutionTextId(targetEntry.evoItem)) {
+    return { ok: false, reason: `cần cầm ${targetEntry.evoItem} trong lúc trao đổi` }
+  }
+  if (evoType.includes('useitem') && targetEntry.evoItem) {
+    const itemId = evolutionTextId(targetEntry.evoItem)
+    const stock = (context.inventory ?? []).filter((item) => evolutionTextId(`${item.id}${item.name}`) === itemId
+      || evolutionTextId(item.id) === itemId || evolutionTextId(item.name) === itemId)
+      .reduce((sum, item) => sum + Math.max(0, Number(item.qty) || 0), 0)
+    if (stock <= 0 || !evolutionTextId(context.storyText).includes(itemId)) {
+      return { ok: false, reason: `cần sử dụng ${targetEntry.evoItem} đang có trong túi` }
+    }
+  }
+  const condition = String(targetEntry.evoCondition ?? '').toLowerCase()
+  const part = String(context.storyDate?.part ?? '').toLowerCase()
+  if (targetEntry.evoGender && String(mon.gender).toLowerCase() !== String(targetEntry.evoGender).toLowerCase()) {
+    return { ok: false, reason: `cần giới tính ${targetEntry.evoGender}` }
+  }
+  if (targetEntry.evoRegion) {
+    const currentRegion = evolutionTextId(`${context.location?.regionKey ?? ''} ${context.location?.regionName ?? ''}`)
+    if (!currentRegion.includes(evolutionTextId(targetEntry.evoRegion))) return { ok: false, reason: `chỉ tiến hoá tại vùng ${targetEntry.evoRegion}` }
+  }
+  if (/during the day|daytime|\bday\b/.test(condition) && /tối|đêm|night/.test(part)) return { ok: false, reason: 'chỉ tiến hoá ban ngày' }
+  if (/at night|nighttime|\bnight\b/.test(condition) && !/tối|đêm|night/.test(part)) return { ok: false, reason: 'chỉ tiến hoá ban đêm' }
+  if (/female/.test(condition) && mon.gender !== 'female') return { ok: false, reason: 'cần cá thể cái' }
+  if (/male/.test(condition) && !/female/.test(condition) && mon.gender !== 'male') return { ok: false, reason: 'cần cá thể đực' }
+  if (/attack\s*>\s*defense/.test(condition) && (mon.stats?.atk ?? 0) <= (mon.stats?.def ?? 0)) return { ok: false, reason: 'cần Attack lớn hơn Defense' }
+  if (/attack\s*<\s*defense/.test(condition) && (mon.stats?.atk ?? 0) >= (mon.stats?.def ?? 0)) return { ok: false, reason: 'cần Attack nhỏ hơn Defense' }
+  if (/attack\s*=\s*defense/.test(condition) && (mon.stats?.atk ?? 0) !== (mon.stats?.def ?? 0)) return { ok: false, reason: 'cần Attack bằng Defense' }
+  if (condition && !/(day|night|male|female|attack|defense)/.test(condition)
+    && !evolutionTextId(context.storyText).includes(evolutionTextId(condition))) {
+    return { ok: false, reason: `cần điều kiện đặc biệt: ${targetEntry.evoCondition}` }
+  }
+  return { ok: true, reason: '' }
+}
+
 /**
  * Tiến hoá CÙNG MỘT CÁ THỂ (đợt 76).
  * Giữ uid/IV/EV/nature/EXP/trạng thái và lượng HP đã mất; chỉ thay dữ liệu
@@ -848,10 +948,19 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     name: targetEntry.name,
     species: targetEntry.species,
     spriteId: targetEntry.spriteId ?? targetEntry.species,
+    dexNum: Number.isFinite(targetEntry.num) ? targetEntry.num : null,
+    gen: Number.isFinite(targetEntry.gen) ? targetEntry.gen : null,
+    forme: targetEntry.forme ?? null,
+    baseSpeciesId: targetEntry.baseSpeciesId ?? null,
     types: [...(targetEntry.types ?? generated.types ?? mon.types ?? [])],
     baseStats: targetEntry.baseStats ?? generated.baseStats ?? mon.baseStats ?? null,
+    catchRate: Number.isFinite(targetEntry.catchRate) ? targetEntry.catchRate : (mon.catchRate ?? generated.catchRate ?? 120),
     hasEvo: Boolean(targetEntry.hasEvo),
     hasPrevo: Boolean(targetEntry.hasPrevo),
+    genderRatio: targetEntry.genderRatio ? { ...targetEntry.genderRatio } : mon.genderRatio ?? null,
+    eggGroups: [...(targetEntry.eggGroups ?? mon.eggGroups ?? [])],
+    eggSpecies: targetEntry.eggSpecies ?? mon.eggSpecies ?? targetEntry.species,
+    eggSpeciesName: targetEntry.eggSpeciesName ?? mon.eggSpeciesName ?? targetEntry.name,
     ability: evolvedAbility.name,
     abilitySlot: evolvedAbility.slot,
     abilityHidden: evolvedAbility.hidden,
@@ -865,6 +974,7 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     hp: mon.hp,
     evolvedFrom: mon.species ?? mon.name,
   }
+  if (targetEntry.evoItem && /(?:trade|hold)/i.test(String(targetEntry.evoType ?? ''))) seed.heldItem = null
   const evolved = seed.baseStats ? recomputeMonStats(seed) : {
     ...seed,
     stats: generated.stats ?? mon.stats,
@@ -1262,4 +1372,19 @@ export function guardPartyRegression(prev, next) {
     const old = before.find((p) => sameIndividual(p, m))
     return old ? guardMonRegression(old, m) : m
   })
+}
+
+/** Bỏ toàn bộ chỉ số tạm của boss/trận trước khi một Pokémon trở thành sở
+ * hữu của người chơi. Dùng chung cho Battle, Safari và các luồng thu phục
+ * sau này để boss nhiều thanh máu không lọt nguyên vào đội hình. */
+export function normalizeAcquiredMon(mon) {
+  if (!mon) return mon
+  const stripped = { ...mon, hp: mon.maxHp, status: null }
+  for (const key of [
+    'bossBars', 'bossTier', 'bossPhase', 'isTrainerMon', 'sleepTurns',
+    'flashFireBoost', 'confusionTurns', 'recharge', 'flinched', 'protect',
+    'dyna', 'dynaHpMultiplier', 'tera', 'origTypes',
+  ]) delete stripped[key]
+  const normalized = recomputeMonStats(stripped)
+  return { ...normalized, hp: normalized.maxHp, status: null, isTrainerMon: false }
 }

@@ -138,14 +138,9 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
 
   function buy() {
     if (!anyPicked || overBudget) return
-    const bought = items.filter((it) => (qty[it.id] ?? 0) > 0).map((it) => ({
-      id: it.id,
-      name: it.name,
-      qty: qty[it.id],
-      price: it.price,
-    }))
+    const bought = items.filter((it) => (qty[it.id] ?? 0) > 0).map((it) => ({ ...it, qty: qty[it.id] }))
     // Quà chủ quán tặng qua mặc cả: vào túi với giá 0 (không tính tổng).
-    for (const f of freebies) bought.push({ id: f.id, name: `${f.name} (tặng)`, qty: 1, price: 0 })
+    for (const f of freebies) bought.push({ ...f, qty: 1, price: 0, gift: true })
     onFinish(bought, total)
   }
 

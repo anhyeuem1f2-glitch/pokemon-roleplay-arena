@@ -6,7 +6,8 @@ import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyPerksToMon } from '../data/playerPerks.js'
-import { describeNatureBehavior } from '../data/pokemonSpecies.js'
+import { describeNatureBehavior, normalizeAcquiredMon } from '../data/pokemonSpecies.js'
+import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 
 // ============ CHẾ ĐỘ SAFARI (đợt 37) ============
 // Kích hoạt khi người chơi Ở TRONG khu Safari (area.safari) và mở "pokeball"
@@ -20,7 +21,7 @@ import { describeNatureBehavior } from '../data/pokemonSpecies.js'
 const SAFARI_BALLS = 30
 
 export default function SafariModal({ onClose, onSafariEnd }) {
-  const { enemyMon, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, apiConfig, playerLocation, storyDate, playerTraits, markPokedexSeen, markPokedexCaught } = useGame()
+  const { enemyMon, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, apiConfig, playerLocation, storyDate, playerTraits, markPokedexSeen, markPokedexCaught, trainerId } = useGame()
   const [balls, setBalls] = useState(SAFARI_BALLS)
   const [catchScore, setCatchScore] = useState(20) // 0-100, ≥ ngưỡng random thì bắt được
   const [fleeChance, setFleeChance] = useState(15) // % bỏ chạy mỗi lượt sau hành động
@@ -127,16 +128,16 @@ export default function SafariModal({ onClose, onSafariEnd }) {
     if (continuingRef.current) return
     continuingRef.current = true
     if (finished === 'caught') {
-      const caught = applyPerksToMon({ ...enemyMon }, playerTraits)
+      const caught = ensurePokemonIdentity(applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits), trainerId)
       markPokedexCaught(caught, { source: 'safari', location: playerLocation, date: storyDate })
       if (party.length < 6) {
         // Đợt 70: áp thiên phú cơ chế cho Pokémon bắt được ở Safari.
-        setParty([...party, caught])
+        setParty((cur) => [...(cur ?? []), caught])
         if (!playerMon) setPlayerMon(caught)
       } else {
         // Safari cũ báo bắt thành công nhưng làm mất Pokémon thứ 7. Đồng nhất
         // với battle thường: đội đầy thì gửi cá thể vào PC Box.
-        setPcBox([...(pcBox ?? []), caught])
+        setPcBox((cur) => [...(cur ?? []), caught])
       }
     }
     onSafariEnd(finished === 'caught' ? 'caught' : finished === 'fled' ? 'flee' : 'escaped')

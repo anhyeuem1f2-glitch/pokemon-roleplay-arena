@@ -16,8 +16,8 @@ import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from
 import AvatarPicker from './AvatarPicker.jsx'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
-import { REGIONS, getRegion, getArea, detectMentionedArea } from '../data/regions.js'
-import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
+import { REGIONS, getRegion, getArea } from '../data/regions.js'
+import { applyStoryState, parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { clearMemory, rememberExchange } from '../utils/storyMemory.js'
 import { archiveExchange, clearArchive } from '../utils/storyArchive.js'
 import { addFact, clearNotebook, upsertNpc } from '../utils/storyNotebook.js'
@@ -26,6 +26,8 @@ import { resetDirectorState } from '../data/storyDirector.js'
 import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
+import { resolveItemByName } from '../data/shopItems.js'
+import { generateLootItems } from '../data/shopGenerator.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
 import { musicManager } from '../utils/musicManager.js'
@@ -203,7 +205,7 @@ export default function IntroScreen({ onOpenSettings }) {
   const [customDesc, setCustomDesc] = useState('')
   // Xuất thân + ngày
   const [originRegionKey, setOriginRegionKey] = useState('kanto')
-  const [originAreaKey, setOriginAreaKey] = useState('')
+  const [originAreaKey, setOriginAreaKey] = useState('pallet')
   const [startDay, setStartDay] = useState(storyDate.day)
   const [startMonth, setStartMonth] = useState(storyDate.month)
   const [startYear, setStartYear] = useState(storyDate.year)
@@ -241,8 +243,9 @@ export default function IntroScreen({ onOpenSettings }) {
     if (d.playerIdentity) setPlayerIdentity(d.playerIdentity)
     setCustomName(d.customName ?? '')
     setCustomDesc(d.customDesc ?? '')
+    const presetRegionKey = d.originRegionKey || originRegionKey
     if (d.originRegionKey) setOriginRegionKey(d.originRegionKey)
-    setOriginAreaKey(d.originAreaKey ?? '')
+    setOriginAreaKey(d.originAreaKey || getRegion(presetRegionKey)?.areas?.[0]?.key || '')
     setPersonality(d.personality ?? [])
     // Preset có thể mang thể loại cũ nhưng không được đổi CHẾ ĐỘ vừa chọn
     // ở bước đầu — tránh nạp hồ sơ để lách luật Thực tế.
@@ -294,13 +297,17 @@ export default function IntroScreen({ onOpenSettings }) {
     }
 
     const finalName = trainerName.trim() || 'Nhà Huấn Luyện'
+    const originArea = (originAreaKey ? getArea(originRegionKey, originAreaKey) : null)
+      ?? originRegion?.areas?.[0]
+      ?? null
+    const resolvedOriginAreaKey = originArea?.key ?? ''
     setPlayerName(finalName)
     setPlayerCharacter({
       gender: gender || '',
       age: age || '',
       appearance: appearance.trim(),
       originRegionKey,
-      originAreaKey,
+      originAreaKey: resolvedOriginAreaKey,
       customIdentity: isCustomIdentity ? { name: identity.name, desc: identity.desc } : null,
     })
 
@@ -325,22 +332,24 @@ export default function IntroScreen({ onOpenSettings }) {
     setPokemonLife({ ...DEFAULT_POKEMON_LIFE })
     setTradeState({ ...DEFAULT_TRADE_STATE })
     clearMemory()
-    await clearArchive()
+    // Biên niên sử được namespace theo trainer. Không xoá kho của các hành
+    // trình cũ đang nằm trong ô save khi bắt đầu một hành trình mới.
+    await clearArchive(journeyTrainerId)
     clearNotebook()
     clearSummary()
     resetDirectorState()
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
     // tích/độ no của run trước dính sang run mới (vì đều persist) — hành
     // trình MỚI phải sạch sẽ từ đầu.
-    setInventory(syncTraitGrantedItems([], traits))
+    const openingInventory = syncTraitGrantedItems([], traits)
+    setInventory(openingInventory)
     setRelationships([])
     setBodyStatus({ head: 0, torso: 0, leftArm: 0, rightArm: 0, leftLeg: 0, rightLeg: 0 })
     setHunger({ player: 100, mon: 100 })
     // Giữ nguyên avatarUrl vừa chọn ở bước Hồ sơ, chỉ reset tiền.
     setPlayerProfile((prof) => ({ ...prof, money: 3000 }))
 
-    const originArea = originAreaKey ? getArea(originRegionKey, originAreaKey) : null
-    if (originArea) setPlayerLocation({ regionKey: originRegionKey, areaKey: originAreaKey })
+    if (originArea) setPlayerLocation({ regionKey: originRegionKey, areaKey: resolvedOriginAreaKey })
 
     const opening = OPENINGS.find((o) => o.key === openingKey) ?? null
     const ageNum = Number(age) || null
@@ -355,7 +364,7 @@ export default function IntroScreen({ onOpenSettings }) {
       // Tính cách + siêu năng lực (đợt 61).
       buildCharacterTraitsNote(traits),
       originArea
-        ? `Xuất thân: ${originArea.name}, vùng ${originRegion?.name}. Mở đầu diễn ra tại/gắn với nơi này (trừ khi tình huống mở đầu nói khác).`
+        ? `VỊ TRÍ MỞ ĐẦU CỐ ĐỊNH: ${originArea.name}, vùng ${originRegion?.name}. Đây là state đã chọn, mở đầu PHẢI diễn ra tại đây; không thay bằng Pallet Town, Kanto hay quê mặc định khác. Chỉ được rời nơi này sau một cảnh di chuyển rõ ràng và tag [[MOVE]].`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
       `Ngày bắt đầu (lịch trong truyện): ngày ${d}/${m}/năm ${y}, buổi sáng, mùa ${getSeason(m)}.`,
       // Đợt 63: nới luật — trước đây CẤM TUYỆT ĐỐI phát Pokémon ở mở đầu,
@@ -403,11 +412,68 @@ export default function IntroScreen({ onOpenSettings }) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
       }
       let parsed = parseStoryStateTags(cleaned)
-      parsed = validateStateAgainstProse(parsed, parsed.cleaned, { playerName: finalName, party: [] }).parsed
+      parsed = validateStateAgainstProse(parsed, parsed.cleaned, {
+        playerName: finalName,
+        party: [],
+        mode: normalizeGameMode(storyTone),
+        adminMode: false,
+        inventory: openingInventory,
+        location: originArea ? { regionKey: originRegionKey, areaKey: resolvedOriginAreaKey } : null,
+      }).parsed
       const openingText = parsed.cleaned
-      setWorldProgress(applyWorldDirectives(DEFAULT_WORLD_PROGRESS, parsed, {
+      // Chương mở đầu cũng dùng cùng giao thức trạng thái như các lượt sau.
+      // Trước đây tag MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ bị parse rồi bỏ
+      // qua, khiến chính văn vừa trao đồ hoặc làm bị thương nhưng HUD vẫn giữ
+      // nguyên giá trị khởi tạo.
+      applyStoryState(parsed, { setPlayerProfile, setRelationships, setBodyStatus })
+      const hungerDelta = (parsed.hunger ?? []).reduce((sum, entry) => {
+        sum[entry.who === 'mon' ? 'mon' : 'player'] += Number(entry.delta) || 0
+        return sum
+      }, { player: 0, mon: 0 })
+      if (hungerDelta.player || hungerDelta.mon) {
+        setHunger((cur) => ({
+          player: Math.max(0, Math.min(100, (Number(cur?.player) || 0) + hungerDelta.player)),
+          mon: Math.max(0, Math.min(100, (Number(cur?.mon) || 0) + hungerDelta.mon)),
+        }))
+      }
+      let resolvedOpeningInventory = openingInventory.map((item) => ({ ...item }))
+      const mergeOpeningItem = (entry, qty, lootSourceId = '') => {
+        if (!entry || !Number.isFinite(Number(qty)) || Number(qty) === 0) return
+        const index = resolvedOpeningInventory.findIndex((item) => item.id === entry.id)
+        if (Number(qty) > 0) {
+          if (index < 0) {
+            resolvedOpeningInventory.push({
+              ...entry,
+              qty: Number(qty),
+              ...(lootSourceId ? { lootSourceIds: [lootSourceId] } : {}),
+            })
+          } else {
+            const current = resolvedOpeningInventory[index]
+            resolvedOpeningInventory[index] = {
+              ...entry,
+              ...current,
+              qty: current.infinite ? current.qty : (Number(current.qty) || 0) + Number(qty),
+              ...(lootSourceId ? { lootSourceIds: [...new Set([...(current.lootSourceIds ?? []), lootSourceId])] } : {}),
+            }
+          }
+          return
+        }
+        if (index < 0 || resolvedOpeningInventory[index].infinite) return
+        const left = Math.max(0, (Number(resolvedOpeningInventory[index].qty) || 0) + Number(qty))
+        if (left > 0) resolvedOpeningInventory[index] = { ...resolvedOpeningInventory[index], qty: left }
+        else resolvedOpeningInventory.splice(index, 1)
+      }
+      for (const item of parsed.items ?? []) mergeOpeningItem(resolveItemByName(item.name), item.qty)
+      for (const [lootIndex, loot] of (parsed.loots ?? []).entries()) {
+        const lootSourceId = `intro-${journeyTrainerId}:loot:${lootIndex}`
+        for (const item of generateLootItems(loot, lootSourceId)) mergeOpeningItem(item, item.qty, lootSourceId)
+      }
+      resolvedOpeningInventory = syncTraitGrantedItems(resolvedOpeningInventory, traits)
+      setInventory(resolvedOpeningInventory)
+      const openingWorldProgress = applyWorldDirectives(DEFAULT_WORLD_PROGRESS, parsed, {
         mode: storyTone, turn: 2, date: { day: d, month: m, year: y, part: 'sáng' },
-      }))
+      })
+      setWorldProgress(openingWorldProgress)
       for (const npc of parsed.npcs ?? []) upsertNpc(npc.name, npc.fields, 2)
       for (const fact of parsed.facts ?? []) addFact(fact.key, fact.text, 2)
       // Một số preset có regex loại khối lựa chọn khỏi prompt/đầu ra hoặc model
@@ -430,13 +496,17 @@ export default function IntroScreen({ onOpenSettings }) {
         { role: 'assistant', content: openingText, actionChoices },
       ])
       // AI lỡ cấp Pokémon ngay mở đầu (đã cấm nhưng đề phòng) → vẫn tôn trọng tag.
-      for (const pk of parsed.pokemons ?? []) {
+      for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
         const entry = pokedexSpecies.find((sp) => sp.name.toLowerCase() === pk.species.toLowerCase())
-        const access = legendaryAccess(entry, DEFAULT_WORLD_PROGRESS, storyTone)
+        const access = legendaryAccess(entry, openingWorldProgress, storyTone)
         if (entry && access.allowed) {
-          const { buildMonSmart } = await import('../data/pokemonSpecies.js')
+          const { buildMonSmart, buildWildMon, normalizeAcquiredMon } = await import('../data/pokemonSpecies.js')
           // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
-          const mon = ensurePokemonIdentity(applyPerksToMon(buildMonSmart(entry, pk.level, movesDb), traits), journeyTrainerId)
+          const buildOwnedMon = normalizeGameMode(storyTone) === 'realistic' ? buildMonSmart : buildWildMon
+          const mon = ensurePokemonIdentity({
+            ...applyPerksToMon(normalizeAcquiredMon(buildOwnedMon(entry, pk.level, movesDb)), traits),
+            acquisitionSourceId: `intro-${journeyTrainerId}:pokemon:${pk.species.toLowerCase()}:${pokemonIndex}`,
+          }, journeyTrainerId)
           setPlayerMon((cur) => cur ?? mon)
           setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
         } else if (entry) {
@@ -449,6 +519,7 @@ export default function IntroScreen({ onOpenSettings }) {
         openingText,
         2,
         1,
+        journeyTrainerId,
       ).catch((archiveErr) => console.warn('[archive] ghi mở đầu lỗi (bỏ qua):', archiveErr.message))
       if (embCfg?.baseUrl && embCfg?.model) {
         rememberExchange(
@@ -458,8 +529,9 @@ export default function IntroScreen({ onOpenSettings }) {
           2,
         ).catch((memErr) => console.warn('[memory] ghi ký ức mở đầu lỗi (bỏ qua):', memErr.message))
       }
-      const startArea = detectMentionedArea(openingText, null)
-      if (startArea) setPlayerLocation(startArea)
+      // Không suy vị trí mở đầu ngược từ prose: nếu model lỡ nhắc một địa danh
+      // khác, state người chơi đã chọn vẫn là nguồn sự thật thay vì bị kéo về Pallet.
+      if (originArea) setPlayerLocation({ regionKey: originRegionKey, areaKey: resolvedOriginAreaKey })
       setGameStarted(true)
     } catch (err) {
       setError(err.message)
@@ -861,14 +933,13 @@ export default function IntroScreen({ onOpenSettings }) {
                     selected={originRegionKey === r.key}
                     title={`${r.name} (Gen ${r.gen})`}
                     desc={REGION_BLURBS[r.key]}
-                    onClick={() => { setOriginRegionKey(r.key); setOriginAreaKey('') }}
+                    onClick={() => { setOriginRegionKey(r.key); setOriginAreaKey(r.areas?.[0]?.key ?? '') }}
                   />
                 ))}
               </div>
               <div className="field">
                 <label>Thành phố / khu xuất thân trong {originRegion?.name}</label>
                 <select value={originAreaKey} onChange={(e2) => setOriginAreaKey(e2.target.value)}>
-                  <option value="">— Để AI tự chọn nơi hợp thân phận —</option>
                   {(originRegion?.areas ?? []).map((a) => (
                     <option key={a.key} value={a.key}>{a.name}</option>
                   ))}

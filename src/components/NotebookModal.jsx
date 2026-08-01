@@ -16,7 +16,7 @@ import { getArchiveSnapshot } from '../utils/storyArchive.js'
 // keyword. Có nút xoá từng mục — mục sai thì dọn ngay khỏi trí nhớ AI.
 
 export default function NotebookModal({ onClose }) {
-  const { apiConfig, messages, memoryApiConfig } = useGame()
+  const { apiConfig, messages, memoryApiConfig, trainerId } = useGame()
   const [tab, setTab] = useState('summary') // 'summary' | 'npc' | 'fact' | 'archive' | 'vector'
   const embCfg = memoryApiConfig?.embedding
   const vectorOn = Boolean(embCfg?.baseUrl && embCfg?.model)
@@ -29,7 +29,7 @@ export default function NotebookModal({ onClose }) {
   const [updating, setUpdating] = useState(() => isSummaryUpdating())
 
   useEffect(() => {
-    getArchiveSnapshot().then(setArchive).catch(() => {})
+    getArchiveSnapshot(200, trainerId).then(setArchive).catch(() => {})
     const u1 = subscribeNotebook(() => setNb(getNotebook()))
     const u2 = subscribeSummary(() => {
       const s = getSummary()

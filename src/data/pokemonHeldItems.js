@@ -140,6 +140,22 @@ export const HELD_ITEMS = [
   entry('metal-powder', 'Metal Powder', 'Ditto chưa biến hình tăng Defense và Special Defense 50%.'),
   entry('deep-sea-tooth', 'Deep Sea Tooth', 'Clamperl tăng gấp đôi Special Attack.'),
   entry('deep-sea-scale', 'Deep Sea Scale', 'Clamperl tăng gấp đôi Special Defense.'),
+  // Vật phẩm tiến hoá qua trao đổi/cầm khi lên cấp. Chúng phải là held item
+  // thật để EQUIP và bộ kiểm tra evolution cùng nhìn thấy đúng một trạng thái.
+  entry('kings-rock', "King's Rock", 'Vật phẩm tiến hoá của Poliwhirl/Slowpoke khi trao đổi.'),
+  entry('dragon-scale', 'Dragon Scale', 'Vật phẩm tiến hoá của Seadra khi trao đổi.'),
+  entry('upgrade', 'Upgrade', 'Vật phẩm tiến hoá của Porygon khi trao đổi.'),
+  entry('dubious-disc', 'Dubious Disc', 'Vật phẩm tiến hoá của Porygon2 khi trao đổi.'),
+  entry('protector', 'Protector', 'Vật phẩm tiến hoá của Rhydon khi trao đổi.'),
+  entry('electirizer', 'Electirizer', 'Vật phẩm tiến hoá của Electabuzz khi trao đổi.'),
+  entry('magmarizer', 'Magmarizer', 'Vật phẩm tiến hoá của Magmar khi trao đổi.'),
+  entry('reaper-cloth', 'Reaper Cloth', 'Vật phẩm tiến hoá của Dusclops khi trao đổi.'),
+  entry('razor-claw', 'Razor Claw', 'Vật phẩm tiến hoá khi cầm và lên cấp vào ban đêm.'),
+  entry('razor-fang', 'Razor Fang', 'Vật phẩm tiến hoá của Gligar khi cầm và lên cấp vào ban đêm.'),
+  entry('prism-scale', 'Prism Scale', 'Vật phẩm tiến hoá của Feebas khi trao đổi.'),
+  entry('whipped-dream', 'Whipped Dream', 'Vật phẩm tiến hoá của Swirlix khi trao đổi.'),
+  entry('sachet', 'Sachet', 'Vật phẩm tiến hoá của Spritzee khi trao đổi.'),
+  entry('oval-stone', 'Oval Stone', 'Vật phẩm tiến hoá của Happiny khi cầm và lên cấp ban ngày.'),
   entry('soul-dew', 'Soul Dew', 'Latias/Latios tăng sức mạnh chiêu Psychic và Dragon 20%.'),
   ...Object.entries(TYPE_BOOSTERS).map(([type, [id, name]]) => entry(id, name, `Chiêu hệ ${TYPE_LABEL[type]} mạnh hơn 20%.`, { boostType: type })),
   ...Object.entries(TYPE_CRYSTALS).map(([id, type]) => entry(id, `${TYPE_LABEL[type]}ium Z`, `Z-Crystal hệ ${TYPE_LABEL[type]}; cần Z-Ring và chiêu gây sát thương cùng hệ.`, { zType: type, ignoreKlutz: true })),
@@ -536,6 +552,13 @@ export function zCrystalMatchesMove(mon, move) {
 export function canUseMegaWithItems(mon, megaEntry, inventory, dev = false) {
   if (dev) return { ok: true, reason: '' }
   if (!trainerHasGear(inventory, 'mega')) return { ok: false, reason: 'Huấn luyện viên cần Key Stone/Mega Ring trong túi.' }
+  const rayquaza = itemId(mon?.species ?? mon?.name) === 'rayquaza' && /rayquaza.*mega/i.test(megaEntry?.name ?? '')
+  if (rayquaza) {
+    const knowsDragonAscent = (mon.moves ?? []).some((move) => itemId(move.id ?? move.name) === 'dragonascent')
+    return knowsDragonAscent
+      ? { ok: true, reason: '' }
+      : { ok: false, reason: 'Rayquaza phải biết Dragon Ascent để Mega Evolution; nó không dùng Mega Stone.' }
+  }
   if (!megaStoneMatches(mon, megaEntry)) return { ok: false, reason: `Pokémon phải cầm đúng ${megaEntry?.requiredItem ?? 'Mega Stone của forme này'}.` }
   return { ok: true, reason: '' }
 }

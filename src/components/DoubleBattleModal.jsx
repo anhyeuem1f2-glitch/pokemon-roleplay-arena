@@ -24,12 +24,14 @@ const STATUS_INFO = {
   par: { label: 'Tê liệt', short: 'PAR' },
   slp: { label: 'Ngủ', short: 'SLP' },
   psn: { label: 'Nhiễm độc', short: 'PSN' },
+  tox: { label: 'Độc nặng', short: 'TOX' },
   frz: { label: 'Đóng băng', short: 'FRZ' },
 }
 const HEAL_AMOUNT = { potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30, fullrestore: 9999 }
 const STATUS_CURE = {
-  antidote: ['psn'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
-  fullrestore: ['psn', 'par', 'slp', 'brn', 'frz'],
+  antidote: ['psn', 'tox'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
+  iceheal: ['frz'], fullheal: ['psn', 'tox', 'par', 'slp', 'brn', 'frz'],
+  fullrestore: ['psn', 'tox', 'par', 'slp', 'brn', 'frz'],
 }
 
 function monKey(mon, fallback = '') {
@@ -84,6 +86,28 @@ function applyStageBoost(stageMap, key, boosts, logs, name, mon = null, options 
 }
 
 function canAct(mon, logs) {
+  if (mon.rechargeTurn) {
+    delete mon.rechargeTurn
+    logs.push(`${mon.name} phải nghỉ để hồi sức!`)
+    return false
+  }
+  if (mon.flinched) {
+    delete mon.flinched
+    logs.push(`${mon.name} chùn bước và không thể hành động!`)
+    return false
+  }
+  if ((mon.confusedTurns ?? 0) > 0) {
+    mon.confusedTurns -= 1
+    if (mon.confusedTurns <= 0) {
+      delete mon.confusedTurns
+      logs.push(`${mon.name} đã hết rối loạn!`)
+    } else if (Math.random() < 1 / 3) {
+      const selfHit = Math.max(1, Math.round(((2 * (mon.level ?? 1) / 5 + 2) * 40 * ((mon.stats?.atk ?? 30) / Math.max(1, mon.stats?.def ?? 30))) / 50 + 2))
+      mon.hp = Math.max(0, mon.hp - selfHit)
+      logs.push(`${mon.name} rối loạn và tự làm mình mất ${selfHit} HP!`)
+      return false
+    } else logs.push(`${mon.name} đang rối loạn nhưng vẫn hành động được.`)
+  }
   if (mon.status === 'slp') {
     const left = (mon.sleepTurns ?? 1) - 1
     if (left > 0) {
@@ -166,7 +190,7 @@ function BattleCard({ mon, label, active, onClick, stages }) {
 function actionText(action, team, enemies) {
   if (!action) return 'Chưa chọn'
   if (action.type === 'switch') return `Đổi → ${team.find((mon) => monKey(mon) === action.targetUid)?.name ?? '?'}`
-  if (action.type === 'item') return `${action.item.name} → ${action.targetSlot + 1}`
+  if (action.type === 'item') return `${action.item.name} → ${action.targetUid ? (team.find((mon) => monKey(mon) === action.targetUid)?.name ?? '?') : `ô ${action.targetSlot + 1}`}`
   const target = action.move.target === 'self' ? 'bản thân' : isSpreadMove(action.move) ? 'cả phe địch' : enemies[action.targetIndex]?.name ?? '?'
   return `${action.move.name} → ${target}`
 }
@@ -310,6 +334,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   }, [team, enemies, finished])
 
   function chooseMove(slot, move) {
+    if (!move?.isStruggle && Number(move?.currentPp ?? move?.pp ?? 35) <= 0) return
     if (move.target === 'self') {
       setActions((cur) => ({ ...cur, [slot]: { type: 'move', move, targetIndex: null } }))
       setTargeting(null)
@@ -373,9 +398,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
     setPanel('fight')
   }
 
-  function chooseItem(slot, item) {
-    if (HEAL_AMOUNT[item.id] === undefined && !STATUS_CURE[item.id]) return
-    setActions((cur) => ({ ...cur, [slot]: { type: 'item', item, targetSlot: slot } }))
+  function chooseItem(slot, item, targetUid = null) {
+    if (HEAL_AMOUNT[item.id] === undefined && !STATUS_CURE[item.id] && item.id !== 'revive') return
+    setActions((cur) => ({ ...cur, [slot]: { type: 'item', item, targetSlot: slot, targetUid } }))
     setPanel('fight')
   }
 
@@ -425,10 +450,27 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       return Math.max(1, Math.round(base * Number(pair[0]) / Number(pair[1])))
     }
 
+    function spendMovePp(mon, move) {
+      if (move?.isStruggle) return true
+      const at = (mon.moves ?? []).findIndex((candidate) => candidate.id === move?.id || candidate.name === move?.name)
+      if (at < 0) return true
+      const current = Number(mon.moves[at].currentPp ?? mon.moves[at].pp ?? 35)
+      if (current <= 0) {
+        roundLog.push(`${mon.moves[at].name} đã hết PP!`)
+        return false
+      }
+      mon.moves = mon.moves.map((candidate, index) => index === at ? { ...candidate, currentPp: current - 1 } : candidate)
+      return true
+    }
+
     function damageTarget(actor, target, move, spreadPenalty) {
       const currentWeather = weatherKey()
       const actorStage = nextStages[monKey(actor)] ?? STAGE_ZERO
       const targetStage = nextStages[monKey(target)] ?? STAGE_ZERO
+      if (target.protected) {
+        roundLog.push(`${target.name} đã bảo vệ bản thân khỏi ${move.name}!`)
+        return 0
+      }
       if (!moveHitsWithAbilities(move, actor, target, currentWeather, actorStage, targetStage)) {
         roundLog.push(`${actor.name} dùng ${move.name} lên ${target.name}, nhưng đòn đánh trượt!`)
         return 0
@@ -446,9 +488,12 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       let moveImmune = false
 
       for (let hit = 0; hit < hits && target.hp > 0 && actor.hp > 0; hit++) {
-        let damage = move.power > 0
-          ? computeDamage(move, actor, target, nextStages[monKey(actor)], nextStages[monKey(target)], currentWeather)
+        const critStage = Math.max(0, Number(move.critRatio) || 0)
+        const critical = !move.damage && (Boolean(move.willCrit) || Math.random() < ([1 / 24, 1 / 8, 1 / 2, 1][Math.min(3, critStage)] ?? 1 / 24))
+        let damage = (move.power > 0 || move.damage != null)
+          ? computeDamage(move, actor, target, nextStages[monKey(actor)], nextStages[monKey(target)], currentWeather, { critical })
           : 0
+        if (critical && damage > 0) roundLog.push('Một đòn chí mạng!')
         if (currentWeather && damage > 0) damage = applyEnvToDamage(damage, move, roundEnv)
         damage = Math.max(0, Math.round(damage * spreadPenalty * allyGuardMultiplier(target, allies)))
         const ability = modifyDamageByAbilities({ damage, move, attacker: actor, defender: target, weatherKey: currentWeather, effectiveness })
@@ -507,12 +552,16 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       if (target.hp > 0) {
         if (!moveImmune) {
           if (move.boosts && move.target !== 'self') applyStageBoost(nextStages, monKey(target), move.boosts, roundLog, target.name, target, { fromOpponent: true })
-          const secondaryTriggered = !suppressSecondary && move.secondary
-            && Math.random() * 100 < (move.secondary.chance ?? 100)
-          if (secondaryTriggered && move.secondary?.boosts) {
-            applyStageBoost(nextStages, monKey(target), move.secondary.boosts, roundLog, target.name, target, { fromOpponent: true })
+          const secondaryEffects = Array.isArray(move.secondaries) && move.secondaries.length
+            ? move.secondaries
+            : (move.secondary ? [move.secondary] : [])
+          const triggeredEffects = suppressSecondary ? [] : secondaryEffects.filter((effect) => Math.random() * 100 < (effect.chance ?? 100))
+          for (const effect of triggeredEffects) {
+            if (effect?.boosts) applyStageBoost(nextStages, monKey(target), effect.boosts, roundLog, target.name, target, { fromOpponent: true })
+            if (effect?.volatileStatus === 'confusion') target.confusedTurns = 2 + Math.floor(Math.random() * 4)
+            if (effect?.volatileStatus === 'flinch') target.flinched = true
           }
-          const status = move.status ?? (secondaryTriggered ? move.secondary?.status : null)
+          const status = move.status ?? triggeredEffects.find((effect) => effect?.status)?.status ?? null
           if (status && STATUS_INFO[status] && !moveStatusIsBlocked(move, target, status, currentWeather)) {
             target.status = status
             if (status === 'slp') target.sleepTurns = 1 + Math.floor(Math.random() * 3)
@@ -550,9 +599,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const livingSlots = nextIds.map((id, slot) => ({ slot, mon: nextTeam.find((entry) => monKey(entry) === id) })).filter(({ mon }) => mon?.hp > 0)
       if (!livingSlots.length) return null
       const targetSlot = livingSlots[Math.floor(Math.random() * livingSlots.length)].slot
-      const usableMoves = (enemy.moves ?? []).filter((move) => move && heldItemMoveAllowed(enemy, move).allowed)
-      if (!usableMoves.length) return null
-      const move = usableMoves[Math.floor(Math.random() * usableMoves.length)]
+      const usableMoves = (enemy.moves ?? []).filter((move) => move && Number(move.currentPp ?? move.pp ?? 35) > 0 && heldItemMoveAllowed(enemy, move).allowed)
+      const move = usableMoves.length
+        ? usableMoves[Math.floor(Math.random() * usableMoves.length)]
+        : { id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], target: 'normal', isStruggle: true }
       return {
         side: 'enemy', actorIndex: enemyIndex, targetSlot, move,
         priority: movePriorityWithAbility(move, enemy) + heldItemPriorityPenalty(enemy),
@@ -591,11 +641,14 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
           continue
         }
         if (action.type === 'item') {
-          const target = nextTeam.find((mon) => monKey(mon) === nextIds[action.targetSlot])
-          if (!target || target.hp <= 0) continue
+          const target = action.targetUid
+            ? nextTeam.find((mon) => monKey(mon) === action.targetUid)
+            : nextTeam.find((mon) => monKey(mon) === nextIds[action.targetSlot])
+          const isRevive = action.item.id === 'revive'
+          if (!target || (isRevive ? target.hp > 0 : target.hp <= 0)) continue
           const heal = HEAL_AMOUNT[action.item.id]
           const cures = STATUS_CURE[action.item.id]
-          const canHeal = heal !== undefined && target.hp < target.maxHp
+          const canHeal = isRevive || (heal !== undefined && target.hp < target.maxHp)
           const canCure = Boolean(cures?.includes(target.status))
           // Không tiêu hao vật phẩm và không mất lượt nếu món đó hoàn toàn
           // không có tác dụng lên mục tiêu hiện tại.
@@ -610,7 +663,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             continue
           }
           consumedThisRound.set(action.item.id, reserved + 1)
-          if (canHeal) {
+          if (isRevive) {
+            target.hp = Math.max(1, Math.floor(target.maxHp / 2))
+            roundLog.push(`Dùng ${action.item.name}: ${target.name} hồi sinh với ${target.hp} HP.`)
+          } else if (canHeal) {
             const before = target.hp
             target.hp = Math.min(target.maxHp, target.hp + heal)
             roundLog.push(`Dùng ${action.item.name} cho ${target.name}: hồi ${target.hp - before} HP.`)
@@ -618,6 +674,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
           if (canCure) {
             target.status = null
             delete target.sleepTurns
+            delete target.toxicCounter
             roundLog.push(`${target.name} đã khỏi trạng thái xấu.`)
           }
           consumeItem(action.item.id)
@@ -628,6 +685,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         Object.assign(actor, lockChoiceMove(actor, action.move))
         if (!canAct(actor, roundLog)) continue
         const move = action.move
+        if (!spendMovePp(actor, move)) continue
         const playerWeather = moveWeatherKey(move)
         if (playerWeather) {
           roundEnv = getBattleEnv(playerWeather)
@@ -636,6 +694,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         }
         if (move.target === 'self') {
           roundLog.push(`${actor.name} dùng ${move.name}.`)
+          if (move.volatileStatus === 'protect') actor.protected = true
           if (move.heal) {
             const before = actor.hp
             actor.hp = Math.min(actor.maxHp, actor.hp + ratioValue(move.heal, actor.maxHp))
@@ -674,6 +733,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
           applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
         }
+        if (actor.hp > 0 && (move.flags?.recharge || move.self?.volatileStatus === 'mustrecharge')) actor.rechargeTurn = true
       } else {
         const actor = nextEnemies[action.actorIndex]
         if (!actor || actor.hp <= 0) continue
@@ -682,6 +742,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         Object.assign(actor, lockChoiceMove(actor, action.move))
         if (!canAct(actor, roundLog)) continue
         const move = action.move
+        if (!spendMovePp(actor, move)) continue
         const enemyWeather = moveWeatherKey(move)
         if (enemyWeather) {
           roundEnv = getBattleEnv(enemyWeather)
@@ -690,6 +751,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         }
         if (move.target === 'self') {
           roundLog.push(`${actor.name} dùng ${move.name}.`)
+          if (move.volatileStatus === 'protect') actor.protected = true
           if (move.heal) {
             const before = actor.hp
             actor.hp = Math.min(actor.maxHp, actor.hp + ratioValue(move.heal, actor.maxHp))
@@ -724,6 +786,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (actor.hp > 0 && move.self?.boosts && Math.random() * 100 < (move.self.chance ?? 100)) {
           applyStageBoost(nextStages, monKey(actor), move.self.boosts, roundLog, actor.name, actor)
         }
+        if (actor.hp > 0 && (move.flags?.recharge || move.self?.volatileStatus === 'mustrecharge')) actor.rechargeTurn = true
       }
     }
 
@@ -739,6 +802,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       Object.assign(mon, result.mon)
       if (result.boosts) applyStageBoost(nextStages, monKey(mon), result.boosts, roundLog, mon.name, mon)
       roundLog.push(...result.logs)
+    }
+    for (const mon of activeEndMons) {
+      delete mon.protected
+      delete mon.flinched
     }
     for (const mon of activeEndMons) {
       const isEnemyMon = nextEnemies.some((entry) => monKey(entry) === monKey(mon))
@@ -868,7 +935,9 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
               <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 11.5, marginBottom: 7 }}>Vật phẩm cho {selectedMon?.name} — tốn lượt của ô {selectedSlot + 1}</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(inventory ?? []).filter((item) => HEAL_AMOUNT[item.id] !== undefined || STATUS_CURE[item.id]).map((item) => <button key={item.id} className="btn" onClick={() => chooseItem(selectedSlot, item)}>{item.name} ×{item.infinite ? '∞' : item.qty}</button>)}
+                  {(inventory ?? []).filter((item) => HEAL_AMOUNT[item.id] !== undefined || STATUS_CURE[item.id] || item.id === 'revive').map((item) => item.id === 'revive'
+                    ? team.filter((mon) => mon.hp <= 0).map((mon) => <button key={`${item.id}-${monKey(mon)}`} className="btn" onClick={() => chooseItem(selectedSlot, item, monKey(mon))}>{item.name} → {mon.name} ×{item.infinite ? '∞' : item.qty}</button>)
+                    : <button key={item.id} className="btn" onClick={() => chooseItem(selectedSlot, item)}>{item.name} ×{item.infinite ? '∞' : item.qty}</button>)}
                 </div>
                 <button className="btn" onClick={() => setPanel('fight')} style={{ marginTop: 8 }}>← Quay lại</button>
               </div>
@@ -877,10 +946,15 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
                 <div style={{ fontSize: 11.5, marginBottom: 7 }}>Chọn hành động cho <strong>{selectedMon?.name}</strong></div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 7 }}>
                   {(selectedMon?.moves ?? []).map((move) => (
-                    <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0 || !heldItemMoveAllowed(selectedMon, move).allowed} title={heldItemMoveAllowed(selectedMon, move).reason} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span>{move.name}</span><TypeBadge type={move.type} />
+                    <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0 || Number(move.currentPp ?? move.pp ?? 35) <= 0 || !heldItemMoveAllowed(selectedMon, move).allowed} title={heldItemMoveAllowed(selectedMon, move).reason} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                      <span>{move.name} · PP {move.currentPp ?? move.pp ?? 35}/{move.pp ?? 35}</span><TypeBadge type={move.type} />
                     </button>
                   ))}
+                  {(selectedMon?.moves ?? []).length > 0 && (selectedMon.moves ?? []).every((move) => Number(move.currentPp ?? move.pp ?? 35) <= 0) && (
+                    <button className="btn" disabled={busy || selectedMon.hp <= 0} onClick={() => chooseMove(selectedSlot, { id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], target: 'normal', isStruggle: true })} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                      <span>Struggle · PP ∞</span><TypeBadge type="normal" />
+                    </button>
+                  )}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginTop: 8 }}>
                   <button className="btn" onClick={() => setPanel('switch')}>POKÉMON · đổi ô {selectedSlot + 1}</button>

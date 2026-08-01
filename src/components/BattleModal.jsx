@@ -4,7 +4,7 @@ import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
-import { buildWildMon, describeNatureBehavior, isSameMon, recomputeMonStats, syncMonInParty } from '../data/pokemonSpecies.js'
+import { buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, syncMonInParty } from '../data/pokemonSpecies.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
 import { musicManager } from '../utils/musicManager.js'
@@ -28,14 +28,15 @@ import {
   heldItemStatMultiplier, defenderTypesWithHeldItem, lockChoiceMove, restoreTransientHeldItem, trainerHasGear,
   weatherTurnsFromHeldItem, zCrystalMatchesMove,
 } from '../data/pokemonHeldItems.js'
+import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 
-// Hiệu ứng trạng thái — đợt đầu tiên (bỏng/tê liệt/ngủ), sẽ bổ sung dần theo
-// yêu cầu (VD độc, đóng băng, giảm/tăng chỉ số theo giai đoạn...).
+// Trạng thái chính: bỏng, tê liệt, ngủ, độc/độc nặng và đóng băng.
 const STATUS_INFO = {
   brn: { label: 'Bỏng', short: 'BRN', color: 'var(--coral)' },
   par: { label: 'Tê liệt', short: 'PAR', color: 'var(--amber)' },
   slp: { label: 'Ngủ', short: 'SLP', color: 'var(--text-dim)' },
   psn: { label: 'Nhiễm độc', short: 'PSN', color: '#a86de0' },
+  tox: { label: 'Nhiễm độc nặng', short: 'TOX', color: '#8f45ca' },
   frz: { label: 'Đóng băng', short: 'FRZ', color: '#79d8ef' },
 }
 
@@ -67,13 +68,18 @@ export function stageMult(stage) {
   return stage >= 0 ? (2 + stage) / 2 : 2 / (2 - stage)
 }
 
-export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO, weatherKey = null) {
-  if (move.power <= 0) return 0
+export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, defStages = STAGE_ZERO, weatherKey = null, options = {}) {
   const defenderTypes = defenderTypesWithHeldItem(defender, move.type)
   const eff = getEffectivenessMulti(move.type, defenderTypes?.length ? defenderTypes : ['normal'])
   // Miễn nhiễm hệ phải gây đúng 0 sát thương. Bản cũ Math.max(1, ...) làm
   // chiêu hệ Đất vẫn rút 1 HP của Flying/Ghost miễn nhiễm.
   if (eff === 0) return 0
+  // Dragon Rage/Sonic Boom/Night Shade/Seismic Toss dùng sát thương cố định,
+  // không chạy qua công thức chỉ số, STAB hay chí mạng nhưng vẫn tôn trọng
+  // miễn nhiễm hệ. Showdown biểu diễn chúng bằng `damage: số | 'level'`.
+  if (Number.isFinite(move.damage)) return Math.max(0, Number(move.damage))
+  if (String(move.damage).toLowerCase() === 'level') return Math.max(1, Number(attacker.level) || 1)
+  if (move.power <= 0) return 0
   // STAB có xét TERASTAL (đợt 30, đúng cơ chế Gen 9): tera trùng hệ GỐC →
   // x2.0 cho hệ đó; hệ gốc còn lại vẫn giữ STAB 1.5 dù types hiện tại đã đổi.
   let stab = 1
@@ -93,8 +99,10 @@ export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, 
   const isSpecial = move.category === 'Special'
   // Unaware bỏ qua bậc tấn công của đối thủ khi phòng thủ, hoặc bỏ qua bậc
   // phòng thủ của đối thủ khi chính Pokémon Unaware tấn công.
-  const atkStage = hasAbility(defender, 'Unaware') ? 0 : (atkStages[isSpecial ? 'spa' : 'atk'] ?? 0)
-  const defStage = hasAbility(attacker, 'Unaware') ? 0 : (defStages[isSpecial ? 'spd' : 'def'] ?? 0)
+  const rawAtkStage = hasAbility(defender, 'Unaware') ? 0 : (atkStages[isSpecial ? 'spa' : 'atk'] ?? 0)
+  const rawDefStage = hasAbility(attacker, 'Unaware') ? 0 : (defStages[isSpecial ? 'spd' : 'def'] ?? 0)
+  const atkStage = options.critical ? Math.max(0, rawAtkStage) : rawAtkStage
+  const defStage = options.critical ? Math.min(0, rawDefStage) : rawDefStage
   const atkStageMult = stageMult(atkStage)
   const defStageMult = stageMult(defStage)
 
@@ -104,14 +112,14 @@ export function computeDamage(move, attacker, defender, atkStages = STAGE_ZERO, 
     const atkStat = (isSpecial ? attacker.stats.spa : attacker.stats.atk) * burnPenalty * atkStageMult * heldItemStatMultiplier(attacker, atkKey)
     const defStat = (isSpecial ? defender.stats.spd : defender.stats.def) * defStageMult * heldItemStatMultiplier(defender, defKey) * weatherDefenseMultiplier(defender, move, weatherKey)
     const base = (levelFactor * move.power * (atkStat / defStat)) / 50 + 2
-    return Math.max(1, Math.round(base * stab * eff * randomFactor * heldItemDamageMultiplier(attacker, move, eff, defender)))
+    return Math.max(1, Math.round(base * stab * eff * randomFactor * (options.critical ? 1.5 : 1) * heldItemDamageMultiplier(attacker, move, eff, defender)))
   }
 
   // Fallback khi 1 trong 2 bên không có baseStats thật (VD loài dự phòng
   // trong danh sách 151 tĩnh) — dùng tỉ lệ chênh lệch level thay cho Atk/Def.
   const base = (levelFactor * move.power * burnPenalty) / 50 + 2
   const levelRatio = (attacker.level / defender.level) * (atkStageMult / (defStageMult * weatherDefenseMultiplier(defender, move, weatherKey)))
-  return Math.max(1, Math.round(base * levelRatio * stab * eff * randomFactor * heldItemDamageMultiplier(attacker, move, eff, defender)))
+  return Math.max(1, Math.round(base * levelRatio * stab * eff * randomFactor * (options.critical ? 1.5 : 1) * heldItemDamageMultiplier(attacker, move, eff, defender)))
 }
 
 function effLabel(mult) {
@@ -368,24 +376,8 @@ function MenuButton({ label, sub, color, onClick, disabled }) {
 // Đợt 81: điều kiện gimmick được kiểm tra tập trung trong pokemonHeldItems.js.
 
 
-/** Pokémon thu phục phải trở về chỉ số cá thể bình thường. Boss hoang dã có
- * nhiều thanh HP chỉ là cơ chế của TRẬN, không được mang lượng HP nhân bội
- * vào đội/PC sau khi bắt hoặc cảm hoá. */
-function normalizeAcquiredMon(mon) {
-  if (!mon) return mon
-  const stripped = { ...mon, hp: mon.maxHp, status: null }
-  delete stripped.bossBars
-  delete stripped.bossTier
-  delete stripped.bossPhase
-  delete stripped.isTrainerMon
-  delete stripped.sleepTurns
-  delete stripped.flashFireBoost
-  const normalized = recomputeMonStats(stripped)
-  return { ...normalized, hp: normalized.maxHp, status: null, isTrainerMon: false }
-}
-
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null, initialEnemyTeam = null }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId } = useGame()
   const restoredEnv = initialBattleState?.battleEnvKey
     ? getBattleEnv(initialBattleState.battleEnvKey)
     : (environment ?? getBattleEnv('none'))
@@ -402,8 +394,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   const defeatedEnemiesRef = useRef(Array.isArray(initialBattleState?.defeatedEnemies)
     ? initialBattleState.defeatedEnemies.map((mon) => ({ ...mon }))
     : [])
-  // 'main' | 'fight' | 'bag' | 'party' | 'talk'
+  // 'main' | 'fight' | 'bag' | 'revive' | 'party' | 'talk'
   const [menu, setMenu] = useState('main')
+  const [pendingReviveItem, setPendingReviveItem] = useState(null)
   // Lý do kết thúc đặc biệt do THUYẾT PHỤC: 'calm' (đối phương nguôi giận,
   // hoà), 'join' (Pokémon hoang dã bị dụ theo mình), 'flee' (đối phương bỏ
   // chạy). null = kết thúc thường (thắng/thua/tự chạy).
@@ -488,6 +481,21 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     if (!preGimmickRef.current) preGimmickRef.current = { ...playerMon }
   }
 
+  function restoreGimmickMon(mon, base = preGimmickRef.current) {
+    if (!mon || !base || !isSameMon(mon, base)) return mon
+    const hpScale = mon.dynaHpMultiplier || 1
+    return {
+      ...base,
+      hp: Math.min(base.maxHp, Math.max(mon.hp > 0 ? 1 : 0, Math.round(mon.hp / hpScale))),
+      status: mon.status,
+      sleepTurns: mon.status === 'slp' ? mon.sleepTurns : undefined,
+      heldItem: mon.heldItem ?? null,
+      consumedHeldItem: mon.consumedHeldItem,
+      knockedOffHeldItem: mon.knockedOffHeldItem,
+      moves: mon.moves ?? base.moves,
+    }
+  }
+
   // MEGA: biến hình THẬT — stats/hệ/sprite của forme Mega ở cùng level, GIỮ
   // nguyên HP hiện tại (đúng game: base HP của Mega không đổi), giữ nguyên
   // 4 chiêu + trạng thái. Kéo dài hết trận.
@@ -538,21 +546,57 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     return 100
   }
 
+  function maxPower(p) {
+    if (p >= 150) return 150
+    if (p >= 110) return 140
+    if (p >= 75) return 130
+    if (p >= 65) return 120
+    if (p >= 55) return 110
+    if (p >= 45) return 100
+    return 90
+  }
+
+  function asMaxMove(move) {
+    if (!move || move.isMaxMove) return move
+    if (move.power <= 0) return {
+      ...move, baseMoveName: move.name, name: 'Max Guard', type: 'normal', power: 0,
+      target: 'self', volatileStatus: 'protect', boosts: null, self: null, secondary: null,
+      secondaries: [], status: null, heal: null, drain: null, recoil: null, multihit: null,
+      weather: null, isMaxMove: true,
+    }
+    const typeNames = { fire: 'Max Flare', water: 'Max Geyser', ice: 'Max Hailstorm', rock: 'Max Rockfall', fighting: 'Max Knuckle', poison: 'Max Ooze', flying: 'Max Airstream', ghost: 'Max Phantasm', dark: 'Max Darkness', grass: 'Max Overgrowth', electric: 'Max Lightning', psychic: 'Max Mindstorm', fairy: 'Max Starfall', steel: 'Max Steelspike', ground: 'Max Quake', bug: 'Max Flutterby', dragon: 'Max Wyrmwind', normal: 'Max Strike' }
+    const weather = { fire: 'sunnyday', water: 'raindance', ice: 'snow', rock: 'sandstorm' }[move.type] ?? null
+    const selfBoost = { fighting: { atk: 1 }, poison: { spa: 1 }, flying: { spe: 1 }, steel: { def: 1 }, ground: { spd: 1 } }[move.type] ?? null
+    const foeBoost = { ghost: { def: -1 }, dark: { spd: -1 }, bug: { spa: -1 }, dragon: { atk: -1 }, normal: { spe: -1 } }[move.type] ?? null
+    return {
+      ...move, baseMoveName: move.name, name: typeNames[move.type] ?? `Max ${move.name}`,
+      power: maxPower(move.power), isMaxMove: true, multihit: null, drain: null, recoil: null,
+      status: null, secondary: foeBoost ? { chance: 100, boosts: foeBoost } : null,
+      secondaries: [], boosts: null, self: selfBoost ? { chance: 100, boosts: selfBoost } : null,
+      volatileStatus: null, sideCondition: null, forceSwitch: false, selfSwitch: null,
+      weather, flags: {},
+    }
+  }
+
   // DYNAMAX: HP hiện tại + tối đa x2 trong 3 lượt, sprite phóng to (dùng forme
   // Gigantamax nếu loài có). Hết 3 lượt tự trở về, HP chia đôi theo tỉ lệ.
   function doDynamax() {
     backupOnce()
+    const dynaLevel = Math.max(0, Math.min(10, Number(playerMon.dynamaxLevel) || 0))
+    const hpMultiplier = 1.5 + dynaLevel * 0.05
+    const canGmax = Boolean(gmaxForme && playerMon.gmaxFactor)
     setPlayerMon((m) => ({
       ...m,
       dyna: true,
-      ...(gmaxForme ? { name: gmaxForme.name, spriteId: gmaxForme.spriteId } : {}),
-      maxHp: m.maxHp * 2,
-      hp: m.hp * 2,
+      dynaHpMultiplier: hpMultiplier,
+      ...(canGmax ? { name: gmaxForme.name, spriteId: gmaxForme.spriteId } : {}),
+      maxHp: Math.round(m.maxHp * hpMultiplier),
+      hp: Math.round(m.hp * hpMultiplier),
     }))
     setDynaTurnsLeft(3)
     setGimmickUsed('dynamax')
     setGimmickOpen(false)
-    pushLog(`✦ ${playerMon.name} DYNAMAX — khổng lồ hoá trong 3 lượt${gmaxForme ? ` (dạng ${gmaxForme.name})` : ''}!`)
+    pushLog(`✦ ${playerMon.name} DYNAMAX — khổng lồ hoá trong 3 lượt${canGmax ? ` (dạng ${gmaxForme.name})` : ''}!`)
   }
 
   function endDynamax() {
@@ -561,18 +605,29 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       dyna: false,
       name: preGimmickRef.current?.name ?? m.name,
       spriteId: preGimmickRef.current?.spriteId ?? m.spriteId,
-      maxHp: Math.max(1, Math.round(m.maxHp / 2)),
-      hp: Math.max(m.hp > 0 ? 1 : 0, Math.round(m.hp / 2)),
+      maxHp: Math.max(1, Math.round(m.maxHp / (m.dynaHpMultiplier || 1))),
+      hp: Math.max(m.hp > 0 ? 1 : 0, Math.round(m.hp / (m.dynaHpMultiplier || 1))),
+      dynaHpMultiplier: undefined,
     }))
     pushLog(`${preGimmickRef.current?.name ?? playerMon.name} trở về kích thước bình thường.`)
+  }
+
+  // Ba lượt Dynamax là ba HÀNH ĐỘNG của Pokémon, không chỉ riêng lúc bấm FIGHT.
+  // Dùng đồ hoặc nói chuyện thất bại cũng tiêu một lượt; đổi Pokémon đã kết thúc
+  // Dynamax ngay trong handleSwitchMon.
+  function consumeDynamaxAction() {
+    if (!playerMon.dyna || gimmickUsed !== 'dynamax') return
+    const left = dynaTurnsLeft - 1
+    setDynaTurnsLeft(Math.max(0, left))
+    if (left <= 0) endDynamax()
   }
 
   // TERASTAL: kết tinh về HỆ CHÍNH của loài (đúng cơ chế: STAB hệ tera trùng
   // hệ gốc = x2.0, hệ gốc còn lại vẫn 1.5) — cả phòng thủ cũng đổi theo hệ mới.
   function doTera() {
     backupOnce()
-    const teraType = playerMon.types[0]
-    setPlayerMon((m) => ({ ...m, tera: teraType, origTypes: m.types, types: [teraType] }))
+    const teraType = playerMon.teraType || playerMon.types[0]
+    setPlayerMon((m) => ({ ...m, tera: teraType, origTypes: m.types, types: teraType === 'stellar' ? m.types : [teraType] }))
     setGimmickUsed('tera')
     setGimmickOpen(false)
     pushLog(`✦ ${playerMon.name} TERASTAL — kết tinh hệ ${teraType.toUpperCase()}! (STAB hệ này x2)`)
@@ -583,14 +638,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   function revertGimmicks() {
     const base = preGimmickRef.current
     if (!base) return
-    setPlayerMon((cur) => ({
-      ...base,
-      hp: Math.min(cur.dyna ? Math.round(cur.hp / 2) : cur.hp, base.maxHp),
-      status: cur.status,
-      sleepTurns: cur.sleepTurns,
-      heldItem: cur.heldItem ?? null,
-      consumedHeldItem: cur.consumedHeldItem,
-    }))
+    setPlayerMon((cur) => restoreGimmickMon(cur, base))
+    setParty((cur) => (cur ?? []).map((mon) => restoreGimmickMon(mon, base)))
     preGimmickRef.current = null
   }
 
@@ -687,6 +736,28 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   }
 
   function canActLocal(mon, lines) {
+    if (mon.rechargeTurn) {
+      delete mon.rechargeTurn
+      lines.push(`${mon.name} phải nghỉ để hồi sức!`)
+      return false
+    }
+    if (mon.flinched) {
+      delete mon.flinched
+      lines.push(`${mon.name} chùn bước và không thể hành động!`)
+      return false
+    }
+    if ((mon.confusedTurns ?? 0) > 0) {
+      mon.confusedTurns -= 1
+      if (mon.confusedTurns <= 0) {
+        delete mon.confusedTurns
+        lines.push(`${mon.name} đã hết rối loạn!`)
+      } else if (Math.random() < 1 / 3) {
+        const selfHit = Math.max(1, Math.round(((2 * (mon.level ?? 1) / 5 + 2) * 40 * ((mon.stats?.atk ?? 30) / Math.max(1, mon.stats?.def ?? 30))) / 50 + 2))
+        mon.hp = Math.max(0, mon.hp - selfHit)
+        lines.push(`${mon.name} rối loạn và tự làm mình mất ${selfHit} HP!`)
+        return false
+      } else lines.push(`${mon.name} đang rối loạn nhưng vẫn hành động được.`)
+    }
     if (mon.status === 'slp') {
       const turnsLeft = (mon.sleepTurns ?? 1) - 1
       if (turnsLeft > 0) {
@@ -764,6 +835,13 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
   async function handleMove(move) {
     if (busy || battleOver || finished) return
+    if (playerMon.dyna) move = asMaxMove(move)
+    const ppMoveName = move.baseMoveName ?? move.name
+    const storedMove = (playerMon.moves ?? []).find((candidate) => candidate.name === ppMoveName || candidate.id === move.id)
+    if (!move.isStruggle && storedMove && Number(storedMove.currentPp ?? storedMove.pp ?? 35) <= 0) {
+      pushLog(`${storedMove.name} đã hết PP!`)
+      return
+    }
     setBusy(true)
     setMenu('main')
 
@@ -781,19 +859,30 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const lines = []
     let turnEnv = battleEnv
     let turnWeatherTurns = weatherTurns
-    const enemyMovePool = (e.moves ?? []).filter((candidate) => heldItemMoveAllowed(e, candidate).allowed)
-    const enemyMove = enemyMovePool[Math.floor(Math.random() * Math.max(1, enemyMovePool.length))]
+    const enemyMovePool = (e.moves ?? []).filter((candidate) => heldItemMoveAllowed(e, candidate).allowed && Number(candidate.currentPp ?? candidate.pp ?? 35) > 0)
+    const enemyMove = enemyMovePool.length
+      ? enemyMovePool[Math.floor(Math.random() * enemyMovePool.length)]
+      : { id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], isStruggle: true }
     const weatherKey = () => weatherIsSuppressed([p, e]) ? null : turnEnv?.key
 
     function executeMove(actor, defender, chosenMove, actorStages, defenderStages, actorSide) {
       if (!chosenMove || actor.hp <= 0 || defender.hp <= 0) return
+      if (actor.tera && /^(?:terablast|tera blast)$/i.test(String(chosenMove.id ?? chosenMove.name).replace(/\s+/g, ''))) {
+        chosenMove = { ...chosenMove, type: actor.tera === 'stellar' ? 'stellar' : actor.tera, power: 80, category: (actor.stats?.atk ?? 0) > (actor.stats?.spa ?? 0) ? 'Physical' : 'Special' }
+      }
       const itemPermission = heldItemMoveAllowed(actor, chosenMove)
       if (!itemPermission.allowed) {
         lines.push(`${actor.name} không thể dùng ${chosenMove.name}: ${itemPermission.reason}`)
         return
       }
-      Object.assign(actor, lockChoiceMove(actor, chosenMove))
       if (!canActLocal(actor, lines)) return
+      const ppName = chosenMove.baseMoveName ?? chosenMove.name
+      if (!chosenMove.isStruggle) actor.moves = (actor.moves ?? []).map((known) => {
+        if (known.name !== ppName && known.id !== chosenMove.id) return known
+        const maxPp = Math.max(1, Number(known.maxPp ?? known.pp) || 35)
+        return { ...known, maxPp, currentPp: Math.max(0, Number(known.currentPp ?? maxPp) - 1) }
+      })
+      Object.assign(actor, lockChoiceMove(actor, chosenMove))
       const currentWeather = weatherKey()
       if (!moveHitsWithAbilities(chosenMove, actor, defender, currentWeather, actorStages, defenderStages)) {
         lines.push(`${actor.name} dùng ${chosenMove.name}, nhưng đòn đánh trượt!`)
@@ -810,6 +899,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const selfTarget = chosenMove.target === 'self'
       if (selfTarget) {
         lines.push(`${actor.name} dùng ${chosenMove.name}.`)
+        if (chosenMove.volatileStatus === 'protect') {
+          actor.protected = true
+          lines.push(`${actor.name} dựng lá chắn bảo vệ!`)
+        }
         if (chosenMove.heal) {
           const healed = ratioValue(chosenMove.heal, actor.maxHp)
           const before = actor.hp
@@ -839,7 +932,14 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const effectiveness = getEffectivenessMulti(chosenMove.type, defenderTypesWithHeldItem(defender, chosenMove.type))
 
       for (let hit = 0; hit < hits && defender.hp > 0; hit++) {
-        let damage = computeDamage(chosenMove, actor, defender, actorStages, defenderStages, currentWeather)
+        if (defender.protected) {
+          lines.push(`${defender.name} đã bảo vệ bản thân khỏi ${chosenMove.name}!`)
+          break
+        }
+        const critStage = Math.max(0, Number(chosenMove.critRatio) || 0)
+        const critical = Boolean(chosenMove.willCrit) || Math.random() < ([1 / 24, 1 / 8, 1 / 2, 1][Math.min(3, critStage)] ?? 1 / 24)
+        let damage = computeDamage(chosenMove, actor, defender, actorStages, defenderStages, currentWeather, { critical })
+        if (critical && damage > 0) lines.push('Một đòn chí mạng!')
         if (currentWeather) damage = applyEnvToDamage(damage, chosenMove, turnEnv)
         const abilityResult = modifyDamageByAbilities({
           damage, move: chosenMove, attacker: actor, defender,
@@ -897,7 +997,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       Object.assign(actor, attackerItemAfter.attacker)
       lines.push(...attackerItemAfter.logs)
 
-      if (chosenMove.power > 0) {
+      if (chosenMove.power > 0 || chosenMove.damage != null) {
         lines.push(`${actor.name} dùng ${chosenMove.name}! Gây ${totalDamage} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
         const label = effLabel(effectiveness)
         if (label) lines.push(label)
@@ -917,6 +1017,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
       if (defender.hp > 0 && !moveImmune) {
         applyStatusLocal(defender, chosenMove.status ?? (secondaryTriggered ? chosenMove.secondary?.status : null), currentWeather, lines, chosenMove)
+        const volatile = chosenMove.volatileStatus ?? (secondaryTriggered ? chosenMove.secondary?.volatileStatus : null)
+        if (volatile === 'confusion' && !(defender.confusedTurns > 0)) {
+          defender.confusedTurns = 2 + Math.floor(Math.random() * 4)
+          lines.push(`${defender.name} trở nên rối loạn!`)
+        } else if (volatile === 'flinch') defender.flinched = true
         const itemCure = afterStatusHeldItem(defender, hasAbility(actor, 'Unnerve'))
         Object.assign(defender, itemCure.mon)
         lines.push(...itemCure.logs)
@@ -933,6 +1038,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         actor.hp = Math.max(0, actor.hp - recoil)
         lines.push(`${actor.name} chịu ${recoil} sát thương phản lực.`)
       }
+      if (chosenMove.flags?.recharge && actor.hp > 0) actor.rechargeTurn = true
       if (defender.hp <= 0) {
         lines.push(`${defender.name} đã gục ngã!`)
         const knockout = knockoutAbilityEffect(actor)
@@ -963,6 +1069,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       Object.assign(mon, statusEnd.mon)
       lines.push(...statusEnd.logs)
     }
+    delete p.protected
+    delete e.protected
     const effectiveEndWeather = weatherIsSuppressed([p, e]) ? null : turnEnv?.key
     for (const [mon, stages] of [[p, pStageNow], [e, eStageNow]]) {
       const result = endTurnAbilityEffect(mon, effectiveEndWeather)
@@ -976,6 +1084,17 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       lines.push(...result.logs)
     }
 
+    if (dynaEnds && p.hp > 0) {
+      const factor = p.dynaHpMultiplier || 1
+      p.dyna = false
+      p.name = preGimmickRef.current?.name ?? p.name
+      p.spriteId = preGimmickRef.current?.spriteId ?? p.spriteId
+      p.maxHp = Math.max(1, Math.round(p.maxHp / factor))
+      p.hp = Math.max(1, Math.min(p.maxHp, Math.round(p.hp / factor)))
+      delete p.dynaHpMultiplier
+      lines.push(`${p.name} trở về kích thước bình thường sau lượt Dynamax thứ ba.`)
+      setDynaTurnsLeft(0)
+    }
     setPlayerMon(p)
     setEnemyMon(e)
     setPStages(pStageNow)
@@ -1003,7 +1122,6 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       reportActiveFainted(playerMon.name, p)
     }
 
-    if (dynaEnds && p.hp > 0 && e.hp > 0) endDynamax()
     await new Promise((resolve) => setTimeout(resolve, 250))
     setBusy(false)
   }
@@ -1075,7 +1193,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           setFinished(true)
           return
         }
-        const lured = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
+        const lured = ensurePokemonIdentity(applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits), trainerId)
         markPokedexCaught(lured, { source: 'befriended-in-battle', location: playerLocation, date: storyDate })
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), lured])
@@ -1094,6 +1212,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       } else {
         // Nói chuyện tốn 1 lượt — đối phương được tấn công tự do.
         enemyFreeHit(playerMon, setPlayerMon, 'không đợi bạn nói xong — ')
+        consumeDynamaxAction()
       }
     } catch (err) {
       pushLog(`(Lỗi gọi AI khi nói chuyện: ${err.message} — không mất lượt.)`)
@@ -1164,9 +1283,15 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     }
 
     if (!canActLocal(attacker, lines)) return finishFreeTurn()
-    const enemyMovePool = (attacker.moves ?? []).filter((candidate) => heldItemMoveAllowed(attacker, candidate).allowed)
-    const enemyMove = enemyMovePool[Math.floor(Math.random() * Math.max(1, enemyMovePool.length))]
-    if (!enemyMove) return finishFreeTurn()
+    const enemyMovePool = (attacker.moves ?? []).filter((candidate) => heldItemMoveAllowed(attacker, candidate).allowed && Number(candidate.currentPp ?? candidate.pp ?? 35) > 0)
+    const enemyMove = enemyMovePool.length
+      ? enemyMovePool[Math.floor(Math.random() * enemyMovePool.length)]
+      : { id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], isStruggle: true }
+    if (!enemyMove.isStruggle) attacker.moves = (attacker.moves ?? []).map((known) => {
+      if (known.id !== enemyMove.id && known.name !== enemyMove.name) return known
+      const maxPp = Math.max(1, Number(known.maxPp ?? known.pp) || 35)
+      return { ...known, maxPp, currentPp: Math.max(0, Number(known.currentPp ?? maxPp) - 1) }
+    })
     Object.assign(attacker, lockChoiceMove(attacker, enemyMove))
 
     const moveWeather = moveWeatherKey(enemyMove)
@@ -1210,7 +1335,10 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     let moveImmune = false
 
     for (let hit = 0; hit < hits && defender.hp > 0 && attacker.hp > 0; hit++) {
-      let dmg = computeDamage(enemyMove, attacker, defender, eStageNow, pStageNow, weatherKey)
+      const critStage = Math.max(0, Number(enemyMove.critRatio) || 0)
+      const critical = !enemyMove.damage && (Boolean(enemyMove.willCrit) || Math.random() < ([1 / 24, 1 / 8, 1 / 2, 1][Math.min(3, critStage)] ?? 1 / 24))
+      let dmg = computeDamage(enemyMove, attacker, defender, eStageNow, pStageNow, weatherKey, { critical })
+      if (critical && dmg > 0) lines.push('Một đòn chí mạng!')
       if (weatherKey) dmg = applyEnvToDamage(dmg, enemyMove, activeEnv)
       const abilityResult = modifyDamageByAbilities({
         damage: dmg, move: enemyMove, attacker, defender, weatherKey, effectiveness,
@@ -1268,6 +1396,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         boostLocal(pStageNow, enemyMove.secondary.boosts, defender.name, lines, defender, { fromOpponent: true })
       }
         applyStatusLocal(defender, enemyMove.status ?? (secondaryTriggered ? enemyMove.secondary?.status : null), weatherKey, lines, enemyMove)
+        const volatile = enemyMove.volatileStatus ?? (secondaryTriggered ? enemyMove.secondary?.volatileStatus : null)
+        if (volatile === 'confusion' && !(defender.confusedTurns > 0)) defender.confusedTurns = 2 + Math.floor(Math.random() * 4)
+        else if (volatile === 'flinch') defender.flinched = true
         const itemCure = afterStatusHeldItem(defender, hasAbility(attacker, 'Unnerve'))
         Object.assign(defender, itemCure.mon)
         lines.push(...itemCure.logs)
@@ -1281,6 +1412,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     if (attacker.hp > 0 && enemyMove.self?.boosts && Math.random() * 100 < (enemyMove.self.chance ?? 100)) {
       boostLocal(eStageNow, enemyMove.self.boosts, attacker.name, lines, attacker)
     }
+    if (attacker.hp > 0 && (enemyMove.flags?.recharge || enemyMove.self?.volatileStatus === 'mustrecharge')) attacker.rechargeTurn = true
     if (totalDealt > 0 && enemyMove.drain && attacker.hp > 0) {
       const before = attacker.hp
       attacker.hp = Math.min(attacker.maxHp, attacker.hp + ratioValue(enemyMove.drain, totalDealt))
@@ -1308,10 +1440,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     potion: 20, superpotion: 60, hyperpotion: 120, freshwater: 30, fullrestore: 9999,
   }
   const STATUS_CURE = {
-    antidote: ['psn'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
-    fullrestore: ['psn', 'par', 'slp', 'brn', 'frz'],
+    antidote: ['psn', 'tox'], paralyzeheal: ['par'], awakening: ['slp'], burnheal: ['brn'],
+    iceheal: ['frz'], fullheal: ['psn', 'tox', 'par', 'slp', 'brn', 'frz'],
+    fullrestore: ['psn', 'tox', 'par', 'slp', 'brn', 'frz'],
   }
-  const BALL_BONUS = { pokeball: 0, greatball: 12, ultraball: 25 }
+  const BALL_BONUS = { pokeball: 1, greatball: 1.5, ultraball: 2, masterball: Infinity }
 
   /** Dùng 1 vật phẩm trong trận. */
   function handleUseItem(item) {
@@ -1328,19 +1461,19 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       consumeItem(id)
       // Tỉ lệ bắt: máu càng thấp càng dễ, có trạng thái thì dễ hơn, bóng xịn
       // cộng thêm. Công thức đơn giản hoá nhưng giữ đúng "cảm giác" game gốc.
-      const hpRatio = enemyMon.hp / Math.max(1, enemyMon.maxHp)
-      const statusBonus = enemyMon.status ? (enemyMon.status === 'slp' || enemyMon.status === 'frz' ? 20 : 10) : 0
+      const statusMultiplier = enemyMon.status ? (enemyMon.status === 'slp' || enemyMon.status === 'frz' ? 2.5 : 1.5) : 1
       const tier = getBossTier(enemyMon.name)
-      const legendPenalty = tier?.key === 'high' ? 45 : tier ? 25 : 0
+      const speciesCatchRate = Number.isFinite(enemyMon.catchRate) ? enemyMon.catchRate : (tier ? 3 : 120)
       // Đợt 70: thiên phú "Bàn Tay Thuần Phục" cộng thẳng 15% (vẫn kẹp 3-95%).
       const perkBonus = catchRateBonus(playerTraits)
-      const chance = Math.max(3, Math.min(95,
-        Math.round(45 * (1 - hpRatio) + 12 + statusBonus + (BALL_BONUS[id] ?? 0) - legendPenalty + perkBonus),
-      ))
+      const catchValue = ((3 * enemyMon.maxHp - 2 * enemyMon.hp) * speciesCatchRate * (BALL_BONUS[id] ?? 1) * statusMultiplier)
+        / Math.max(1, 3 * enemyMon.maxHp)
+      const isMasterBall = id === 'masterball'
+      const chance = isMasterBall ? 100 : Math.max(1, Math.min(95, Math.round(100 * Math.pow(Math.min(1, catchValue / 255), 0.75) + perkBonus)))
       const roll = Math.random() * 100
       pushLog(`Bạn ném ${item.name}! (khả năng ~${chance}%)`)
-      if (roll < chance) {
-        const caught = applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits)
+      if (isMasterBall || roll < chance) {
+        const caught = ensurePokemonIdentity(applyPerksToMon(normalizeAcquiredMon(enemyMon), playerTraits), trainerId)
         markPokedexCaught(caught, { source: 'wild-battle', location: playerLocation, date: storyDate })
         if ((party ?? []).length < 6) {
           setParty((cur) => [...(cur ?? []), caught])
@@ -1358,6 +1491,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       }
       pushLog(`${enemyMon.name} thoát ra khỏi bóng!`)
       enemyFreeHit(playerMon, setPlayerMon)
+      consumeDynamaxAction()
       setBusy(false)
       return
     }
@@ -1371,7 +1505,13 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       return
     }
     if (isRevive) {
-      pushLog('Không có Pokémon nào gục ngã để hồi sinh.')
+      const fainted = (party ?? []).filter((mon) => mon && !isSameMon(mon, playerMon) && (mon.hp ?? 0) <= 0)
+      if (fainted.length === 0) {
+        pushLog('Không có Pokémon dự bị nào gục ngã để hồi sinh.')
+        return
+      }
+      setPendingReviveItem(item)
+      setMenu('revive')
       return
     }
     const canHeal = heal !== undefined && playerMon.hp < playerMon.maxHp
@@ -1399,11 +1539,27 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       const oldStatus = itemTarget.status
       itemTarget.status = null
       delete itemTarget.sleepTurns
+      delete itemTarget.toxicCounter
       pushLog(`${playerMon.name} đã khỏi ${STATUS_INFO[oldStatus]?.label?.toLowerCase() ?? 'trạng thái xấu'}!`)
     }
     setPlayerMon(itemTarget)
     // Dùng đồ tốn 1 lượt.
     enemyFreeHit(itemTarget, setPlayerMon)
+    consumeDynamaxAction()
+    setBusy(false)
+  }
+
+  function handleReviveTarget(target) {
+    if (!pendingReviveItem || busy || finished || battleOver || !target || (target.hp ?? 0) > 0) return
+    setBusy(true)
+    const revived = { ...target, hp: Math.max(1, Math.floor((target.maxHp ?? 1) / 2)) }
+    consumeItem(pendingReviveItem.id)
+    setParty((cur) => (cur ?? []).map((mon) => (isSameMon(mon, target) ? revived : mon)))
+    pushLog(`Bạn dùng ${pendingReviveItem.name} — ${target.name} hồi sinh với ${revived.hp} HP.`)
+    setPendingReviveItem(null)
+    setMenu('main')
+    enemyFreeHit(playerMon, setPlayerMon)
+    consumeDynamaxAction()
     setBusy(false)
   }
 
@@ -1427,7 +1583,16 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       ? `${playerMon.name} không thể chiến đấu nữa! Bạn tung ${target.name} ra trận!`
       : `Bạn thu ${playerMon.name} về và tung ${target.name} ra trận!`)
     // Regenerator/Natural Cure kích hoạt khi rút về; lưu snapshot đó vào đội.
-    const withdrawn = clearHeldItemVolatile(switchOutAbility(playerMon))
+    let withdrawn = clearHeldItemVolatile(switchOutAbility(playerMon))
+    // Dynamax kết thúc ngay khi rút Pokémon. Mega/Tera vẫn được giữ trong runtime
+    // của đúng cá thể để nếu quay lại sân nó còn đúng dạng, nhưng cuối trận sẽ trả
+    // toàn bộ party về dạng gốc bằng uid — không lấy HP của Pokémon khác gắn nhầm.
+    if (withdrawn.dyna && preGimmickRef.current && isSameMon(withdrawn, preGimmickRef.current)) {
+      withdrawn = restoreGimmickMon(withdrawn)
+      preGimmickRef.current = null
+      setDynaTurnsLeft(0)
+      pushLog(`${withdrawn.name} trở về kích thước bình thường khi được thu hồi.`)
+    }
     setParty((cur) => syncMonInParty(cur, withdrawn))
     participantsRef.current.add(participantKey(target))
     setPlayerMon(clearHeldItemVolatile({ ...target }))
@@ -1484,22 +1649,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     // Biến hình Mega/Dynamax/Tera chỉ tồn tại TRONG trận nên trả về bản gốc,
     // nhưng GIỮ nguyên lượng máu và trạng thái đang có.
     const base = preGimmickRef.current
-    const finalMon = base
-      ? {
-          ...base,
-          hp: Math.min(playerMon.dyna ? Math.round(playerMon.hp / 2) : playerMon.hp, base.maxHp),
-          status: playerMon.status,
-          heldItem: playerMon.heldItem ?? null,
-          consumedHeldItem: playerMon.consumedHeldItem,
-          knockedOffHeldItem: playerMon.knockedOffHeldItem,
-          ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
-        }
-      : {
-          ...playerMon,
-          ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
-        }
+    const finalMon = restoreGimmickMon({
+      ...playerMon,
+      ...(playerMon.status === 'slp' ? { sleepTurns: playerMon.sleepTurns } : { sleepTurns: undefined }),
+    }, base)
     const persistedMon = restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(finalMon)))
-    const restoredParty = (party ?? []).map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(mon))))
+    const restoredParty = (party ?? []).map((mon) => restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(restoreGimmickMon(mon, base)))))
     const finalParty = syncMonInParty(restoredParty, persistedMon)
     const finalEnemy = restoreTransientHeldItem(clearHeldItemVolatile(clearBattleVolatile(enemyMon)))
     const allEnemies = [...defeatedEnemiesRef.current, finalEnemy]
@@ -1627,14 +1782,14 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                     },
                   },
                   dynamax: {
-                    available: devUnlockGimmicks || trainerHasGear(inventory, 'dynamax'),
-                    reason: 'cần Dynamax Band (chỉ có ở Galar) — chưa có trong túi',
+                    available: devUnlockGimmicks || (trainerHasGear(inventory, 'dynamax') && playerLocation?.regionKey === 'galar'),
+                    reason: !trainerHasGear(inventory, 'dynamax') ? 'cần Dynamax Band' : 'Dynamax chỉ hoạt động tại Power Spot ở Galar',
                     onPick: doDynamax,
                   },
                   tera: {
                     available: devUnlockGimmicks || trainerHasGear(inventory, 'tera'),
                     reason: 'cần Tera Orb (chỉ có ở Paldea) — chưa có trong túi',
-                    color: TYPE_COLORS[playerMon.types[0]] ?? '#5fd7e8',
+                    color: TYPE_COLORS[playerMon.teraType ?? playerMon.types[0]] ?? '#5fd7e8',
                     onPick: doTera,
                   },
                 }}
@@ -1668,7 +1823,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
               {playerMon.moves.map((move) => {
                 const zTarget = zArmed && (devUnlockGimmicks ? move.power > 0 : zCrystalMatchesMove(playerMon, move))
-                const zDisabled = (zArmed && !zTarget) || !heldItemMoveAllowed(playerMon, move).allowed
+                const ppLeft = Number(move.currentPp ?? move.pp ?? 35)
+                const zDisabled = ppLeft <= 0 || (zArmed && !zTarget) || !heldItemMoveAllowed(playerMon, move).allowed
                 return (
                   <button
                     key={move.name}
@@ -1681,7 +1837,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                         setZArmed(false)
                         setGimmickUsed('zmove')
                         pushLog(`✦ ${playerMon.name} phóng Z-MOVE: Z-${move.name}!!`)
-                        handleMove({ ...move, baseMoveName: move.name, isZMove: true, name: `Z-${move.name}`, power: zPower(move.power) })
+                        handleMove({
+                          ...move, baseMoveName: move.name, isZMove: true, name: `Z-${move.name}`, power: zPower(move.power),
+                          multihit: null, drain: null, recoil: null, status: null, boosts: null,
+                          self: null, secondary: null, secondaries: [], volatileStatus: null,
+                          sideCondition: null, weather: null, forceSwitch: false, selfSwitch: null, flags: {},
+                        })
                       } else {
                         handleMove(move)
                       }
@@ -1705,10 +1866,18 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                         </span>
                       )}
                     </span>
-                    <TypeBadge type={move.type} />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <small style={{ color: ppLeft <= 0 ? 'var(--coral)' : 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>PP {ppLeft}/{move.maxPp ?? move.pp ?? 35}</small>
+                      <TypeBadge type={move.type} />
+                    </span>
                   </button>
                 )
               })}
+              {(playerMon.moves ?? []).every((move) => Number(move.currentPp ?? move.pp ?? 35) <= 0) && (
+                <button className="btn" disabled={busy || battleOver} onClick={() => handleMove({ id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], isStruggle: true })} style={{ gridColumn: '1 / -1', color: 'var(--coral)' }}>
+                  Struggle · không còn chiêu có PP
+                </button>
+              )}
             </div>
             <button className="btn" style={{ width: '100%' }} onClick={() => setMenu('main')} disabled={busy}>
               ← Quay lại
@@ -1750,9 +1919,30 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             canUse={(it) =>
               BALL_BONUS[it.id] !== undefined
               || HEAL_AMOUNT[it.id] !== undefined
-              || Boolean(STATUS_CURE[it.id])}
+              || Boolean(STATUS_CURE[it.id])
+              || it.id === 'revive'}
             onUse={handleUseItem}
           />
+        ) : menu === 'revive' ? (
+          <div>
+            <p style={{ fontSize: 12.5, color: 'var(--text-mid)', margin: '4px 0 10px' }}>
+              Chọn một Pokémon dự bị đã gục để dùng {pendingReviveItem?.name ?? 'Revive'}:
+            </p>
+            {(party ?? []).filter((mon) => mon && !isSameMon(mon, playerMon) && (mon.hp ?? 0) <= 0).map((mon) => (
+              <button
+                key={mon.uid ?? `${mon.name}-${mon.level}`}
+                className="btn"
+                style={{ width: '100%', marginBottom: 6, textAlign: 'left' }}
+                onClick={() => handleReviveTarget(mon)}
+                disabled={busy}
+              >
+                {mon.name} · Lv.{mon.level} · đã gục
+              </button>
+            ))}
+            <button className="btn" style={{ width: '100%' }} onClick={() => { setPendingReviveItem(null); setMenu('bag') }} disabled={busy}>
+              ← Quay lại túi
+            </button>
+          </div>
         ) : menu === 'party' ? (
           <div>
             {mustSwitch && (

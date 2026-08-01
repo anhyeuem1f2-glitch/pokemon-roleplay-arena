@@ -1,5 +1,4 @@
 import { createStableId, ensurePokemonIdentity } from './persistentIdentity.js'
-import { getBossTier } from './bossTiers.js'
 
 export const CONTEST_CATEGORIES = [
   { key: 'cool', label: 'Cool', stat: 'atk' },
@@ -36,13 +35,26 @@ export function rollPokemonLifeTraits(mon, ownerTrainerId = null) {
 
 export function breedingCompatibility(first, second) {
   if (!first || !second || first.uid === second.uid) return { ok: false, reason: 'Cần hai cá thể khác nhau.' }
-  if (getBossTier(first.name) || getBossTier(second.name)) return { ok: false, reason: 'Pokémon huyền thoại/huyền ảo không tham gia nhân giống.' }
-  const a = String(first.name ?? '').toLowerCase()
-  const b = String(second.name ?? '').toLowerCase()
+  const a = String(first.species ?? first.name ?? '').toLowerCase()
+  const b = String(second.species ?? second.name ?? '').toLowerCase()
   const ditto = a === 'ditto' || b === 'ditto'
-  if (!ditto && a !== b) return { ok: false, reason: 'Bản thử nghiệm chỉ hỗ trợ Ditto hoặc hai Pokémon cùng loài.' }
-  if (!ditto && first.gender !== 'unknown' && second.gender !== 'unknown' && first.gender === second.gender) {
-    return { ok: false, reason: 'Hai Pokémon cùng giới tính không tạo trứng trong luật hiện tại.' }
+  const firstGroups = new Set((first.eggGroups ?? []).map((group) => String(group).toLowerCase()))
+  const secondGroups = new Set((second.eggGroups ?? []).map((group) => String(group).toLowerCase()))
+  // Dữ liệu Egg Group mới là nguồn luật. Nhờ vậy hầu hết huyền thoại vẫn bị
+  // chặn bởi Undiscovered, nhưng ngoại lệ canon Manaphy/Phione + Ditto hoạt
+  // động thay vì bị một lệnh cấm "mọi boss" quá rộng chặn nhầm.
+  if (firstGroups.has('undiscovered') || secondGroups.has('undiscovered')) {
+    return { ok: false, reason: 'Một Pokémon thuộc Egg Group Undiscovered nên không thể sinh sản.' }
+  }
+  if (ditto && (a === 'ditto' && b === 'ditto')) return { ok: false, reason: 'Hai Ditto không thể tạo trứng.' }
+  if (!ditto && (!firstGroups.size || !secondGroups.size || ![...firstGroups].some((group) => secondGroups.has(group)))) {
+    return { ok: false, reason: 'Hai Pokémon không có Egg Group tương thích.' }
+  }
+  if (!ditto && (first.gender === 'unknown' || second.gender === 'unknown')) {
+    return { ok: false, reason: 'Pokémon vô giới tính cần ghép với Ditto.' }
+  }
+  if (!ditto && first.gender === second.gender) {
+    return { ok: false, reason: 'Hai Pokémon cùng giới tính không thể tạo trứng.' }
   }
   return { ok: true, reason: 'Tương thích.' }
 }
@@ -50,12 +62,25 @@ export function breedingCompatibility(first, second) {
 export function createEgg(first, second, trainerId, storyDate) {
   const compatibility = breedingCompatibility(first, second)
   if (!compatibility.ok) throw new Error(compatibility.reason)
-  const child = String(first.name).toLowerCase() === 'ditto' ? second : first
+  const firstIsDitto = String(first.species ?? first.name).toLowerCase() === 'ditto'
+  const secondIsDitto = String(second.species ?? second.name).toLowerCase() === 'ditto'
+  const child = firstIsDitto ? second : secondIsDitto ? first : first.gender === 'female' ? first : second
+  const childSpecies = String(child.eggSpecies ?? child.species ?? child.name)
+  const manaphyEgg = childSpecies.toLowerCase().replace(/[^a-z0-9]/g, '') === 'manaphy'
+  const inheritedIvs = {}
+  const statKeys = ['hp', 'atk', 'def', 'spa', 'spd', 'spe']
+  for (const stat of statKeys.sort(() => Math.random() - 0.5).slice(0, 3)) {
+    const source = Math.random() < 0.5 ? first : second
+    const inherited = Number(source.ivs?.[stat])
+    if (Number.isFinite(inherited)) inheritedIvs[stat] = inherited
+  }
   return {
     id: createStableId('egg'),
     eggCode: `EG-${String(createStableId('e')).slice(-8).toUpperCase()}`,
-    species: child.species ?? child.name,
-    speciesName: child.name,
+    species: manaphyEgg ? 'phione' : childSpecies,
+    speciesName: manaphyEgg ? 'Phione' : (child.eggSpeciesName ?? child.name),
+    inheritedIvs,
+    inheritedNature: Math.random() < 0.5 ? first.nature : second.nature,
     parentIds: [first.uid, second.uid],
     ownerTrainerId: trainerId,
     createdDate: storyDate ? { ...storyDate } : null,
@@ -65,9 +90,14 @@ export function createEgg(first, second, trainerId, storyDate) {
   }
 }
 
-export function careForEgg(egg) {
+export function careForEgg(egg, storyDate = null) {
+  const sameDay = storyDate && egg.lastCareDate
+    && storyDate.day === egg.lastCareDate.day
+    && storyDate.month === egg.lastCareDate.month
+    && storyDate.year === egg.lastCareDate.year
+  if (sameDay) throw new Error('Trứng đã được chăm sóc trong ngày này; hãy để thời gian chính văn trôi tiếp.')
   const care = Math.min(egg.neededCare ?? 4, (egg.care ?? 0) + 1)
-  return { ...egg, care, status: care >= (egg.neededCare ?? 4) ? 'ready' : 'incubating' }
+  return { ...egg, care, lastCareDate: storyDate ? { ...storyDate } : egg.lastCareDate, status: care >= (egg.neededCare ?? 4) ? 'ready' : 'incubating' }
 }
 
 export function campWithPokemon(mon, storyDate) {

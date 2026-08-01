@@ -1,5 +1,6 @@
-import { createStableId, ensurePokemonIdentity } from './persistentIdentity.js'
+import { createStableId, ensurePokemonIdentity, publicTrainerCode } from './persistentIdentity.js'
 import { modeAllowsTrading } from './gameModes.js'
+import { evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements } from './pokemonSpecies.js'
 
 export const DEFAULT_TRADE_STATE = { escrow: [], claimedTransfers: [], receipts: [] }
 
@@ -22,11 +23,15 @@ export function makeTradeOffer(mon, senderTrainerId, recipientTrainerCode, mode,
   if (!modeAllowsTrading(mode, adminOverride)) throw new Error('Trao đổi chỉ hoạt động trong chế độ Thực tế (hoặc phiên Admin).')
   if (!mon?.uid || !senderTrainerId) throw new Error('Thiếu mã cố định của người gửi hoặc Pokémon.')
   if (mon.currentTrainerId && mon.currentTrainerId !== senderTrainerId) throw new Error('Trainer này không phải chủ sở hữu hiện tại của cá thể.')
+  const normalizedRecipient = String(recipientTrainerCode ?? '').trim().toUpperCase()
+  if (normalizedRecipient && !/^TR-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(normalizedRecipient)) {
+    throw new Error('Mã người nhận phải có dạng TR-XXXX-XXXX, hoặc để trống cho đề nghị công khai.')
+  }
   const payload = {
     version: 1,
     transferId: createStableId('trade'),
     senderTrainerId,
-    recipientTrainerCode: String(recipientTrainerCode ?? '').trim().toUpperCase() || null,
+    recipientTrainerCode: normalizedRecipient || null,
     pokemon: ensurePokemonIdentity(mon, senderTrainerId),
     createdAt: new Date().toISOString(),
   }
@@ -73,11 +78,41 @@ export function acceptTradePacket(packet, receiverTrainerId, receiverTrainerCode
   }
 }
 
+function speciesKey(value) {
+  return String(value ?? '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '')
+}
+
+/** Tiến hoá ngay các nhánh trade tiêu chuẩn sau khi quyền sở hữu đã đổi. */
+export function evolveReceivedTradePokemon(mon, pokedexSpecies, movesDb = null) {
+  if (!mon?.tradeHistory?.length) return { pokemon: mon, evolved: false }
+  const source = (pokedexSpecies ?? []).find((entry) =>
+    [entry.name, entry.species, entry.baseSpeciesId].some((value) => speciesKey(value) === speciesKey(mon.species ?? mon.name)),
+  )
+  if (!source) return { pokemon: mon, evolved: false }
+  const candidates = (pokedexSpecies ?? []).filter((entry) =>
+    /trade/i.test(String(entry.evoType ?? '')) && isDirectEvolution(source, entry),
+  )
+  for (const target of candidates) {
+    const check = validateEvolutionRequirements(mon, source, target, {
+      mode: 'realistic', adminMode: false, inventory: [], storyText: '',
+    })
+    if (check.ok) return { pokemon: evolveOwnedMon(mon, target, movesDb), evolved: true, from: mon.name, to: target.name }
+  }
+  return { pokemon: mon, evolved: false }
+}
+
 export function verifyReceipt(text, offer) {
   let receipt
   try { receipt = JSON.parse(String(text ?? '').trim()) } catch { throw new Error('Biên nhận không phải JSON hợp lệ.') }
   const { checksum: provided, ...payload } = receipt ?? {}
   if (!provided || checksum(JSON.stringify(payload)) !== provided) throw new Error('Biên nhận đã bị sửa.')
-  if (payload.transferId !== offer.transferId || payload.pokemonUid !== offer.pokemon.uid) throw new Error('Biên nhận không khớp đề nghị này.')
+  if (payload.version !== 1 || !payload.receiverTrainerId
+    || payload.transferId !== offer.transferId || payload.pokemonUid !== offer.pokemon.uid) {
+    throw new Error('Biên nhận không khớp đề nghị này.')
+  }
+  if (offer.recipientTrainerCode && publicTrainerCode(payload.receiverTrainerId) !== offer.recipientTrainerCode) {
+    throw new Error('Biên nhận không đến từ trainer được chỉ định trong đề nghị.')
+  }
   return receipt
 }

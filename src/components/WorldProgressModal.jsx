@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { getNotebook, subscribeNotebook } from '../utils/storyNotebook.js'
-import { getGameMode } from '../data/gameModes.js'
+import { getGameMode, normalizeGameMode } from '../data/gameModes.js'
 
 const statusLabel = { active: 'Đang làm', completed: 'Hoàn thành', failed: 'Thất bại', paused: 'Tạm dừng' }
 
@@ -9,6 +9,7 @@ export default function WorldProgressModal({ onClose }) {
   const { worldProgress, setWorldProgress, storyTone, trainerCode } = useGame()
   const [tab, setTab] = useState('quests')
   const [notebook, setNotebook] = useState(() => getNotebook())
+  const realistic = normalizeGameMode(storyTone) === 'realistic'
   useEffect(() => subscribeNotebook(() => setNotebook(getNotebook())), [])
   const tabs = [['quests', 'Nhiệm vụ'], ['badges', 'Huy hiệu'], ['factions', 'Phe phái'], ['law', 'Pháp luật'], ['npcs', 'NPC']]
 
@@ -35,7 +36,7 @@ export default function WorldProgressModal({ onClose }) {
                   {quest.objective && <div>Mục tiêu: {quest.objective}</div>}
                   {quest.giver && <div>Người giao: {quest.giver}</div>}
                   {quest.reward && <div>Phần thưởng dự kiến: {quest.reward}</div>}
-                  <select value={quest.status} onChange={(event) => setWorldProgress((cur) => ({ ...cur, quests: cur.quests.map((item) => item.id === quest.id ? { ...item, status: event.target.value } : item) }))} style={{ marginTop: 8 }}>
+                  <select disabled={realistic} title={realistic ? 'Chế độ Thực tế chỉ cập nhật nhiệm vụ từ diễn biến chính văn.' : 'Sandbox cho phép chỉnh thủ công.'} value={quest.status} onChange={(event) => setWorldProgress((cur) => ({ ...cur, quests: cur.quests.map((item) => item.id === quest.id ? { ...item, status: event.target.value } : item) }))} style={{ marginTop: 8 }}>
                     {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </Card>

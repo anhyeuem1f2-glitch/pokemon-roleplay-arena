@@ -26,6 +26,19 @@ function storedGameMode() {
   try { return normalizeGameMode(JSON.parse(localStorage.getItem('trainer-arena:story-tone') || '{}')) } catch { return 'anime' }
 }
 
+function dedupePokemonRecords(list) {
+  const seenUids = new Set()
+  const seenSources = new Set()
+  return (Array.isArray(list) ? list : []).filter((mon) => {
+    const uid = mon?.uid || null
+    const source = mon?.acquisitionSourceId || null
+    if ((uid && seenUids.has(uid)) || (source && seenSources.has(source))) return false
+    if (uid) seenUids.add(uid)
+    if (source) seenSources.add(source)
+    return true
+  })
+}
+
 export function GameProvider({ children }) {
   // Admin Mode chỉ sống trong SESSION hiện tại: không chèn vào save, không
   // theo người chơi sang máy khác và không có URL/query công khai để bật.
@@ -224,7 +237,8 @@ export function GameProvider({ children }) {
       // pokemonSpecies.js — bất kỳ luồng nào ghi đè con đang ra trận bằng một
       // bản chụp CŨ HƠN (API phụ chạy nền, callback giữ closure cũ...) đều bị
       // giữ lại mốc level/exp cao hơn thay vì để người chơi mất công sức.
-      const resolved = ensurePokemonIdentity(guardMonRegression(cur, raw), trainerId)
+      const guarded = guardMonRegression(cur, raw)
+      const resolved = ensurePokemonIdentity(guarded, guarded?.currentTrainerId ?? trainerId)
       try { localStorage.setItem('trainer-arena:player-mon', JSON.stringify(resolved ?? null)) } catch { /* ignore */ }
       return resolved
     })
@@ -351,8 +365,15 @@ export function GameProvider({ children }) {
     return { player: 100, mon: 100 }
   })
   const setHunger = useCallback((next) => {
-    setHungerState(next)
-    try { localStorage.setItem('trainer-arena:hunger', JSON.stringify(next)) } catch { /* ignore */ }
+    setHungerState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      const normalized = {
+        player: Math.max(0, Math.min(100, Number(resolved?.player) || 0)),
+        mon: Math.max(0, Math.min(100, Number(resolved?.mon) || 0)),
+      }
+      try { localStorage.setItem('trainer-arena:hunger', JSON.stringify(normalized)) } catch { /* ignore */ }
+      return normalized
+    })
   }, [])
   const adjustHunger = useCallback((deltas) => {
     setHungerState((cur) => {
@@ -505,7 +526,7 @@ export function GameProvider({ children }) {
   const [party, setPartyState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:party')
-      return saved ? JSON.parse(saved).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
+      return saved ? dedupePokemonRecords(JSON.parse(saved)).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
     } catch {
       return []
     }
@@ -514,11 +535,11 @@ export function GameProvider({ children }) {
   // setter persist đều phải an toàn với cả 2 dạng gọi).
   const setParty = useCallback((next) => {
     setPartyState((cur) => {
-      const raw = (typeof next === 'function' ? next(cur) : next).slice(0, 6)
+      const raw = dedupePokemonRecords(typeof next === 'function' ? next(cur) : next).slice(0, 6)
       // Đợt 70: cùng chốt chặn tụt cấp như setPlayerMon, áp cho từng cá thể
       // trong đội (khớp theo uid). Người chơi báo HUD tụt về Lv5 — đội hình
       // cũng nằm trên đường ghi đè đó.
-      const resolved = guardPartyRegression(cur, raw).map((mon) => ensurePokemonIdentity(mon, trainerId))
+      const resolved = guardPartyRegression(cur, raw).map((mon) => ensurePokemonIdentity(mon, mon?.currentTrainerId ?? trainerId))
       try { localStorage.setItem('trainer-arena:party', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
@@ -531,18 +552,35 @@ export function GameProvider({ children }) {
   const [pcBox, setPcBoxState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:pc-box')
-      return saved ? JSON.parse(saved).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
+      return saved ? dedupePokemonRecords(JSON.parse(saved)).map((mon) => ensurePokemonIdentity(mon, trainerId)) : []
     } catch {
       return []
     }
   })
   const setPcBox = useCallback((next) => {
     setPcBoxState((cur) => {
-      const resolved = (typeof next === 'function' ? next(cur) : next).map((mon) => ensurePokemonIdentity(mon, trainerId))
+      const resolved = dedupePokemonRecords(typeof next === 'function' ? next(cur) : next)
+        .map((mon) => ensurePokemonIdentity(mon, mon?.currentTrainerId ?? trainerId))
       try { localStorage.setItem('trainer-arena:pc-box', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })
   }, [trainerId])
+
+  // Party và PC là hai kho sở hữu khác nhau. Save lỗi cũ hoặc hai callback
+  // gần nhau có thể từng ghi cùng một cá thể vào cả hai khóa localStorage;
+  // dedupe riêng từng mảng không bắt được trường hợp chéo này. Party là nguồn
+  // ưu tiên, PC tự bỏ bản sao theo uid hoặc sourceMessage ổn định.
+  useEffect(() => {
+    const partyUids = new Set((party ?? []).map((mon) => mon?.uid).filter(Boolean))
+    const partySources = new Set((party ?? []).map((mon) => mon?.acquisitionSourceId).filter(Boolean))
+    setPcBox((cur) => {
+      const filtered = (cur ?? []).filter((mon) =>
+        !(mon?.uid && partyUids.has(mon.uid))
+        && !(mon?.acquisitionSourceId && partySources.has(mon.acquisitionSourceId)),
+      )
+      return filtered.length === (cur ?? []).length ? cur : filtered
+    })
+  }, [party, setPcBox])
 
   // --- Tiến trình thế giới có cấu trúc (đợt 87): huy hiệu, nhiệm vụ, phe
   // phái/danh tiếng, luật pháp và truy nã. ---
@@ -584,7 +622,14 @@ export function GameProvider({ children }) {
 
   /** Hồi phục TOÀN ĐỘI về đầy máu + sạch trạng thái (Trung tâm Pokémon). */
   const healAll = useCallback(() => {
-    const heal = (m) => (m ? { ...m, hp: m.maxHp, status: null, sleepTurns: undefined } : m)
+    const heal = (m) => (m ? {
+      ...m,
+      hp: m.maxHp,
+      status: null,
+      sleepTurns: undefined,
+      toxicCounter: undefined,
+      moves: (m.moves ?? []).map((move) => ({ ...move, currentPp: Math.max(1, Number(move.maxPp ?? move.pp) || 35) })),
+    } : m)
     setPlayerMon((m) => heal(m))
     setParty((cur) => (cur ?? []).map(heal))
   }, [setPlayerMon, setParty])

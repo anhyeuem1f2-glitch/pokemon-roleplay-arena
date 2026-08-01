@@ -82,17 +82,17 @@ const FAMILIES = {
     { base: 'Đinh giày băng', price: 1300, cat: 'climbing', variants: ['10 mấu', '12 mấu'], desc: 'Gắn vào giày đi băng.' },
   ],
   grocery: [
-    { base: 'Gạo', price: 90, cat: 'grocery', variants: ['1kg', '5kg'], desc: 'Gạo địa phương.' },
-    { base: 'Mì gói', price: 25, cat: 'grocery', variants: ['bò', 'gà', 'chay'], desc: 'Cứu đói kinh điển.' },
-    { base: 'Đồ hộp', price: 85, cat: 'grocery', variants: ['cá', 'thịt hầm', 'đậu'], desc: 'Để được lâu.' },
-    { base: 'Bánh mì', price: 40, cat: 'grocery', variants: ['ổ thường', 'nguyên cám'], desc: 'Ra lò buổi sáng.' },
-    { base: 'Trứng', price: 70, cat: 'grocery', variants: ['vỉ 6', 'vỉ 10'], desc: 'Trứng trại địa phương.' },
-    { base: 'Berry tươi', price: 110, cat: 'grocery', variants: ['Oran', 'Sitrus', 'Pecha', 'Cheri'], desc: 'Người ăn được, Pokémon càng thích.' },
-    { base: 'Trà gói', price: 95, cat: 'grocery', variants: ['xanh', 'đen', 'hoa cúc'], desc: 'Ấm bụng buổi tối.' },
-    { base: 'Sữa Miltank', price: 130, cat: 'grocery', variants: ['tươi', 'tiệt trùng'], desc: 'Nguồn Johto chính hiệu.' },
+    { base: 'Gạo', price: 90, cat: 'grocery', variants: ['1kg', '5kg'], hungerPlayer: 25, desc: 'Một khẩu phần đã nấu từ gạo địa phương.' },
+    { base: 'Mì gói', price: 25, cat: 'grocery', variants: ['bò', 'gà', 'chay'], hungerPlayer: 15, desc: 'Cứu đói kinh điển.' },
+    { base: 'Đồ hộp', price: 85, cat: 'grocery', variants: ['cá', 'thịt hầm', 'đậu'], hungerPlayer: 18, desc: 'Để được lâu.' },
+    { base: 'Bánh mì', price: 40, cat: 'grocery', variants: ['ổ thường', 'nguyên cám'], hungerPlayer: 12, desc: 'Ra lò buổi sáng.' },
+    { base: 'Trứng', price: 70, cat: 'grocery', variants: ['vỉ 6', 'vỉ 10'], hungerPlayer: 16, desc: 'Một khẩu phần trứng trại địa phương.' },
+    { base: 'Berry tươi', price: 110, cat: 'grocery', variants: ['Oran', 'Sitrus', 'Pecha', 'Cheri'], hungerPlayer: 8, desc: 'Người ăn được, Pokémon càng thích.' },
+    { base: 'Trà gói', price: 95, cat: 'grocery', variants: ['xanh', 'đen', 'hoa cúc'], hungerPlayer: 5, desc: 'Ấm bụng buổi tối.' },
+    { base: 'Sữa Miltank', price: 130, cat: 'grocery', variants: ['tươi', 'tiệt trùng'], hungerPlayer: 10, desc: 'Nguồn Johto chính hiệu.' },
     { base: 'Muối - gia vị', price: 45, cat: 'grocery', variants: ['muối', 'tiêu', 'bột nêm'], desc: 'Bếp dã ngoại cần đủ vị.' },
-    { base: 'Thức ăn Pokémon', price: 120, cat: 'pokefood', variants: ['túi thường', 'túi lớn', 'cao cấp'], desc: 'Khẩu phần cân bằng.' },
-    { base: 'Snack Pokémon', price: 55, cat: 'pokefood', variants: ['giòn', 'mềm'], desc: 'Thưởng khi ngoan.' },
+    { base: 'Thức ăn Pokémon', price: 120, cat: 'pokefood', variants: ['túi thường', 'túi lớn', 'cao cấp'], hungerMon: 30, desc: 'Khẩu phần cân bằng.' },
+    { base: 'Snack Pokémon', price: 55, cat: 'pokefood', variants: ['giòn', 'mềm'], hungerMon: 10, friendship: 1, desc: 'Thưởng khi ngoan.' },
   ],
   daily: [
     { base: 'Xà phòng', price: 35, cat: 'daily', variants: ['bánh', 'nước'], desc: 'Sạch bụi đường.' },
@@ -101,7 +101,7 @@ const FAMILIES = {
     { base: 'Pin tiểu', price: 80, cat: 'daily', variants: ['AA vỉ 4', 'AAA vỉ 4'], desc: 'Cho đèn và radio.' },
     { base: 'Hộp diêm - bật lửa', price: 30, cat: 'daily', variants: ['diêm', 'bật lửa'], desc: 'Lửa là sự sống.' },
     { base: 'Kim chỉ', price: 25, cat: 'daily', desc: 'Vá đồ giữa đường.' },
-    { base: 'Túi sơ cứu (người)', price: 380, cat: 'daily', desc: 'Băng gạc, thuốc đỏ — cho NGƯỜI.' },
+    { base: 'Túi sơ cứu (người)', price: 380, cat: 'human', humanHeal: 18, desc: 'Băng gạc, thuốc đỏ — giảm 18 thương tích một bộ phận.' },
     { base: 'Ô gấp', price: 160, cat: 'daily', variants: ['đen', 'xanh', 'chấm bi'], desc: 'Gọn trong balo.' },
   ],
 }
@@ -120,6 +120,80 @@ export const GENERATED_CATEGORY_LABELS = {
   climbing: 'Đồ leo núi',
   grocery: 'Thực phẩm & tạp hoá',
   daily: 'Đồ dùng sinh hoạt',
+}
+
+const LOOT_POOLS = {
+  treasure: [
+    { id: 'loot-rough-ruby', name: 'Hồng ngọc thô', price: 2400, category: 'treasure', desc: 'Đá quý thô có thể giám định hoặc bán lại.' },
+    { id: 'loot-sapphire', name: 'Lam ngọc', price: 2600, category: 'treasure', desc: 'Viên đá xanh có giá trị, chưa có giấy giám định.' },
+    { id: 'loot-pearl', name: 'Ngọc trai', price: 1400, category: 'treasure', desc: 'Ngọc trai tự nhiên dùng làm trang sức.' },
+    { id: 'loot-big-pearl', name: 'Ngọc trai lớn', price: 4000, category: 'treasure', desc: 'Ngọc trai lớn hiếm gặp, giá trị cao.' },
+    { id: 'loot-stardust', name: 'Stardust', price: 1000, category: 'treasure', desc: 'Bột đỏ lấp lánh được giới sưu tầm ưa chuộng.' },
+    { id: 'loot-star-piece', name: 'Star Piece', price: 6000, category: 'treasure', desc: 'Mảnh tinh thể đỏ quý hiếm có giá trị sưu tầm.' },
+    { id: 'loot-nugget', name: 'Nugget', price: 5000, category: 'treasure', desc: 'Khối vàng nguyên chất có thể bán với giá cao.' },
+  ],
+  medicine: [
+    { id: 'potion', name: 'Potion', category: 'heal', desc: 'Hồi 20 HP cho Pokémon.' },
+    { id: 'superpotion', name: 'Super Potion', category: 'heal', desc: 'Hồi 60 HP cho Pokémon.' },
+    { id: 'antidote', name: 'Antidote', category: 'status', desc: 'Chữa trúng độc.' },
+    { id: 'paralyzeheal', name: 'Paralyze Heal', category: 'status', desc: 'Chữa tê liệt.' },
+    { id: 'bandage', name: 'Băng gạc', category: 'human', humanHeal: 10, desc: 'Sơ cứu vết thương nhẹ cho người.' },
+  ],
+  trainer: [
+    { id: 'pokeball', name: 'Poké Ball', category: 'ball', desc: 'Bóng bắt Pokémon cơ bản.' },
+    { id: 'greatball', name: 'Great Ball', category: 'ball', desc: 'Bóng bắt Pokémon cải tiến.' },
+    { id: 'repel', name: 'Repel', category: 'misc', desc: 'Xua Pokémon hoang dã yếu trong một thời gian.' },
+    { id: 'escaperope', name: 'Escape Rope', category: 'misc', desc: 'Dùng để thoát nhanh khỏi hang động.' },
+  ],
+  food: [
+    { id: 'sandwich', name: 'Sandwich', category: 'food', hungerPlayer: 20, desc: 'Một phần ăn nhanh cho người.' },
+    { id: 'driedration', name: 'Lương khô dã ngoại', category: 'food', hungerPlayer: 30, desc: 'Khẩu phần để được lâu.' },
+    { id: 'pokefood', name: 'Thức ăn Pokémon (túi)', category: 'pokefood', hungerMon: 30, desc: 'Khẩu phần tiêu chuẩn cho Pokémon.' },
+    { id: 'pokepuff', name: 'Poké Puff', category: 'pokefood', hungerMon: 10, friendship: 1, desc: 'Bánh ngọt cho Pokémon.' },
+  ],
+  technology: [
+    { id: 'loot-data-drive', name: 'Ổ dữ liệu mã hoá', price: 1800, category: 'daily', desc: 'Thiết bị lưu trữ; nội dung cần được giải mã trong chính văn.' },
+    { id: 'loot-circuit-board', name: 'Bo mạch Silph', price: 900, category: 'daily', desc: 'Linh kiện điện tử còn dùng được.' },
+    { id: 'loot-lab-notes', name: 'Tập ghi chép phòng thí nghiệm', price: 0, category: 'special', desc: 'Tài liệu cốt truyện; nội dung do chính văn xác lập.' },
+    { id: 'flashlight', name: 'Đèn pin', category: 'daily', desc: 'Đèn cầm tay dùng khi thám hiểm.' },
+  ],
+  clothing: [
+    { id: 'loot-travel-coat', name: 'Áo khoác du hành', price: 500, category: 'clothes', desc: 'Áo khoác bền dùng khi đi đường.' },
+    { id: 'loot-leather-gloves', name: 'Găng tay da', price: 220, category: 'clothes', desc: 'Găng tay bảo vệ tay khi làm việc.' },
+    { id: 'raincoat', name: 'Áo mưa', category: 'daily', desc: 'Áo mưa gọn nhẹ.' },
+  ],
+}
+
+function detectLootType(raw) {
+  // Model thường viết giá trị tag dạng snake_case (đá_quý, công_nghệ).
+  // Chuẩn hoá dấu phân cách trước khi dò để chúng không rơi nhầm vào pool tổng hợp.
+  const type = String(raw ?? '').toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/đá\s*quý|da\s*quy|ngọc|jewel|gem|kho\s*báu|treasure/.test(type)) return 'treasure'
+  if (/thuốc|y\s*tế|medical|pharmacy|bệnh\s*viện/.test(type)) return 'medicine'
+  if (/trainer|pok[eé]|bóng|ball/.test(type)) return 'trainer'
+  if (/thực\s*phẩm|đồ\s*ăn|food|grocery|nhà\s*bếp/.test(type)) return 'food'
+  if (/công\s*nghệ|điện\s*tử|tech|lab|phòng\s*thí\s*nghiệm/.test(type)) return 'technology'
+  if (/quần\s*áo|thời\s*trang|clothes|kho\s*vải/.test(type)) return 'clothing'
+  return 'general'
+}
+
+/** Sinh chiến lợi phẩm nhỏ gọn, deterministic theo nguồn sự kiện để callback lặp không reroll. */
+export function generateLootItems(loot = {}, sourceSeed = '') {
+  const type = detectLootType(loot.type)
+  const rng = mulberry32(hashStr(`loot|${sourceSeed}|${loot.type ?? ''}|${loot.size ?? ''}`))
+  const size = String(loot.size ?? '').toLowerCase()
+  const count = /lớn|lon|large|to/.test(size) ? 5 : /nhỏ|nho|small|ít|it/.test(size) ? 2 : 3
+  const scale = /lớn|lon|large|to/.test(size) ? 3 : /nhỏ|nho|small|ít|it/.test(size) ? 1 : 2
+  const general = [...LOOT_POOLS.food, ...LOOT_POOLS.medicine, ...LOOT_POOLS.trainer, ...LOOT_POOLS.technology, ...LOOT_POOLS.clothing]
+  const pool = [...(LOOT_POOLS[type] ?? general)]
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1))
+    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+  }
+  return pool.slice(0, Math.min(count, pool.length)).map((item) => ({
+    ...item,
+    qty: Math.max(1, 1 + Math.floor(rng() * scale)),
+  }))
 }
 
 /** Suy LOẠI cửa hàng từ chuỗi loại AI khai (từ khoá VN/EN, mặc định general). */
@@ -153,6 +227,7 @@ export function generateShopItems(shop) {
   if (type === 'trainer') return SHOP_ITEMS.filter((it) => !it.noShop)
 
   const rng = mulberry32(hashStr(shop?.name ?? 'shop'))
+  const shopKey = hashStr(`${shop?.name ?? 'shop'}|${shop?.type ?? ''}|${shop?.size ?? ''}`).toString(36)
   const target = countForSize(shop?.size, rng)
   const famKeys = TYPE_FAMILIES[type] ?? TYPE_FAMILIES.general
   const families = famKeys.flatMap((k) => FAMILIES[k])
@@ -180,10 +255,16 @@ export function generateShopItems(shop) {
     const price = Math.max(10, Math.round((c.fam.price * c.brand.tier * jitter) / 5) * 5)
     const parts = [c.v, c.sz].filter(Boolean).join(', ')
     items.push({
-      id: `gen-${items.length}`,
+      // ID phải ổn định nhưng có namespace theo cửa hàng. `gen-0` cũ làm hai
+      // món hoàn toàn khác ở hai shop bị gộp chung một slot trong túi.
+      id: `gen-${shopKey}-${items.length}`,
       name: `${c.brand.name} ${c.fam.base}${parts ? ` (${parts})` : ''}`,
       price,
       category: c.fam.cat,
+      hungerPlayer: c.fam.hungerPlayer ?? null,
+      hungerMon: c.fam.hungerMon ?? null,
+      friendship: c.fam.friendship ?? 0,
+      humanHeal: c.fam.humanHeal ?? null,
       desc: `${c.fam.desc} — ${c.brand.blurb}.`,
     })
   }

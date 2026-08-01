@@ -18,7 +18,7 @@ function firstSeenLabel(record) {
 }
 
 export default function PokedexModal({ onClose }) {
-  const { pokedexRecords, pokedexSpecies, pokedexStatus } = useGame()
+  const { pokedexRecords, pokedexSpecies, pokedexStatus, pokedexError } = useGame()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [page, setPage] = useState(0)
@@ -96,6 +96,11 @@ export default function PokedexModal({ onClose }) {
         <div style={{ padding: 16 }}>
           {pokedexStatus === 'loading' && (
             <div style={{ color: 'var(--text-dim)', fontSize: 11, marginBottom: 10 }}>Đang tải dữ liệu National Pokédex; tiến độ đã ghi vẫn được giữ nguyên.</div>
+          )}
+          {pokedexStatus === 'error' && (
+            <div style={{ color: 'var(--coral)', fontSize: 11, marginBottom: 10 }}>
+              Không tải được National Pokédex ({pokedexError || 'lỗi mạng'}). Game đang dùng dữ liệu Gen 1 dự phòng; Pokémon/vùng đời sau sẽ hoạt động đầy đủ khi tải lại thành công.
+            </div>
           )}
           {!visible.length ? (
             <div style={{ padding: '34px 10px', textAlign: 'center', color: 'var(--text-dim)', lineHeight: 1.7 }}>

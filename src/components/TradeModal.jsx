@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
-import { acceptTradePacket, decodeTradePacket, encodeTradePacket, makeTradeOffer, verifyReceipt } from '../data/trading.js'
+import { acceptTradePacket, decodeTradePacket, encodeTradePacket, evolveReceivedTradePokemon, makeTradeOffer, verifyReceipt } from '../data/trading.js'
 import { modeAllowsTrading } from '../data/gameModes.js'
 
 export default function TradeModal({ onClose }) {
-  const { adminMode, storyTone, trainerId, trainerCode, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, tradeState, setTradeState } = useGame()
-  const owned = useMemo(() => [...party, ...pcBox].filter((mon, index, all) => all.findIndex((x) => x.uid === mon.uid) === index), [party, pcBox])
+  const { adminMode, storyTone, trainerId, trainerCode, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, tradeState, setTradeState, pokedexSpecies, movesDb } = useGame()
+  const owned = useMemo(() => [...party, ...pcBox, playerMon].filter(Boolean).filter((mon, index, all) => all.findIndex((x) => (x.uid ?? x.pokemonId) === (mon.uid ?? mon.pokemonId)) === index), [party, pcBox, playerMon])
   const [selectedId, setSelectedId] = useState(owned[0]?.uid ?? '')
   const [recipientCode, setRecipientCode] = useState('')
   const [packetText, setPacketText] = useState('')
@@ -31,13 +31,15 @@ export default function TradeModal({ onClose }) {
     try {
       const packet = decodeTradePacket(packetText)
       const result = acceptTradePacket(packet, trainerId, trainerCode, tradeState, owned, storyTone, adminMode)
+      const evolution = evolveReceivedTradePokemon(result.pokemon, pokedexSpecies, movesDb)
+      const received = evolution.pokemon
       if (party.length < 6) {
-        setParty((cur) => [...cur, result.pokemon])
-        setPlayerMon((cur) => cur ?? result.pokemon)
-      } else setPcBox((cur) => [...cur, result.pokemon])
+        setParty((cur) => [...cur, received])
+        setPlayerMon((cur) => cur ?? received)
+      } else setPcBox((cur) => [...cur, received])
       setTradeState(result.tradeState)
       setReceiptText(JSON.stringify(result.receipt))
-      setNotice(`Đã nhận ${result.pokemon.name} · ${result.pokemon.pokemonId}. Gửi biên nhận lại cho người gửi.`)
+      setNotice(`Đã nhận ${received.name} · ${received.pokemonId}.${evolution.evolved ? ` ${evolution.from} đã tiến hoá thành ${evolution.to} qua trao đổi.` : ''} Gửi biên nhận lại cho người gửi.`)
     } catch (error) { setNotice(error.message) }
   }
 
@@ -49,13 +51,33 @@ export default function TradeModal({ onClose }) {
     } catch (error) { setNotice(error.message) }
   }
 
+  function cancelOffer(offer) {
+    if (!offer?.pokemon) return
+    const alreadyOwned = owned.some((mon) => mon.uid === offer.pokemon.uid)
+    if (alreadyOwned) {
+      setTradeState((cur) => ({ ...cur, escrow: cur.escrow.filter((item) => item.transferId !== offer.transferId) }))
+      setNotice('Đã dọn đề nghị lỗi; Pokémon vốn đã có trong save này.')
+      return
+    }
+    // Không có máy chủ nên không thể biết một bản sao gói đã được nhập ở máy
+    // khác hay chưa. Người gửi phải chỉ hủy khi chắc chắn bên nhận chưa nhận.
+    if (!window.confirm(`Chỉ hủy nếu người nhận CHƯA nhập gói. Khôi phục ${offer.pokemon.name} về save này?`)) return
+    const restored = { ...offer.pokemon, currentTrainerId: trainerId }
+    if (party.length < 6) {
+      setParty((cur) => [...cur, restored])
+      setPlayerMon((cur) => cur ?? restored)
+    } else setPcBox((cur) => [...cur, restored])
+    setTradeState((cur) => ({ ...cur, escrow: cur.escrow.filter((item) => item.transferId !== offer.transferId) }))
+    setNotice(`Đã hủy đề nghị và khôi phục ${restored.name}${party.length < 6 ? ' vào đội' : ' vào PC'}.`)
+  }
+
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 98, padding: 16, display: 'grid', placeItems: 'center', background: 'rgba(2,7,11,.85)', backdropFilter: 'blur(8px)' }}>
       <div onClick={(event) => event.stopPropagation()} className="panel" style={{ width: 'min(860px,97vw)', maxHeight: '93vh', overflowY: 'auto', borderRadius: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><div style={{ color: 'var(--amber)', fontSize: 10, fontWeight: 800 }}>MULTIPLAYER THỬ NGHIỆM</div><h2 className="page-title" style={{ margin: 0 }}>Trao đổi Pokémon</h2></div><button className="btn" onClick={onClose}>✕ Đóng</button></div>
         {!allowed ? <div style={{ marginTop: 16, padding: 14, border: '1px solid var(--amber)', borderRadius: 10 }}>Tính năng bị khoá: chỉ chế độ Thực tế mới được chuyển quyền sở hữu Pokémon.</div> : <>
           {adminMode && modeAllowsTrading(storyTone) === false && <div style={{ marginTop: 10, color: 'var(--amber)', fontSize: 11 }}>Admin override: đang kiểm thử trao đổi ngoài chế độ Thực tế.</div>}
-          <div style={{ marginTop: 12, padding: 10, border: '1px solid var(--line)', borderRadius: 9, color: 'var(--text-mid)', fontSize: 11.5 }}>Mã trainer công khai: <b style={{ color: 'var(--mint)', fontFamily: 'var(--font-mono)' }}>{trainerCode}</b>. Đây là thử nghiệm ngang hàng bằng gói JSON; muốn chống sao chép tuyệt đối cần máy chủ trung tâm.</div>
+          <div style={{ marginTop: 12, padding: 10, border: '1px solid var(--line)', borderRadius: 9, color: 'var(--text-mid)', fontSize: 11.5 }}>Mã trainer công khai: <b style={{ color: 'var(--mint)', fontFamily: 'var(--font-mono)' }}>{trainerCode}</b>. Đây là thử nghiệm ngang hàng bằng gói JSON: checksum phát hiện sửa nhầm, nhưng không thể chống sao chép/gian lận tuyệt đối nếu chưa có máy chủ trung tâm.</div>
           {notice && <div style={{ marginTop: 10, color: 'var(--amber)' }}>{notice}</div>}
           <Panel title="1. Tạo đề nghị gửi">
             <select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">— Pokémon —</option>{owned.map((mon) => <option key={mon.uid} value={mon.uid}>{mon.name} · {mon.pokemonId}</option>)}</select>
@@ -68,7 +90,7 @@ export default function TradeModal({ onClose }) {
           </Panel>
           <Panel title="3. Biên nhận">
             <textarea value={receiptText} onChange={(event) => setReceiptText(event.target.value)} placeholder="Người nhận gửi chuỗi biên nhận này lại cho người gửi…" style={{ width: '100%', minHeight: 90 }} />
-            {tradeState.escrow.map((offer) => <div key={offer.transferId} style={{ marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 8 }}><span>{offer.pokemon.name} · {offer.pokemon.pokemonId}</span><button className="btn" onClick={() => finalize(offer)} style={{ marginLeft: 8 }}>Xác nhận biên nhận</button><button className="btn" onClick={() => setPacketText(encodeTradePacket(offer))} style={{ marginLeft: 6 }}>Hiện lại gói</button></div>)}
+            {tradeState.escrow.map((offer) => <div key={offer.transferId} style={{ marginTop: 8, borderTop: '1px solid var(--line)', paddingTop: 8 }}><span>{offer.pokemon.name} · {offer.pokemon.pokemonId}</span><button className="btn" onClick={() => finalize(offer)} style={{ marginLeft: 8 }}>Xác nhận biên nhận</button><button className="btn" onClick={() => setPacketText(encodeTradePacket(offer))} style={{ marginLeft: 6 }}>Hiện lại gói</button><button className="btn" onClick={() => cancelOffer(offer)} style={{ marginLeft: 6, color: 'var(--coral)' }}>Hủy chưa nhận</button></div>)}
           </Panel>
         </>}
       </div>

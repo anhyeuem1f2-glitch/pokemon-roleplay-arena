@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { SHOP_ITEMS } from '../data/shopItems.js'
-import { buildMonSmart } from '../data/pokemonSpecies.js'
+import { buildWildMon, normalizeAcquiredMon } from '../data/pokemonSpecies.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 import { ADMIN_SHORTCUT_LABEL } from '../data/adminMode.js'
 import TradeModal from './TradeModal.jsx'
@@ -72,7 +72,8 @@ export default function AdminModal({ onClose, onOpenDev }) {
     )
     if (!entry) { setNotice(`Không tìm thấy loài “${speciesName}” trong Pokédex đã tải.`); return }
     const lv = Math.max(1, Math.min(200, Math.floor(Number(level) || 1)))
-    const mon = ensurePokemonIdentity({ ...buildMonSmart(entry, lv, movesDb), shiny }, trainerId)
+    // Admin là công cụ kiểm thử: tạo đúng level đã nhập, không áp trần boss hay sinh thái.
+    const mon = ensurePokemonIdentity({ ...normalizeAcquiredMon(buildWildMon(entry, lv, movesDb)), shiny }, trainerId)
     if (destination === 'pc' || party.length >= 6) {
       setPcBox((cur) => [...cur, mon])
       setNotice(`Đã tạo ${mon.name} Lv.${mon.level}${shiny ? ' Shiny' : ''} trong PC.`)
@@ -158,4 +159,3 @@ export default function AdminModal({ onClose, onOpenDev }) {
     </div>
   )
 }
-

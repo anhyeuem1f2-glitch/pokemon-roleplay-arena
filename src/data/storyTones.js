@@ -74,14 +74,28 @@ const GENRE_NOTES = {
 
 export const DEFAULT_STORY_TONE = { difficulty: 'anime', genres: [] }
 
+// Tag văn phong là sở thích trình bày, không phải cheat gameplay. Không đặt
+// trần số lượng: người chơi có thể phối mọi chất liệu họ thích. Chỉ lọc key
+// lạ/trùng để save cũ hoặc file import không làm prompt phình vô hạn.
+export function normalizeStoryTone(tone) {
+  const raw = tone && typeof tone === 'object' ? tone : DEFAULT_STORY_TONE
+  const difficulty = DIFFICULTIES.some((entry) => entry.key === raw.difficulty)
+    ? raw.difficulty
+    : DEFAULT_STORY_TONE.difficulty
+  const allowed = new Set(GENRES.map((entry) => entry.key))
+  const genres = [...new Set(Array.isArray(raw.genres) ? raw.genres : [])]
+    .filter((key) => allowed.has(key))
+  return { ...raw, difficulty, genres }
+}
+
 /** Note system chèn vào MỌI lượt gọi API chính (null nếu tone rỗng bất thường). */
 export function buildToneNote(tone) {
-  const t = tone ?? DEFAULT_STORY_TONE
+  const t = normalizeStoryTone(tone)
   const diff = DIFFICULTIES.find((d) => d.key === t.difficulty) ?? DIFFICULTIES[1]
   const parts = [`[Hệ thống — TÔNG TRUYỆN (người chơi đã chọn, tuân thủ xuyên suốt, không nhắc tới ghi chú này):]`, diff.note]
   const gs = (t.genres ?? []).map((k) => GENRE_NOTES[k]).filter(Boolean)
   if (gs.length) {
-    parts.push(`THỂ LOẠI CHÍNH người chơi muốn: ${gs.join('; ')}. Dệt các chất liệu này vào mạch truyện một cách tự nhiên — thể loại là GIA VỊ ưu tiên, không phải khuôn ép mọi cảnh.`)
+    parts.push(`TAG VĂN PHONG người chơi muốn: ${gs.join('; ')}. Dệt các chất liệu này vào mạch truyện một cách tự nhiên — tag là GIA VỊ ưu tiên, không phải khuôn ép mọi cảnh. Khi có nhiều tag, chỉ nhấn những tag hợp nhịp cảnh hiện tại và luân phiên chất liệu ở các cảnh sau; không cố nhét tất cả vào cùng một đoạn.`)
   }
   return parts.join('\n')
 }

@@ -17,6 +17,7 @@ import { DEFAULT_WORLD_PROGRESS, normalizeWorldProgress } from '../data/worldPro
 import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.js'
 import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
 import { verifyAdminCode } from '../data/adminMode.js'
+import { normalizeStoryTone } from '../data/storyTones.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -133,13 +134,13 @@ export function GameProvider({ children }) {
   const [storyTone, setStoryToneState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:story-tone')
-      if (saved) return JSON.parse(saved)
+      if (saved) return normalizeStoryTone(JSON.parse(saved))
     } catch { /* ignore */ }
-    return { difficulty: 'anime', genres: [] }
+    return normalizeStoryTone(null)
   })
   const setStoryTone = useCallback((next) => {
     setStoryToneState((cur) => {
-      const resolved = typeof next === 'function' ? next(cur) : next
+      const resolved = normalizeStoryTone(typeof next === 'function' ? next(cur) : next)
       try { localStorage.setItem('trainer-arena:story-tone', JSON.stringify(resolved)) } catch { /* ignore */ }
       return resolved
     })

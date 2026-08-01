@@ -13,6 +13,7 @@ import WorldProgressModal from './WorldProgressModal.jsx'
 import PokemonLifeModal from './PokemonLifeModal.jsx'
 import TradeModal from './TradeModal.jsx'
 import { modeAllowsTrading } from '../data/gameModes.js'
+import StoryTagsModal from './StoryTagsModal.jsx'
 
 // ============ CỘT HUD BÊN PHẢI (đợt 26) ============
 // Theo yêu cầu chuyển Cài đặt / Màn hình chính / Bản đồ sang PHẢI (bố cục
@@ -29,6 +30,7 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const [progressOpen, setProgressOpen] = useState(false)
   const [lifeOpen, setLifeOpen] = useState(false)
   const [tradeOpen, setTradeOpen] = useState(false)
+  const [storyTagsOpen, setStoryTagsOpen] = useState(false)
 
   const region = playerLocation ? getRegion(playerLocation.regionKey) : null
   const area = playerLocation ? getArea(playerLocation.regionKey, playerLocation.areaKey) : null
@@ -115,6 +117,15 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
         </div>
       </div>
 
+      <button
+        className="btn"
+        style={{ width: '100%', borderColor: storyTone.genres?.length ? '#9a7bd4' : 'var(--line)' }}
+        onClick={() => setStoryTagsOpen(true)}
+        title="Đổi tag văn phong dùng cho các lượt kể tiếp theo"
+      >
+        🎭 Tag truyện · {storyTone.genres?.length ?? 0}
+      </button>
+
       {/* Sổ tay cốt truyện (đợt 30): tóm tắt + NPC + fact */}
       <button className="btn" style={{ width: '100%' }} onClick={() => setNotebookOpen(true)}>
         📓 Sổ tay cốt truyện
@@ -161,6 +172,7 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       {progressOpen && <WorldProgressModal onClose={() => setProgressOpen(false)} />}
       {lifeOpen && <PokemonLifeModal onClose={() => setLifeOpen(false)} />}
       {tradeOpen && <TradeModal onClose={() => setTradeOpen(false)} />}
+      {storyTagsOpen && <StoryTagsModal onClose={() => setStoryTagsOpen(false)} />}
 
       {/* Modal bản đồ đầy đủ */}
       {mapOpen && (

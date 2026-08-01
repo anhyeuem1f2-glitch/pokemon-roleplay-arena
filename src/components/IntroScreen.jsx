@@ -975,7 +975,7 @@ export default function IntroScreen({ onOpenSettings }) {
               </div>
               <div style={{ marginTop: 16 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', marginBottom: 8 }}>
-                  Thể loại chính (chọn tối đa 3 — có thể bỏ qua)
+                  Tag văn phong (chọn tự do — có thể phối nhiều tag)
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {GENRES.map((g) => {
@@ -986,7 +986,6 @@ export default function IntroScreen({ onOpenSettings }) {
                         onClick={() => setStoryTone((t) => {
                           const cur = t.genres ?? []
                           if (cur.includes(g.key)) return { ...t, genres: cur.filter((k) => k !== g.key) }
-                          if (cur.length >= 3) return t // trần 3 thể loại — nhiều hơn là loãng
                           return { ...t, genres: [...cur, g.key] }
                         })}
                         style={{
@@ -1002,7 +1001,7 @@ export default function IntroScreen({ onOpenSettings }) {
                   })}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
-                  Thể loại là gia vị AI ưu tiên dệt vào truyện; luật chế độ đã được chọn từ bước đầu.
+                  Đã chọn {storyTone.genres?.length ?? 0}/{GENRES.length}. Có thể chọn bao nhiêu tag tuỳ thích; AI sẽ phối chúng như gia vị văn phong. Luật chế độ đã được chọn từ bước đầu.
                 </div>
               </div>
             </div>

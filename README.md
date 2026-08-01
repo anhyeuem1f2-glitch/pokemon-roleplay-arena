@@ -2260,7 +2260,7 @@ Ba thiên phú cơ chế sẵn có (Max IV/EV, EXP luyện tập ×2, tỉ lệ 
 
 ## Cập nhật (đợt 73) — Pokémon báo lên cấp nhưng biến đứng yên, thiên phú tùy chỉnh chạy bằng cơ chế thật
 
-**BUG TESTER 1: bảng “Biến cập nhật” báo Froakie Lv8/Lv9/Lv11 nhưng HUD vẫn Lv5/Lv6.** Đây không còn là bug tụt cấp do React closure của đợt 70 mà là một đường khác: giao thức chỉ có `[[POKEMON Loài | LvN]]` cho **nhận Pokémon mới**, chưa có tag tăng cấp cho Pokémon đang sở hữu. Main model/API phụ vì thế dùng lại `[[POKEMON Froakie | Lv9]]`; viewer đọc đúng tag nên hiện Lv9, nhưng `RoleplayChat` thấy đội đã có Froakie cùng loài thì bỏ qua để tránh tạo trùng — số liệu thật không thay đổi. Nay thêm tag chính thức `[[LEVEL Tên Pokémon | +1]]` / `[[LEVEL Tên Pokémon | Lv11]]`, parser và API phụ đều hiểu. Đồng thời giữ tương thích ngược: nếu model cũ vẫn trả `[[POKEMON Froakie | Lv9]]` mà đội đã có Froakie, app coi đó là yêu cầu **nâng cá thể hiện có** tới Lv9, tuyệt đối không hạ cấp.
+**BUG TESTER 1: bảng “Biến cập nhật” báo Froakie Lv8/Lv9/Lv11 nhưng HUD vẫn Lv5/Lv6.** Đây không còn là bug tụt cấp do React closure của đợt 70 mà là một đường khác: giao thức chỉ có `[[POKEMON Loài | LvN]]` cho **nhận Pokémon mới**, chưa có tag tăng cấp cho Pokémon đang sở hữu. Nay có tag chính thức `[[LEVEL Tên Pokémon | +1]]` / `[[LEVEL Tên Pokémon | Lv11]]`, parser và API phụ đều hiểu. Từ đợt 89, `[[POKEMON]]` trùng loài **không còn** bị hiểu ngầm là tăng cấp: một trainer được phép sở hữu nhiều cá thể cùng loài, còn tăng cấp bắt buộc dùng `LEVEL`. Tương thích model cũ chỉ còn áp cho trường hợp chính văn xác nhận rõ một dạng tiến hoá trực tiếp, khi đó app đổi đúng cá thể cũ thay vì sinh bản sao.
 
 **BUG TESTER 2: ô thiên phú tự mô tả ghi “Max IV/EV, EXP sau trận ×3, cả đội nhận EXP, Rare Candy vô hạn” nhưng chỉ có lời kể.** Nguyên nhân là phần tự mô tả trước đây chỉ được bơm vào prompt; battle engine, công thức EXP và túi đồ không hề đọc câu chữ đó. Đợt 73 thêm bộ phân tích cơ chế deterministic phía app, bỏ dấu và nhận cả cách viết Việt/Anh đời thường. Các luật tùy chỉnh hiện được hỗ trợ trực tiếp gồm:
 
@@ -2464,7 +2464,7 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 
 **DANH TIẾNG, PHE PHÁI, PHÁP LUẬT VÀ TRUY NÃ.** `REP` theo dõi uy tín với tổ chức tách khỏi hảo cảm cá nhân `REL`; `WANTED` giữ cấp truy nã, tiền thưởng, vùng áp dụng và lịch sử lý do. Delta mỗi lượt bị kẹp theo chế độ: Thực tế nghiêm và chậm, Anime/Sảng văn linh hoạt hơn. Dữ liệu này được bơm lại vào system prompt mỗi lượt nên cảnh sát, dân cư, phe đối địch và người giao nhiệm vụ phải phản ứng nhất quán.
 
-**ĐẠO DIỄN ƯU TIÊN MẠCH ĐANG CHẠY.** Khi có truy nã đáng kể hoặc nhiệm vụ đang hoạt động, Story Director đẩy hệ quả/manh mối của tuyến đó thay vì ném thêm biến cố ngẫu nhiên. Mật độ biến cố được điều chỉnh theo chế độ. Huyền thoại/huyền ảo/Ultra Beast/Paradox có cổng deterministic dựa trên huy hiệu + số nhiệm vụ đã hoàn thành (hoặc permit cốt truyện lưu trong state); nếu tắt Badge Case, một ngưỡng nhiệm vụ cao hơn được dùng làm tuyến sandbox thay thế nên sưu tầm huy hiệu không bao giờ là bắt buộc. Cả `[[POKEMON]]` lẫn nút mở battle đều kiểm tra cổng cuối cùng, vì vậy không thể gọi Mewtwo ra bằng một câu chính văn. Encounter fallback vẫn giữ luật biome đợt 86 và tuyệt đối không random boss.
+**ĐẠO DIỄN ƯU TIÊN MẠCH ĐANG CHẠY.** Khi có truy nã đáng kể hoặc nhiệm vụ đang hoạt động, Story Director đẩy hệ quả/manh mối của tuyến đó thay vì ném thêm biến cố ngẫu nhiên. Mật độ biến cố được điều chỉnh theo chế độ. Quy tắc huyền thoại đã được chốt lại ở đợt 89: chỉ **Thực tế** dùng cổng encounter/triệu hồi; cổng dựa vào cuộc gặp cực hiếm hợp sinh thái hoặc điều kiện lore đã thực sự hoàn tất (đúng di vật, địa điểm, nghi thức), tuyệt đối không dựa vào số huy hiệu/nhiệm vụ. Anime và Sảng văn bỏ qua cổng này. Encounter fallback vẫn không random boss.
 
 **NPC CÓ MÃ VÀ ĐỘI HÌNH BỀN VỮNG.** Mỗi NPC có mã deterministic `NPC-…`; trường `đội=` được parse thành tối đa sáu slot loài/level. Sổ tay ghi số lần gặp và số trận đã đấu. Khi gặp lại trainer có tên, battle ưu tiên đúng roster/level đã lưu thay vì reroll một loài ngẫu nhiên. Trận đơn với trainer nay nối toàn bộ roster trong cùng modal: một Pokémon gục thì đối thủ thu về và tung slot kế tiếp, reset bậc chỉ số phía đối thủ, kích hoạt Ability vào sân và chỉ tuyên bố thắng khi hết đội. Runtime ẩn/mở lại giữ cả đối thủ hiện tại, dự bị và danh sách đã gục để EXP cuối trận tính đủ; đội chỉ đổi khi chính văn thực sự cập nhật hồ sơ NPC.
 
@@ -2477,3 +2477,80 @@ Phía app cũng không còn tin tag mù quáng: `detectInteractiveShop()` kiểm
 **Giao thức mới:** `[[BADGE ...]]`, `[[QUEST ...]]`, `[[REP ...]]`, `[[WANTED ...]]`, `[[RIBBON ...]]`, `[[MARK ...]]`. API cập nhật biến phụ hiểu cùng giao thức, đối chiếu cùng chính văn và chống áp trùng với model chính.
 
 **Phạm vi thử nghiệm trao đổi:** chưa có backend/phòng online, chữ ký mật mã hay khoá toàn cục, nên hai trình duyệt trao đổi bằng copy/paste JSON. Không dùng tính năng này cho save cạnh tranh cho tới khi có dịch vụ xác nhận transfer ID phía máy chủ.
+
+## Cập nhật (đợt 88) — Story Director có nhịp, trọng tài input Thực tế, biên niên 2.000+ lượt và Admin Mode
+
+**AUDIT STORY DIRECTOR: nguyên nhân gây cảm giác “thúc đẩy không tự nhiên” đã được sửa ở đúng gốc.** Ghi chú tự do sáng tạo cũ bắt model thêm “sự cố nhỏ chen ngang” và chuyện nghe lỏm trong mọi lượt, trong khi Director riêng cũng có thể gieo một hạt giống khác. Hai lớp cộng nhau khiến cảnh tâm sự, chăm Pokémon hoặc cắm trại khó có khoảng thở. Luật mới coi cảnh yên/đối thoại có trọng lượng là tiến triển hợp lệ, ưu tiên hệ quả của lựa chọn cũ, nhiệm vụ đang mở, NPC đã gặp và lời hứa chưa giải quyết trước khi tạo tuyến mới. Bộ đọc nhịp tạm giữ nudge khi đang ở battle/shop/Pokémon Center, cao trào, câu hỏi đối thoại dang dở hoặc người chơi đang chờ phản ứng. Hạt giống được nhớ bằng fingerprint để không lặp lại trong các lần thúc đẩy gần nhau; khi thật sự dùng, nó ưu tiên tín hiệu nền và quan hệ nhân-quả thay vì một NPC lạ đột nhiên xuất hiện.
+
+**CHẾ ĐỘ THỰC TẾ CÓ TRỌNG TÀI INPUT RIÊNG, KHÔNG CHỈ DỰA VÀO MODEL “TỰ GIÁC”.** Input người chơi được phân biệt thành ba lớp: (1) hành động/ý định hợp lệ; (2) nỗ lực hiếm nhưng khả thi; (3) tuyên bố kết quả ngoài quyền nhân vật. Câu kiểu “đang đi thì thấy Rayquaza và nó đi theo” không tạo encounter, battle hay quyền sở hữu; AI phải giữ ý định/cảm giác của nhân vật rồi giải thích tối thiểu theo bối cảnh như nhìn nhầm Pokémon thường đúng sinh cảnh, bóng dáng, tin đồn, mô hình, ảnh giả hoặc dấu vết chưa đủ bằng chứng. Không được mắng người chơi là cheat và không được máy móc biến lần nào cũng thành Caterpie.
+
+**HIẾM KHÔNG ĐỒNG NGHĨA VÔ LÝ.** Dratini, Larvitar, Bagon, Beldum, Gible, Deino, Goomy, Jangmo-o, Dreepy và Frigibax non có thể là mục tiêu tìm kiếm hợp lý. Một input bỏ vài chục triệu thuê chuyên gia, xin giấy phép và lập mạng lưới được chấp nhận ở phần khởi tạo hành động: ký hợp đồng, đặt cọc và mở quest nhiều giai đoạn. Tiền mua nhân lực, thời gian, thông tin và cơ hội — không mua thành công 100%; Director còn phải xét sinh cảnh, mùa, luật bảo tồn, lừa đảo, phúc lợi và quyền từ chối của cá thể. Chỉ khi chính văn xác nhận giao dịch thật thì tag state mới được trừ tiền.
+
+**TRÍ NHỚ KHÔNG CÒN CẮT MẤT LƯỢT 5 Ở MỐC 400.** Vector memory cũ vẫn được giữ làm lớp liên tưởng ngữ nghĩa tùy chọn, nhưng từng có trần 400 entry trong `localStorage`; tới lượt 2.000 thì dữ kiện đầu truyện thực sự bị xóa khỏi lớp đó. Đợt 88 thêm Biên niên sử exact bằng IndexedDB: mỗi trao đổi giữ gần như trọn input + chính văn, có số lượt thật, chương 20 lượt, từ khóa và cờ sự kiện quan trọng, không tự vứt bản ghi cũ. Save đời cũ được backfill theo lô ngay khi vào game. Khi truyện dài, app luôn giữ cửa sổ 24 tin gần, tìm exact trong toàn transcript + IndexedDB, hiểu truy vấn “lượt N/chương N/lần đầu”, rồi mới gộp kết quả embedding/rerank nếu người chơi đã cấu hình. Xoá/reroll một nhánh sẽ xoá ký ức từ điểm cắt tới cuối để canon cũ không quay lại.
+
+**SỔ TAY HIỂN THỊ RÕ BỐN LỚP NHỚ.** Tab `Biên niên` cho biết tổng số lượt exact đã lưu và xem tối đa 200 bản ghi mới nhất; ngoài ra còn tóm tắt cốt truyện, hồ sơ NPC/fact keyword và vector memory. Regression tạo 2.000 lượt giả lập, giấu duy nhất chi tiết “Mira giấu chiếc chuông bạc nứt dưới gốc sồi” ở lượt 5; cả truy vấn theo vật chứng lẫn câu “sự kiện ở lượt 5” đều kéo đúng bản ghi đó lên đầu.
+
+**ADMIN MODE DÀNH CHO CHỦ DỰ ÁN, HOẠT ĐỘNG Ở MỌI CHẾ ĐỘ.** Không còn đường `?dev=1`, nút Dev hay gợi ý trên title/HUD. Cổng quản trị chỉ mở từ tổ hợp phím kín, yêu cầu mã chủ dự án và chỉ giữ quyền trong `sessionStorage` của tab hiện tại — không chèn vào save. Bảng có thể đặt/cộng tiền, cấp cả vật phẩm không bán, tạo Pokémon/level/Shiny vào party hoặc PC, hồi đội, mở huy hiệu + cổng huyền thoại, xoá truy nã, mở phòng Dev và thử trao đổi ở Anime/Sảng văn bằng admin override. Trong battle, admin mở các gimmick test; trong chính văn, phiên đã xác thực có thể bỏ cổng tiến trình nhưng vẫn phải dùng tag state chuẩn. Đây là cổng kiểm thử phía client để giấu khỏi người chơi thông thường, không phải xác thực máy chủ chống người biết đọc source.
+
+**Trao đổi vẫn chỉ là luật thường của chế độ Thực tế.** Anime/Sảng văn không hiện và không gọi được trao đổi trong gameplay bình thường. Admin override chỉ tồn tại để chủ dự án kiểm thử rồi tự mất khi khoá/đóng phiên; nó không thay đổi mô tả hay luật save của các chế độ.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–88 đều PASS (16/16). Test đợt 88 bao phủ Rayquaza bị diễn giải lại, chiến dịch Dratini nhiều triệu được chấp nhận dưới dạng nỗ lực, admin bypass, shortcut/mã nghiêm ngặt, Director biết giữ cảnh đối thoại, truy hồi lượt 5 trong kho 2.000 lượt, exact transcript cho save cũ, trade admin ngoài Thực tế, xoá đường `?dev=1` và tích hợp UI. Gói nguồn rút gọn không có `package.json`, nên chưa thể chạy lệnh build/lint của project đầy đủ từ riêng gói này; các module JS mới đã qua `node --check` và toàn bộ regression đều xanh.
+
+### File cần cập nhật lên GitHub sau đợt 88
+
+Chỉ upload/ghi đè hai phần sau:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/` (đặc biệt các file nhạc nặng), các file `test-dot*.mjs`, ZIP bàn giao hoặc file hồ sơ dự án. Gói ZIP `github-update-src-readme` chỉ chứa đúng `src/` và `README.md` để có thể kéo thả cập nhật.
+
+## Cập nhật (đợt 89) — sửa báo cáo bug, điều kiện tiến hoá và các lỗ hổng audit cuối
+
+**F5/CALLBACK KHÔNG CÒN NHÂN BẢN POKÉMON.** Mỗi `[[POKEMON]]` được gắn `acquisitionSourceId` ổn định từ mã tin AI + vị trí tag. Cùng một response chạy lại sẽ bị bỏ qua dù trước đó cá thể nằm trong party hay PC. Context còn dedupe theo cả `uid` lẫn source ID, đồng thời sửa save cũ có cùng cá thể nằm chéo ở party và PC. Việc sở hữu hai Pokémon cùng loài vẫn hợp lệ nếu chúng đến từ hai sự kiện nhận khác nhau; không còn lấy “trùng loài” làm dấu hiệu tăng cấp.
+
+**LOOT ĐỘNG.** Giao thức có `[[LOOT loại=... | quy mô=nhỏ/vừa/lớn]]` cho một lô chiến lợi phẩm không tiện liệt kê. App đối chiếu rằng chính văn đã lấy đồ thành công, bác ý định tương lai/phủ định, rồi sinh 2/3/5 loại vật phẩm tùy quy mô từ pool đá quý, y tế, trainer, thực phẩm, công nghệ, quần áo hoặc tổng hợp. Kết quả deterministic theo source ID nên tải lại không reroll/cộng lặp; giá trị kiểu `đá_quý`/`công_nghệ` dạng snake_case cũng được nhận đúng. Nếu preset làm tag rơi vào phần scaffold bị cắt, bộ dọn output vẫn cứu riêng tag LOOT như các tag state khác.
+
+**FRIENDSHIP VÀ TIẾN HOÁ LÀ STATE THẬT.** Thân mật được cập nhật bất biến trên đúng `uid`, đồng bộ active mon với party và được áp trước `EVOLVE` trong cùng lượt, nên thanh Summary đổi ngay và mốc vừa đạt có hiệu lực tức thì. Ở Thực tế, validator kiểm tra trực tiếp level, Friendship 220, ngày/đêm, giới tính, vùng, chiêu đã biết, đá/vật phẩm sử dụng, held item và lịch sử trao đổi. Tiến hoá trade tiêu chuẩn tự chạy sau khi người nhận nhập một gói hợp lệ, giữ nguyên mã cá thể/IV/EV/Nature/EXP; vật phẩm cầm bắt buộc vẫn được kiểm tra.
+
+**LUẬT CHẾ ĐỘ VÀ HUYỀN THOẠI.** Anti-cheat input, nắn level/sinh thái và cổng huyền thoại chỉ chạy ở Thực tế; Anime/Sảng văn giữ quyền tác giả về encounter. Thực tế không dùng badge/quest làm khóa. Ví dụ Reshiram chỉ nhận permit triệu hồi khi có White/Light Stone trong túi, đang ở Opelucid/Dragonspiral Tower và chính văn xác nhận nghi thức; thuyết phục/gia nhập vẫn là diễn biến riêng. Lỗ hổng chương mở đầu đã đóng: đoạn mở đầu cũng đối chiếu mode, inventory và location rồi dùng world progress vừa được xác lập trước khi cấp Pokémon.
+
+**MỞ ĐẦU GIỮ ĐÚNG XUẤT THÂN VÀ ÁP ĐỦ BIẾN.** Region/city người chơi chọn là vị trí state cố định, không suy ngược từ một địa danh AI lỡ nhắc và không rơi về Pallet. MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ ở chương mở đầu nay được áp vào HUD/save thay vì bị parse rồi bỏ quên.
+
+**BATTLE/ĐỜI SỐNG/TRADE ĐƯỢC CHỐT LẠI.** Master Ball bắt chắc chắn Pokémon hoang nhưng không bán đại trà; Ice Heal/Full Heal chữa đúng trạng thái; Mega/Tera/Dynamax trở về dạng gốc khi kết thúc/ẩn trận và Tera Type là thuộc tính cố định của cá thể. Pokémon bắt trong Battle/Safari có Original/Current Trainer đúng. Trao đổi vẫn chỉ mở bình thường ở Thực tế (Admin có override để test), kiểm mã người nhận/receipt/chống nhận lại cùng transfer và tiến hoá trade sau chuyển quyền.
+
+**DỮ LIỆU POKÉDEX.** Source không gọi `pokeapi.co` ở runtime và đợt này không thêm phụ thuộc PokéAPI trực tiếp. Dữ liệu Showdown hiện có vẫn dùng cache IndexedDB 30 ngày cùng fallback tĩnh khi mất mạng; các điều kiện tiến hoá cần thiết đã được giữ trong bản chuẩn hoá/cache thay vì gọi PokéAPI theo từng sự kiện gameplay.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–89 đều PASS (17/17). Test đợt 89 bao phủ parse/evidence/seed loot, chống loot tương lai, Friendship bất biến + mốc 220, tiến hoá bằng đá/ngày đêm/trade, nghi thức Reshiram chỉ cứng ở Thực tế, idempotency source ID, dedupe party–PC và áp trạng thái mở đầu. Toàn bộ 63 module `.js` qua `node --check`; gói rút gọn không có `package.json`, vì vậy không thể chạy lệnh build/lint chính thức của project đầy đủ.
+
+### File cần cập nhật lên GitHub sau đợt 89
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, file báo cáo bug, ZIP hay hồ sơ bàn giao.
+
+## Cập nhật (đợt 90) — siết tìm Pokémon đích danh trong chế độ Thực tế
+
+**SỬA TRƯỜNG HỢP “ĐI TÌM DITTO → DITTO NẰM NGAY DƯỚI CỐNG”.** Trọng tài cũ chỉ can thiệp với Legendary và nhóm pseudo-legendary non, nên tên loài thường như Ditto/Pikachu đi thẳng qua prompt. Nay mọi câu `đi tìm`, `tìm kiếm`, `săn tìm`, `truy tìm` một Pokémon được gọi đích danh đều mở một tiến trình tìm kiếm; gõ lại “đi tìm X” không bao giờ tự roll X ra ngay. Tên được khớp theo ranh giới đầy đủ nên `Mew` không còn bị nhận nhầm khi input chỉ viết `Mewtwo`.
+
+**TÌM CHUNG CHỈ CÓ MANH MỐI HOẶC KHÔNG CÓ GÌ.** Chính lượt khởi tạo chỉ được trả: không tìm thấy gì đáng tin, hoặc manh mối gián tiếp chưa xác minh (tin đồn, hồ sơ, vệt dấu, nhân chứng không chắc, camera mờ…). App cấm mục tiêu xuất hiện tận mắt, `[[BATTLE]]`, bắt/nhận và `[[POKEMON]]`; nơi người chơi đoán như “dưới cống” không được tự biến thành vị trí spawn. Sinh cảnh, vùng, ngày/đêm, thời tiết, khả năng ngụy trang và phương pháp tìm đều phải có trọng lượng.
+
+**TIẾN TRÌNH NHIỀU BƯỚC CÓ XÁC SUẤT THẬT.** Kết quả tìm được lưu ngay trên message theo mục tiêu và số bước, nên F5 vẫn giữ tiến trình. Người chơi phải làm hành động cụ thể để theo/kiểm tra/phân tích manh mối; bước 1–2 luôn chưa thể encounter. Từ bước 3 mới bắt đầu roll xác suất thấp theo catch rate: loài rất khó bắt 8%, khó 12%, vừa 18%, phổ biến 28%; mỗi bước theo dấu tiếp theo cộng 5%, trần 45%. Trượt roll vẫn chỉ có manh mối/mất dấu. Đạt roll mới chỉ cho phép encounter trở thành khả năng: địa điểm và lore vẫn phải khớp, Pokémon vẫn có thể trốn/từ chối/chống trả và không tự động gia nhập.
+
+**BA LỚP CHỐT THAY VÌ TIN MODEL TỰ GIÁC.** (1) System prompt phân xử input; (2) app kiểm tra bản nháp, phát hiện target xuất hiện/BATTLE/POKEMON rồi yêu cầu provider viết lại đúng một lần; (3) nếu provider tiếp tục vi phạm hoặc lượt sửa lỗi hỏng, app dùng đoạn thất bại tìm kiếm an toàn tại chỗ. Lớp evidence cuối cùng vẫn loại mọi `POKEMON` do main model hoặc State API cố cấp trong lượt bị khóa.
+
+**CHỈ ÁP DỤNG Ở THỰC TẾ.** Anime và Sảng văn vẫn giữ toàn quyền tác giả như trước. Phiên Admin đã xác thực cũng bỏ qua cổng để chủ dự án test nhanh.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–90 đều PASS (18/18). Test đợt 90 bao phủ Ditto dưới cống, Pokémon thường, chống nhầm Mew/Mewtwo, Anime/Sảng/Admin bypass, hai bước đầu luôn khóa, bước 3 trượt/đạt theo RNG inject, tìm chung lặp lại vẫn không spawn, phát hiện bản nháp vi phạm, fallback an toàn và chặn state `POKEMON`.
+
+### File cần cập nhật lên GitHub sau đợt 90
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs` hay các file nguồn khác. ZIP bàn giao đợt 90 cũng chỉ chứa đúng hai phần trên.

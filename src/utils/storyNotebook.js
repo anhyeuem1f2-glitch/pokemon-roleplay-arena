@@ -131,7 +131,19 @@ export function recordNpcBattle(npcId, team = null) {
   const at = s.npcs.findIndex((npc) => normalizeNpc(npc).id === npcId)
   if (at < 0) return
   const npc = normalizeNpc(s.npcs[at])
-  s.npcs[at] = { ...npc, team: Array.isArray(team) && team.length ? team : npc.team, battles: npc.battles + 1 }
+  const battleTeam = Array.isArray(team) && team.length
+    ? team.map((mon, index) => ({
+      slot: index,
+      species: String(mon?.baseSpeciesName ?? mon?.name ?? mon?.species ?? '').replace(/-(?:Mega(?:-[XY])?|Gmax)$/i, '') || 'Pokémon',
+      level: Math.max(1, Math.min(100, Number(mon?.level) || 1)),
+    })).slice(0, 6)
+    : npc.team
+  const fields = { ...(npc.fields ?? {}) }
+  const existingTeamKey = Object.keys(fields).find((field) => /^(đội|doi|team)$/i.test(field.trim()))
+  fields[existingTeamKey ?? 'đội'] = battleTeam.map((mon) => `${mon.species} Lv${mon.level}`).join(', ')
+  // Lưu đúng đội THỰC SỰ đã xuất trận (kể cả đội được app sinh khi tag NPC
+  // ban đầu chưa khai đội), để lần tái đấu không reroll sang Pokémon khác.
+  s.npcs[at] = { ...npc, fields, team: battleTeam, battles: npc.battles + 1 }
   persist()
   notify()
 }

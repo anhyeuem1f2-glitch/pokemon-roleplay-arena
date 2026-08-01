@@ -6,7 +6,7 @@
 // toàn bộ 2000 lượt vào context model.
 
 const DB_NAME = 'trainer-arena-story-archive'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE = 'exchanges'
 export const ARCHIVE_CHAPTER_SIZE = 20
 // Giữ gần như trọn một lượt chính văn chuẩn 300-600 từ; IndexedDB chịu dữ
@@ -31,18 +31,23 @@ export function memoryTerms(value) {
   return [...new Set((fold(value).match(/[a-z0-9][a-z0-9'-]{1,}/g) ?? []).filter((term) => !STOP.has(term)))]
 }
 
-function exchangeId(turn) {
-  return `turn-${Math.max(0, Number(turn) || 0).toString().padStart(8, '0')}`
+function archiveNamespace(value) {
+  return String(value || 'legacy').replace(/[^a-z0-9_-]/gi, '').slice(0, 96) || 'legacy'
 }
 
-export function makeArchiveEntry(userText, assistantText, turn, storyTurn = null) {
+function exchangeId(turn, namespace = 'legacy') {
+  return `${archiveNamespace(namespace)}:turn-${Math.max(0, Number(turn) || 0).toString().padStart(8, '0')}`
+}
+
+export function makeArchiveEntry(userText, assistantText, turn, storyTurn = null, namespace = 'legacy') {
   const safeTurn = Math.max(0, Number(turn) || 0)
   const safeStoryTurn = Math.max(1, Number(storyTurn) || Math.ceil(safeTurn / 2) || 1)
   const user = clip(userText)
   const assistant = clip(assistantText)
   const text = user ? `Người chơi: ${user}\nDiễn biến: ${assistant}` : assistant
   return {
-    id: exchangeId(safeTurn),
+    id: exchangeId(safeTurn, namespace),
+    namespace: archiveNamespace(namespace),
     turn: safeTurn,
     storyTurn: safeStoryTurn,
     chapter: Math.floor((safeStoryTurn - 1) / ARCHIVE_CHAPTER_SIZE) + 1,
@@ -65,6 +70,10 @@ function openDb() {
         const store = db.createObjectStore(STORE, { keyPath: 'id' })
         store.createIndex('turn', 'turn', { unique: false })
         store.createIndex('chapter', 'chapter', { unique: false })
+        store.createIndex('namespace', 'namespace', { unique: false })
+      } else {
+        const store = request.transaction.objectStore(STORE)
+        if (!store.indexNames.contains('namespace')) store.createIndex('namespace', 'namespace', { unique: false })
       }
     }
     request.onsuccess = () => resolve(request.result)
@@ -88,8 +97,8 @@ async function withStore(mode, callback) {
   } finally { db.close() }
 }
 
-export async function archiveExchange(userText, assistantText, turn, storyTurn = null) {
-  const entry = makeArchiveEntry(userText, assistantText, turn, storyTurn)
+export async function archiveExchange(userText, assistantText, turn, storyTurn = null, namespace = 'legacy') {
+  const entry = makeArchiveEntry(userText, assistantText, turn, storyTurn, namespace)
   if (!entry.text) return null
   memoryFallback.set(entry.id, entry)
   try { await withStore('readwrite', (store) => store.put(entry)) } catch { /* RAM vẫn giữ được trong phiên */ }
@@ -97,7 +106,7 @@ export async function archiveExchange(userText, assistantText, turn, storyTurn =
 }
 
 /** Nâng cấp save cũ theo lô trong một transaction, không gọi API và không sửa messages. */
-export async function backfillArchiveFromMessages(messages) {
+export async function backfillArchiveFromMessages(messages, namespace = 'legacy') {
   const list = Array.isArray(messages) ? messages : []
   const entries = []
   let storyTurn = 0
@@ -109,7 +118,7 @@ export async function backfillArchiveFromMessages(messages) {
       if (list[j]?.role === 'user' && !list[j]?.hidden) { userText = list[j].content; break }
       if (list[j]?.role === 'assistant') break
     }
-    const entry = makeArchiveEntry(userText, list[i].content, i, storyTurn)
+    const entry = makeArchiveEntry(userText, list[i].content, i, storyTurn, namespace)
     if (entry.text) entries.push(entry)
   }
   for (const entry of entries) memoryFallback.set(entry.id, entry)
@@ -129,20 +138,21 @@ export async function backfillArchiveFromMessages(messages) {
   return entries.length
 }
 
-async function listArchiveEntries() {
+async function listArchiveEntries(namespace = 'legacy') {
+  const wanted = archiveNamespace(namespace)
   try {
     const records = await withStore('readonly', (store) => store.getAll())
     if (Array.isArray(records)) {
       for (const entry of records) memoryFallback.set(entry.id, entry)
-      return records
+      return records.filter((entry) => archiveNamespace(entry.namespace) === wanted)
     }
   } catch { /* dùng RAM */ }
-  return [...memoryFallback.values()]
+  return [...memoryFallback.values()].filter((entry) => archiveNamespace(entry.namespace) === wanted)
 }
 
 /** Snapshot nhẹ cho Sổ tay; mặc định chỉ trả 200 mục mới nhất nhưng count là toàn bộ. */
-export async function getArchiveSnapshot(limit = 200) {
-  const entries = (await listArchiveEntries()).sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0))
+export async function getArchiveSnapshot(limit = 200, namespace = 'legacy') {
+  const entries = (await listArchiveEntries(namespace)).sort((a, b) => (a.turn ?? 0) - (b.turn ?? 0))
   return {
     count: entries.length,
     entries: entries.slice(-Math.max(1, Number(limit) || 200)).map(({ id, turn, storyTurn, chapter, text }) => ({ id, turn, storyTurn, chapter, text })),
@@ -205,16 +215,17 @@ export function recallFromTranscript(messages, queryText, { maxTurn = Infinity, 
   return scoreArchiveEntries(entries, queryText, { maxTurn, topK })
 }
 
-export async function recallArchive({ queryText, maxTurn = Infinity, topK = MAX_RESULTS } = {}) {
-  return scoreArchiveEntries(await listArchiveEntries(), queryText, { maxTurn, topK })
+export async function recallArchive({ queryText, maxTurn = Infinity, topK = MAX_RESULTS, namespace = 'legacy' } = {}) {
+  return scoreArchiveEntries(await listArchiveEntries(namespace), queryText, { maxTurn, topK })
 }
 
-export async function forgetArchiveRange(turnFrom, turnTo) {
+export async function forgetArchiveRange(turnFrom, turnTo, namespace = 'legacy') {
+  const wanted = archiveNamespace(namespace)
   const lo = Math.min(Number(turnFrom) || 0, Number(turnTo) || 0)
   const hi = Math.max(Number(turnFrom) || 0, Number(turnTo) || 0)
-  for (const [id, entry] of memoryFallback) if (entry.turn >= lo && entry.turn <= hi) memoryFallback.delete(id)
+  for (const [id, entry] of memoryFallback) if (archiveNamespace(entry.namespace) === wanted && entry.turn >= lo && entry.turn <= hi) memoryFallback.delete(id)
   try {
-    const records = await listArchiveEntries()
+    const records = await listArchiveEntries(namespace)
     const targets = records.filter((entry) => entry.turn >= lo && entry.turn <= hi)
     if (!targets.length) return
     const db = await openDb()
@@ -230,9 +241,43 @@ export async function forgetArchiveRange(turnFrom, turnTo) {
   } catch { /* ignore */ }
 }
 
-export async function clearArchive() {
+export async function clearArchive(namespace = null) {
+  if (namespace !== null && namespace !== undefined) {
+    await forgetArchiveRange(0, Number.MAX_SAFE_INTEGER, namespace)
+    return
+  }
   memoryFallback.clear()
   try { await withStore('readwrite', (store) => store.clear()) } catch { /* ignore */ }
+}
+
+/** Đóng gói toàn bộ biên niên của một hành trình vào save/file xuất. */
+export async function exportArchiveEntries(namespace = 'legacy') {
+  return (await listArchiveEntries(namespace)).map((entry) => ({ ...entry, terms: [...(entry.terms ?? [])] }))
+}
+
+/** Khôi phục biên niên khi tải ô save hoặc nạp file trên thiết bị khác. */
+export async function importArchiveEntries(entries, namespace = 'legacy', { replace = true } = {}) {
+  const wanted = archiveNamespace(namespace)
+  if (replace) await clearArchive(wanted)
+  const prepared = (Array.isArray(entries) ? entries : []).map((entry) => ({
+    ...makeArchiveEntry(entry?.user, entry?.assistant, entry?.turn, entry?.storyTurn, wanted),
+    savedAt: Number(entry?.savedAt) || Date.now(),
+  })).filter((entry) => entry.text)
+  for (const entry of prepared) memoryFallback.set(entry.id, entry)
+  if (!prepared.length) return 0
+  try {
+    const db = await openDb()
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite')
+      const store = tx.objectStore(STORE)
+      for (const entry of prepared) store.put(entry)
+      tx.oncomplete = resolve
+      tx.onabort = () => reject(tx.error ?? new Error('Khôi phục biên niên sử bị huỷ'))
+      tx.onerror = () => reject(tx.error ?? new Error('Lỗi khôi phục biên niên sử'))
+    })
+    db.close()
+  } catch { /* IndexedDB không khả dụng: bản RAM vẫn có hiệu lực trong phiên */ }
+  return prepared.length
 }
 
 export function mergeMemoryResults(...groups) {

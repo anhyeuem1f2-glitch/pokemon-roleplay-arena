@@ -87,6 +87,14 @@ export async function loadMovesData() {
         target: m.target || 'normal',
         self: m.self || null,
         secondary: m.secondary || null,
+        secondaries: Array.isArray(m.secondaries) ? m.secondaries : [],
+        volatileStatus: m.volatileStatus || null,
+        sideCondition: m.sideCondition || null,
+        selfSwitch: m.selfSwitch || null,
+        forceSwitch: Boolean(m.forceSwitch),
+        damage: m.damage ?? null,
+        critRatio: m.critRatio || 0,
+        willCrit: Boolean(m.willCrit),
         accuracy: m.accuracy ?? true,
         flags: m.flags || {},
         status: m.status || null,
@@ -120,6 +128,14 @@ export async function loadMovesData() {
           (Array.isArray(m.secondaries)
             ? m.secondaries.find((s) => s?.status) || m.secondaries[0] || null
             : null),
+        secondaries: Array.isArray(m.secondaries) ? m.secondaries : [],
+        volatileStatus: m.volatileStatus || null,
+        sideCondition: m.sideCondition || null,
+        selfSwitch: m.selfSwitch || null,
+        forceSwitch: Boolean(m.forceSwitch),
+        damage: m.damage ?? null,
+        critRatio: m.critRatio || 0,
+        willCrit: Boolean(m.willCrit),
         self: m.self || null, // 1 số chiêu tự gây hiệu ứng phụ cho chính mình
         boosts: m.boosts || null, // hiếm chiêu sát thương có boosts top-level
         target: m.target || 'normal',

@@ -24,8 +24,9 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Hảo cảm NPC thay đổi (giúp đỡ, cãi vã, tặng quà...): [[REL Tên NPC=+10]] (từ -100 tới +100, mỗi lần đổi 1-15 điểm là hợp lý; có thể kèm ghi chú: [[REL Misty=+8 | cùng nhau tuần tra bờ hồ]]). Chỉ dùng cho NPC có tên, xuất hiện thật trong truyện.
 - Nhân vật chính BỊ THƯƠNG hoặc HỒI PHỤC phần thân thể nào (thế giới này Pokémon tấn công con người là chuyện bình thường): [[BODY leftArm=+25]] (dương = thương thêm, âm = hồi phục; bộ phận: head, torso, leftArm, rightArm, leftLeg, rightLeg; 0 lành lặn, 100 là mất/hỏng hẳn — vết cào nhẹ +5~10, trúng đòn nặng +20~40, gãy/bỏng nặng +50+). Mô tả vết thương trong lời kể phải khớp với tag.
 - CHỈ khi nhân vật đã THỰC SỰ BƯỚC VÀO BÊN TRONG cửa hàng, đang đứng trước quầy/kệ và lượt kể dừng để người chơi chọn mua: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật. Đi tới một thành phố, đi ngang/nhìn thấy cửa hàng, nhắc tên trung tâm mua sắm, hoặc chỉ nói “sẵn tiện mua sau” thì TUYỆT ĐỐI KHÔNG dùng SHOP. Chính văn phải nói rõ nhân vật đã vào trong; đừng tự liệt kê hàng, chỉ tả không khí rồi dừng.
-- Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. KHÔNG dùng POKEMON cho tiến hoá. Mở đầu "tay trắng" thì việc nhận Pokémon ĐẦU TIÊN phải là một khoảnh khắc có ý nghĩa, đến từ diễn biến hợp lý (không rơi từ trên trời); level hợp HOÀN CẢNH THẾ GIỚI chứ không theo sức người chơi: khu an toàn gần thị trấn lớn / có champion hay giáo sư canh giữ (VD Pallet Town có Giáo sư Oak) thì Pokémon YẾU và non; càng vào sâu hang/núi/đường hiểm thì càng mạnh; con đầu đàn mạnh hơn hẳn con thường; loài đã tiến hoá hết thì level cao. Pokémon của NPC trainer thì theo THÂN PHẬN + TUỔI + KINH NGHIỆM của trainer đó (học sinh mới yếu, gym leader/elite/trùm tổ chức rất mạnh). App sẽ tự nắn mềm nếu lệch, nhưng hãy ghi level đúng tinh thần này. KHÔNG cấp Pokémon bừa bãi hay dồn dập — cả một chương truyện có khi chỉ 1 lần, và người chơi phải là người CHỌN nhận.
-- LUẬT LIÊN ĐOÀN ENDGAME (ghi đè level canon cũ): mỗi Tứ Thiên Vương dùng đội 6 Pokémon Lv85, Lv85, Lv90, Lv90, Lv95, Lv95; Champion dùng Lv98, Lv98, Lv99, Lv99, Lv100, Lv100. Không hạ level theo người chơi và không dùng level gốc thấp hơn từ game nguồn.
+- Khi nhân vật đã THỰC SỰ lấy được một đống đồ không thể liệt kê chính xác từng món (vơ vét kho, trộm hàng, thu chiến lợi phẩm, nhặt đồ sau tai nạn): [[LOOT loại=đá quý | quy mô=nhỏ/vừa/lớn]]. App tự sinh vật phẩm theo loại ∈ {đá quý, y tế, trainer, thực phẩm, công nghệ, quần áo, tổng hợp}. Chỉ dùng sau khi việc lấy đồ đã thành công trong chính văn, không dùng cho ý định “sẽ vơ vét”; ở Thực tế phải kể cả phản ứng pháp luật/truy nã hợp lý nếu đó là trộm cắp.
+- Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. KHÔNG dùng POKEMON cho tiến hoá. Ở chế độ THỰC TẾ: mở đầu "tay trắng" thì Pokémon đầu tiên phải đến từ diễn biến hợp lý; level theo hoàn cảnh, sinh thái, giai đoạn tiến hoá và kinh nghiệm trainer, app được nắn level lệch; không tự cấp dồn dập khi người chơi chưa chọn nhận. Câu “đi tìm/tìm kiếm Pokémon X” chỉ khởi tạo việc tìm: tìm chung chỉ được manh mối gián tiếp hoặc không có kết quả, tuyệt đối không dùng POKEMON/BATTLE và không cho X xuất hiện trực tiếp; áp cả với loài thường như Ditto. Phải theo manh mối cụ thể ít nhất ba bước; sau đó app mới có thể cho một lượt vượt phân xử xác suất thấp, nhưng sinh cảnh/thời điểm vẫn phải hợp và gặp không đồng nghĩa bắt/gia nhập. Ở ANIME/SẢNG VĂN: tôn trọng quyền tác giả của người chơi về cách nhận, loài và level; không viện sinh thái hay độ hiếm để bác hoặc bóp level đã tuyên bố.
+- LUẬT LIÊN ĐOÀN ENDGAME MẶC ĐỊNH: mỗi Tứ Thiên Vương dùng đội 6 Pokémon Lv85, Lv85, Lv90, Lv90, Lv95, Lv95; Champion dùng Lv98, Lv98, Lv99, Lv99, Lv100, Lv100. Ở Thực tế không hạ level theo người chơi. Ở Anime/Sảng văn, đây chỉ là mốc mặc định và nhường cho thiết lập mà người chơi chủ động viết.
 - Pokémon đang sở hữu TIẾN HOÁ thành loài khác: [[EVOLVE Tên hiện tại | Tên sau tiến hoá]]. Đây là CÙNG MỘT CÁ THỂ: app giữ uid/IV/EV/nature/EXP và thay hình ảnh/chỉ số loài; tuyệt đối không dùng [[POKEMON loài mới]] vì sẽ tạo bản sao. Nếu tiến hoá xảy ra đúng lúc lên cấp, khai cả [[LEVEL tên cũ | +1]] rồi [[EVOLVE tên cũ | tên mới]].
 - Pokémon đang sở hữu THỰC SỰ ĐƯỢC CHO CẦM trang bị trong chính văn: [[EQUIP Tên Pokémon | Tên vật phẩm]]. Vật phẩm phải đang có trong túi, phải là held item hợp lệ; EQUIP tự chuyển đúng 1 món khỏi túi nên KHÔNG xuất thêm [[ITEM ... | -1]] cho cùng hành động; nếu thay món cũ, app tự cất món cũ lại túi. Khi nhân vật tháo/cất trang bị: [[UNEQUIP Tên Pokémon]]. Key Stone, Z-Ring, Dynamax Band và Tera Orb là thiết bị của HUẤN LUYỆN VIÊN, không dùng EQUIP cho Pokémon.
 - Độ THÂN MẬT của một Pokémon đang sở hữu thay đổi RÕ RÀNG vì hành động trong chính văn: [[FRIEND Tên Pokémon | +5 | lý do ngắn]] hoặc số âm khi niềm tin bị tổn thương. Chỉ dùng khi truyện thực sự thể hiện Pokémon được chăm sóc, được cứu, được khen/tặng món yêu thích, cùng vượt khó, bị bỏ rơi/ngược đãi hoặc mất niềm tin; KHÔNG cộng chỉ vì đi bộ, nói chuyện xã giao hay xuất hiện cùng nhau. Mỗi lượt thường trong ±1-10, sự kiện rất lớn tối đa ±30; app kẹp tổng 0-255.
@@ -36,6 +37,7 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Thời gian trong truyện trôi qua (ngủ một đêm, đi đường nhiều ngày, chờ đợi...): [[DATE +1]] (số ngày trôi); chuyển buổi trong cùng ngày: [[DATE buổi=sáng|trưa|chiều|tối|đêm]]. Ngày giờ hiện tại luôn được cung cấp trong ngữ cảnh — lời kể về thời gian phải khớp với nó.
 - NPC CÓ TÊN xuất hiện lần đầu, hoặc lộ thông tin quan trọng mới: khai báo hồ sơ bằng [[NPC Tên | tuổi=24 | nghề=Kiểm lâm | đội=Pikachu Lv25, Luxray Lv30 | ghi chú=em gái của trưởng gym]] — các trường tuổi/nghề/đội/ghi chú đều tuỳ chọn, cập nhật NPC cũ thì chỉ cần ghi trường thay đổi. QUY TẮC TẠO NPC: tên phải ĐA DẠNG đúng chất thế giới Pokémon (đừng lặp lại mãi vài cái tên quen tay như "Elara"); tuổi + nghề nghiệp hợp bối cảnh (dân thường đa số KHÔNG phải trainer); nếu là trainer thì đội hình 1-6 Pokémon hợp nghề/vùng/kinh nghiệm (tân binh thường 1-2, trainer lâu năm 3-6), LEVEL PHẢI HỢP LÝ với khu vực hiện tại và trình độ thật của trainer (dân thường/tân binh thấp, kiểm lâm/cảnh sát trung bình, gym leader cao) — không lạm phát level chỉ để đuổi theo người chơi. NPC gặp lại phải giữ đúng đội đã lưu; chỉ cập nhật khi truyện thật sự cho thấy họ bắt thêm, tiến hoá hoặc luyện đội mạnh lên, không reroll đội theo mỗi lần xuất hiện.
 - Khi người chơi THỰC SỰ được trao huy hiệu chính thức: [[BADGE Tên huy hiệu | region=Kanto | gym=Pewter Gym | leader=Brock]]. Huy hiệu là sưu tầm tự chọn trong sandbox; không trao chỉ vì thắng một trận không chính thức.
+- Chỉ trong chế độ Thực tế, khi chính văn xác nhận ĐỦ điều kiện triệu hồi/cuộc gặp huyền thoại (đúng di vật, đúng địa điểm và nghi thức/lore), khai [[LEGENDARY_ACCESS Tên loài | reason=lý do cụ thể]]. Không dùng vì đủ huy hiệu/nhiệm vụ, không dùng chỉ vì người chơi tuyên bố. Anime/Sảng văn không cần cổng này.
 - Nhiệm vụ được nhận/cập nhật/kết thúc rõ ràng: [[QUEST mã-ngắn | status=active|completed|failed|paused | title=... | giver=... | objective=... | reward=... | region=...]]. Dùng cùng một mã cho mọi lần cập nhật; chỉ completed khi chính văn xác nhận mục tiêu đã hoàn tất.
 - Danh tiếng với PHE PHÁI thay đổi: [[REP Tên phe=+5 | lý do]]; khác với REL của một NPC. Phạm tội, cứu người, phá kế hoạch hoặc hoàn thành việc cho phe phải có hậu quả hợp lý.
 - Mức TRUY NÃ thay đổi vì hành vi phạm pháp/được minh oan/nộp phạt: [[WANTED +1 | region=Kanto | reason=phá kho hàng | bounty=500]]. Số âm dùng khi giảm truy nã; không tự xoá chỉ vì sang lượt khác.
@@ -71,6 +73,7 @@ const FACT_RE = /\[\[\s*FACT\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 const REL_RE = /\[\[\s*REL\s+([^=\]|]+?)\s*=\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?)\s*)?\]\]/gi
 const BODY_RE = /\[\[\s*BODY\s+(head|torso|leftArm|rightArm|leftLeg|rightLeg)\s*=\s*([+-]?\d+)\s*\]\]/gi
 const SHOP_RE = /\[\[\s*SHOP\s+([^\]|]+?)(?:\s*\|\s*([^\]]*?))?\s*\]\]/gi
+const LOOT_RE = /\[\[\s*LOOT\s+([^\]]+?)\s*\]\]/gi
 // Đợt 71: nhân vật ĐANG Ở TRONG Trung tâm Pokémon → hiện nút Chữa trị + Máy PC.
 // Tên sau tag là tuỳ chọn ([[POKECENTER]] hoặc [[POKECENTER Trung tâm Viridian]]).
 // Đợt 72: AI TRAO / LẤY ĐI VẬT PHẨM. Đây là mắt xích còn thiếu khiến năng
@@ -85,6 +88,7 @@ const REP_RE = /\[\[\s*REP\s+([^=\]|]+?)\s*=\s*([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\
 const WANTED_RE = /\[\[\s*WANTED\s+([+-]?\d+)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi
 const RIBBON_RE = /\[\[\s*RIBBON\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 const MARK_RE = /\[\[\s*MARK\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
+const LEGENDARY_ACCESS_RE = /\[\[\s*LEGENDARY_ACCESS\s+([^\]|]+?)(?:\s*\|\s*reason\s*=\s*([^\]]+?))?\s*\]\]/gi
 
 /**
  * Parse mọi tag trạng thái trong text. Trả về:
@@ -94,12 +98,13 @@ const MARK_RE = /\[\[\s*MARK\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
  * Regex không neo dòng: model thực tế thường nhét tag giữa câu.
  */
 export function parseStoryStateTags(text) {
-  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], equipment: [], hunger: [], moves: [], moveDirectives: [], items: [], badges: [], quests: [], reputations: [], wanted: [], collectionAwards: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
+  if (!text) return { money: 0, moneyEntries: [], rel: [], body: [], shops: [], loots: [], npcs: [], facts: [], pokemons: [], levels: [], evolutions: [], friendships: [], equipment: [], hunger: [], moves: [], moveDirectives: [], items: [], badges: [], quests: [], reputations: [], wanted: [], legendaryAccess: [], collectionAwards: [], dateAdvance: 0, training: 0, datePart: null, pokecenter: null, cleaned: text ?? '' }
   let money = 0
   const moneyEntries = []
   const rel = []
   const body = []
   const shops = []
+  const loots = []
   const npcs = []
   const facts = []
   const pokemons = []
@@ -118,6 +123,7 @@ export function parseStoryStateTags(text) {
   const quests = []
   const reputations = []
   const wanted = []
+  const legendaryAccess = []
   const collectionAwards = []
 
   for (const m of text.matchAll(MONEY_RE)) {
@@ -148,6 +154,23 @@ export function parseStoryStateTags(text) {
       }
     }
     shops.push(shop)
+  }
+  for (const m of text.matchAll(LOOT_RE)) {
+    const loot = { type: 'tổng hợp', size: 'vừa' }
+    for (const segment of String(m[1] ?? '').split('|')) {
+      const part = segment.trim()
+      const at = part.indexOf('=')
+      if (at < 0) {
+        if (part) loot.type = part
+        continue
+      }
+      const key = part.slice(0, at).trim().toLowerCase()
+      const value = part.slice(at + 1).trim()
+      if (!value) continue
+      if (key === 'type' || key.startsWith('loại') || key.startsWith('loai')) loot.type = value
+      else if (key === 'size' || key.startsWith('quy')) loot.size = value
+    }
+    loots.push(loot)
   }
   // [[NPC Tên | key=value | key=value ...]] — phần sau tên là danh sách
   // trường key=value phân tách bởi |; đoạn không có dấu = thì gộp vào ghi chú.
@@ -256,12 +279,14 @@ export function parseStoryStateTags(text) {
   }
   for (const m of text.matchAll(RIBBON_RE)) collectionAwards.push({ kind: 'ribbon', target: m[1].trim(), name: m[2].trim() })
   for (const m of text.matchAll(MARK_RE)) collectionAwards.push({ kind: 'mark', target: m[1].trim(), name: m[2].trim() })
+  for (const m of text.matchAll(LEGENDARY_ACCESS_RE)) legendaryAccess.push({ species: m[1].trim(), reason: (m[2] ?? '').trim() })
 
   const cleaned = text
     .replace(MONEY_RE, '')
     .replace(REL_RE, '')
     .replace(BODY_RE, '')
     .replace(SHOP_RE, '')
+    .replace(LOOT_RE, '')
     .replace(POKECENTER_RE, '')
     .replace(ITEM_RE, '')
     .replace(NPC_RE, '')
@@ -283,6 +308,7 @@ export function parseStoryStateTags(text) {
     .replace(WANTED_RE, '')
     .replace(RIBBON_RE, '')
     .replace(MARK_RE, '')
+    .replace(LEGENDARY_ACCESS_RE, '')
     // Tag nằm giữa câu bị gỡ để lại vụn: ", ," / "( )" / 2 dấu cách — dọn nhẹ.
     .replace(/\(\s*\)/g, '')
     .replace(/\s+([,.;:!?])/g, '$1')
@@ -292,7 +318,7 @@ export function parseStoryStateTags(text) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 
-  return { money, moneyEntries, rel, body, shops, npcs, facts, pokemons, levels, evolutions, friendships, equipment, hunger, moves, moveDirectives, items, badges, quests, reputations, wanted, collectionAwards, dateAdvance,
+  return { money, moneyEntries, rel, body, shops, loots, npcs, facts, pokemons, levels, evolutions, friendships, equipment, hunger, moves, moveDirectives, items, badges, quests, reputations, wanted, legendaryAccess, collectionAwards, dateAdvance,
     training, datePart, pokecenter, cleaned }
 }
 

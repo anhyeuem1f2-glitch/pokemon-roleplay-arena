@@ -45,6 +45,39 @@ function mentions(text, value) {
   return tokens.length > 0 && tokens.every((token) => phraseRegex(token)?.test(hay))
 }
 
+function legendaryContextIsValid(entry, prose, options) {
+  if (options.adminMode || String(options.mode ?? '').toLowerCase() !== 'realistic') return true
+  const evidence = fold(`${entry.reason ?? ''} ${prose}`)
+  if (!String(entry.reason ?? '').trim()) return false
+  // Chỉ coi đây là nhánh triệu hồi khi lý do hoặc chính câu nói về loài đó
+  // mô tả nghi thức. Một di vật được nhắc ở đoạn khác không được vô tình biến
+  // cuộc gặp tự nhiên thành nghi thức rồi làm nó trượt kiểm tra địa điểm.
+  const speciesLines = storySentences(prose).filter((line) => mentions(line, entry.species)).join(' ')
+  const triggerEvidence = fold(`${entry.reason ?? ''} ${speciesLines}`)
+  const summons = /\b(trieu hoi|goi den|danh thuc|nghi thuc|di vat|stone)\b/.test(triggerEvidence)
+  if (!summons) return true // một cuộc gặp tự nhiên cực hiếm do chính văn phân xử
+
+  const species = fold(entry.species).replace(/\s/g, '')
+  const inventoryText = fold((options.inventory ?? []).filter((item) => item?.infinite || (item?.qty ?? 0) > 0)
+    .map((item) => `${item.id} ${item.name}`).join(' '))
+  const place = `${String(options.location?.regionKey ?? '').toLowerCase()}:${String(options.location?.areaKey ?? '').toLowerCase()}`
+  // Các nghi thức canon có điều kiện máy có thể xác minh. Không biến chúng
+  // thành khóa badge/quest; chỉ đối chiếu đúng di vật + đúng nơi nếu chính
+  // văn chọn con đường TRIỆU HỒI này. Gặp tự nhiên vẫn là nhánh riêng ở trên.
+  if (species === 'reshiram') {
+    const hasStone = /\b(light stone|white stone|da trang|bach thach)\b/.test(inventoryText)
+    return hasStone && place === 'unova:opelucid' && /dragonspiral/.test(evidence)
+  }
+  if (species === 'zekrom') {
+    const hasStone = /\b(dark stone|black stone|da den|hac thach)\b/.test(inventoryText)
+    return hasStone && place === 'unova:opelucid' && /dragonspiral/.test(evidence)
+  }
+  if (species === 'arceus' && /azure flute|sao thien|flute/.test(evidence)) {
+    return /azure flute/.test(inventoryText) && /hall of origin|spear pillar/.test(evidence)
+  }
+  return true
+}
+
 function genericMonTarget(value) {
   const key = fold(value)
   return key.includes('pokemon dang ra tran') || key.includes('pokemon hien tai') || key === 'pokemon'
@@ -100,6 +133,7 @@ const EQUIP_ITEM = ['đeo', 'trang bị', 'cho cầm', 'đưa cho giữ', 'gắn
 const UNEQUIP_ITEM = ['tháo', 'gỡ', 'cất lại', 'thu hồi', 'lấy lại', 'bỏ trang bị', 'không còn cầm']
 const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho']
 const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn']
+const LOOT_ACTION = ['vơ vét', 'lấy sạch', 'cuỗm', 'trộm được', 'thu chiến lợi phẩm', 'gom hết', 'nhặt được', 'tịch thu', 'mang số đồ', 'bỏ chiến lợi phẩm vào túi']
 const MOVE = [
   'đi tới', 'đi đến', 'đã tới', 'đã đến', 'tới nơi', 'đến nơi', 'đặt chân',
   'rời khỏi', 'đi vào', 'bước vào', 'đi qua', 'tiến về', 'khởi hành tới',
@@ -203,6 +237,10 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   const partyNames = (options.party ?? []).map((mon) => mon?.name).filter(Boolean)
 
   next.pokemons = (parsed?.pokemons ?? []).filter((entry) => {
+    if (options.blockPokemonAcquisition) {
+      reject(rejected, 'pokemon', entry, 'lượt khởi tạo tìm kiếm ở chế độ Thực tế chỉ được có manh mối hoặc không tìm thấy; không thể nhận Pokémon ngay')
+      return false
+    }
     const ok = sentenceEvidence(prose, entry.species, ACQUIRE)
     if (!ok) reject(rejected, 'pokemon', entry, `chính văn chưa xác nhận người chơi nhận ${entry.species}`)
     return ok
@@ -221,6 +259,22 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.items = (parsed?.items ?? []).filter((entry) => {
     const ok = sentenceEvidence(prose, entry.name, Number(entry.qty) > 0 ? RECEIVE_ITEM : LOSE_ITEM)
     if (!ok) reject(rejected, 'item', entry, `chính văn chưa xác nhận thay đổi vật phẩm ${entry.name}`)
+    return ok
+  })
+  next.loots = (parsed?.loots ?? []).filter((entry) => {
+    const type = fold(entry.type)
+    const typeAliases = type.includes('da quy') || type.includes('ngoc') ? ['đá quý', 'ngọc', 'trang sức', 'kho báu']
+      : type.includes('y te') || type.includes('thuoc') ? ['y tế', 'thuốc', 'phòng khám']
+        : type.includes('trainer') ? ['trainer', 'poké mart', 'poke mart', 'poké ball', 'poke ball']
+          : type.includes('thuc pham') || type.includes('do an') ? ['thực phẩm', 'đồ ăn', 'nhà bếp']
+            : type.includes('cong nghe') ? ['công nghệ', 'điện tử', 'phòng thí nghiệm', 'thiết bị']
+              : type.includes('quan ao') ? ['quần áo', 'thời trang', 'kho vải']
+                : []
+    const actionOk = storySentences(prose).some((line) => hasAny(line, LOOT_ACTION)
+      && !hasFutureOrConditional(line) && !hasNegation(line))
+    const typeOk = !type || type.includes('tong hop') || mentions(prose, entry.type) || hasAny(prose, typeAliases)
+    const ok = actionOk && typeOk
+    if (!ok) reject(rejected, 'loot', entry, 'chính văn chưa xác nhận đã lấy được chiến lợi phẩm đúng loại')
     return ok
   })
   next.moveDirectives = (parsed?.moveDirectives ?? []).filter((entry) => {
@@ -323,6 +377,16 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     if (!ok) reject(rejected, 'wanted', entry, 'chính văn chưa xác nhận mức truy nã thay đổi')
     return ok
   })
+  next.legendaryAccess = (parsed?.legendaryAccess ?? []).filter((entry) => {
+    const proseLine = storySentences(prose).find((line) => mentions(line, entry.species)
+      && hasAny(line, ['triệu hồi', 'đáp lại', 'thức tỉnh', 'hiện thân', 'xuất hiện', 'cánh cổng', 'nghi thức', 'di vật'])
+      && !hasFutureOrConditional(line) && !hasNegation(line))
+    const reasonOk = !entry.reason || words(entry.reason).filter((token) => token.length >= 4)
+      .some((token) => phraseRegex(token)?.test(fold(prose)))
+    const ok = Boolean(proseLine && reasonOk && legendaryContextIsValid(entry, prose, options))
+    if (!ok) reject(rejected, 'legendaryAccess', entry, `chính văn chưa xác nhận điều kiện triệu hồi/cuộc gặp ${entry.species}`)
+    return ok
+  })
   next.collectionAwards = (parsed?.collectionAwards ?? []).filter((entry) => {
     const ok = (genericMonTarget(entry.target) || mentions(prose, entry.target)) && mentions(prose, entry.name)
       && hasAny(prose, ['ribbon', 'ruy băng', 'mark', 'dấu ấn', 'trao', 'nhận được'])
@@ -337,6 +401,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.levels = dedupeEntries(next.levels, 'level', rejected)
   next.evolutions = dedupeEntries(next.evolutions, 'evolve', rejected)
   next.items = dedupeEntries(next.items, 'item', rejected)
+  next.loots = dedupeEntries(next.loots, 'loot', rejected)
   next.moveDirectives = dedupeEntries(next.moveDirectives, 'move', rejected)
   next.moves = next.moveDirectives.map((entry) => entry.place)
   next.equipment = dedupeEntries(next.equipment, 'equipment', rejected)
@@ -350,6 +415,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.quests = dedupeEntries(next.quests, 'quest', rejected)
   next.reputations = dedupeEntries(next.reputations, 'rep', rejected)
   next.wanted = dedupeEntries(next.wanted, 'wanted', rejected)
+  next.legendaryAccess = dedupeEntries(next.legendaryAccess, 'legendaryAccess', rejected)
   next.collectionAwards = dedupeEntries(next.collectionAwards, 'collection', rejected)
   if (parsed?.pokecenter) {
     const named = parsed.pokecenter.name && parsed.pokecenter.name !== 'Trung tâm Pokémon'

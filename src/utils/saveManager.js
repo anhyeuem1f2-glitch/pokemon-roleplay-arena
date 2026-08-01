@@ -1,4 +1,5 @@
 import { readLargeCache, writeLargeCache } from './browserCache.js'
+import { exportArchiveEntries, importArchiveEntries } from './storyArchive.js'
 
 // ============ LƯU / TẢI GAME (đợt 69) ============
 // Yêu cầu người chơi: "cập nhật thêm tính năng save game như Pokémon gốc".
@@ -12,6 +13,7 @@ import { readLargeCache, writeLargeCache } from './browserCache.js'
 const PREFIX = 'trainer-arena:'
 const SLOT_KEY = 'trainer-arena-saves:v1'
 const SLOT_DB_KEY = 'save-slots:v2'
+const TURN_CHECKPOINT_KEY = 'turn-checkpoint:v1'
 export const MAX_SLOTS = 3
 
 // Khoá KHÔNG thuộc ván chơi → không lưu vào save, không ghi đè khi tải.
@@ -48,6 +50,39 @@ export function snapshotGame() {
     }
   } catch { /* ignore */ }
   return data
+}
+
+/**
+ * Checkpoint duy nhất cho lượt đang chờ/đã trả lời gần nhất. Reroll trong UI chỉ
+ * được phép ở lượt cuối nên không cần giữ 2.000 bản sao state. Lưu IndexedDB để
+ * party/worldbook lớn không ăn quota localStorage.
+ */
+export async function saveTurnCheckpoint(trainerId, baseMessages, userText) {
+  const data = snapshotGame()
+  delete data['trainer-arena:messages']
+  const payload = {
+    trainerId: String(trainerId ?? ''),
+    savedAt: Date.now(),
+    data,
+    baseMessages: Array.isArray(baseMessages) ? baseMessages : [],
+    userText: String(userText ?? ''),
+  }
+  if (!await writeLargeCache(`${TURN_CHECKPOINT_KEY}:${payload.trainerId}`, payload)) {
+    throw new Error('Không tạo được checkpoint an toàn cho lượt mới; hãy giải phóng bộ nhớ trình duyệt rồi thử lại.')
+  }
+  return payload
+}
+
+export async function restoreTurnCheckpoint(trainerId, replacementUserText = null, expectedUserIndex = null) {
+  const key = `${TURN_CHECKPOINT_KEY}:${String(trainerId ?? '')}`
+  const checkpoint = await readLargeCache(key)
+  if (!checkpoint || checkpoint.trainerId !== String(trainerId ?? '')) return null
+  if (Number.isInteger(expectedUserIndex) && (checkpoint.baseMessages?.length ?? 0) !== expectedUserIndex) return null
+  applySnapshot(checkpoint.data)
+  const userText = replacementUserText === null ? checkpoint.userText : String(replacementUserText)
+  const restoredMessages = [...(checkpoint.baseMessages ?? []), { role: 'user', content: userText }]
+  try { localStorage.setItem('trainer-arena:messages', JSON.stringify(restoredMessages)) } catch { /* storageOptimizer sẽ xử lý lại sau reload */ }
+  return { ...checkpoint, userText, restoredMessages }
 }
 
 /** Thông tin tóm tắt để hiển thị trên ô save (như màn hình save game gốc). */
@@ -146,8 +181,9 @@ export async function listSaves() {
 /** Lưu ván hiện tại vào ô `slot`. Ném lỗi nếu bộ nhớ đầy. */
 export async function saveToSlot(slot) {
   const data = snapshotGame()
+  const archive = await exportArchiveEntries(data[PREFIX + 'trainer-id'] || 'legacy')
   const slots = await loadSlots()
-  slots[slot] = { savedAt: Date.now(), info: describeSnapshot(data), data }
+  slots[slot] = { savedAt: Date.now(), info: describeSnapshot(data), data, archive }
   try {
     await persistSlots(slots)
   } catch {
@@ -165,6 +201,9 @@ export async function loadFromSlot(slot) {
   const entry = slots[slot]
   if (!entry?.data) return false
   applySnapshot(entry.data)
+  // Save đời cũ chưa đóng gói archive: xoá nhánh IndexedDB tương lai của
+  // cùng trainer rồi để backfill từ messages của slot chạy sau reload.
+  await importArchiveEntries(Array.isArray(entry.archive) ? entry.archive : [], entry.data[PREFIX + 'trainer-id'] || 'legacy')
   return true
 }
 
@@ -191,13 +230,15 @@ export function applySnapshot(data) {
 }
 
 /** Xuất ván hiện tại ra file .json để cất ra ngoài trình duyệt. */
-export function exportSaveFile() {
+export async function exportSaveFile() {
+  const data = snapshotGame()
   const payload = {
     format: 'trainer-arena-save',
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
-    info: describeSnapshot(snapshotGame()),
-    data: snapshotGame(),
+    info: describeSnapshot(data),
+    data,
+    archive: await exportArchiveEntries(data[PREFIX + 'trainer-id'] || 'legacy'),
   }
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -223,5 +264,6 @@ export async function importSaveFile(file) {
     throw new Error('File này không phải file save của Trainer Arena.')
   }
   applySnapshot(payload.data)
+  await importArchiveEntries(Array.isArray(payload.archive) ? payload.archive : [], payload.data[PREFIX + 'trainer-id'] || 'legacy')
   return describeSnapshot(payload.data)
 }

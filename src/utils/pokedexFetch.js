@@ -11,11 +11,16 @@ import { readLargeCache, writeLargeCache, removeLegacyLocalCache } from './brows
 // cho 1 số loài nhất định, và những loài đó ĐÃ nằm sẵn trong dữ liệu tải về.
 
 const POKEDEX_URL = 'https://play.pokemonshowdown.com/data/pokedex.json'
-// v11 giữ dex number/gen/form/tags để Pokédex hành trình và encounter sinh
-// thái không phải đoán từ tên. Giữ tên v10 ở hằng legacy để regression cũ
-// nhận diện đường migration và localStorage cũ được dọn sau khi tải lại.
-const CACHE_KEY = 'trainer-arena:pokedex-cache-v11'
-const LEGACY_CACHE_KEY = 'trainer-arena:pokedex-cache-v10'
+// v14 giữ dữ liệu tiến hoá/sinh sản/catch rate và sửa kế thừa Friendship cho
+// các forme. Cache cũ đã gán 70 quá sớm nên Mega/forme có thể mất mức thân
+// mật gốc của loài cơ sở.
+const CACHE_KEY = 'trainer-arena:pokedex-cache-v14'
+const LEGACY_CACHE_KEYS = [
+  'trainer-arena:pokedex-cache-v13',
+  'trainer-arena:pokedex-cache-v12',
+  'trainer-arena:pokedex-cache-v11',
+  'trainer-arena:pokedex-cache-v10',
+]
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 function toID(text) {
@@ -78,7 +83,8 @@ function normalizeEntry(species, key) {
       : [],
     // Một số loài bắt đầu với mức thân mật khác 70 (đặc biệt nhóm huyền
     // thoại). Giữ dữ liệu thật nếu Showdown cung cấp; save cũ vẫn fallback 70.
-    baseFriendship: Number.isFinite(species.baseFriendship) ? species.baseFriendship : 70,
+    baseFriendship: Number.isFinite(species.baseFriendship) ? species.baseFriendship : null,
+    catchRate: Number.isFinite(species.catchRate) ? species.catchRate : null,
     // Nhiều form/mega/regional (VD Necrozma-Ultra) KHÔNG có learnset riêng
     // trong dữ liệu — cần fallback về learnset của loài GỐC (VD Necrozma) vì
     // trong game thật, các form này thường học đúng bộ chiêu của loài gốc.
@@ -89,6 +95,19 @@ function normalizeEntry(species, key) {
     requiredItems: Array.isArray(species.requiredItems) ? [...species.requiredItems] : [],
     battleOnly: species.battleOnly ?? null,
     changesFrom: species.changesFrom ?? null,
+    // Giữ trọn điều kiện tiến hoá do Showdown công bố. Chỉ giữ evoLevel từng
+    // khiến mọi nhánh dùng đá/tình bạn/thời gian/chiêu/trao đổi bị coi như tự do.
+    evoType: species.evoType ?? null,
+    evoItem: species.evoItem ?? null,
+    evoMove: species.evoMove ?? null,
+    evoCondition: species.evoCondition ?? null,
+    evoRegion: species.evoRegion ?? null,
+    evoGender: species.evoGender ?? null,
+    // Dữ liệu vòng đời: tỉ lệ giới tính và Egg Group phải đi cùng loài; không
+    // random 50/50 cho Pokémon vô giới tính và không chỉ cho cùng loài sinh sản.
+    gender: species.gender ?? null,
+    genderRatio: species.genderRatio ? { ...species.genderRatio } : null,
+    eggGroups: Array.isArray(species.eggGroups) ? [...species.eggGroups] : [],
     // Đợt 39 — suy MỨC LEVEL HỢP LÝ: hasPrevo (đã tiến hoá từ loài khác),
     // hasEvo (còn tiến hoá được), BST (tổng base stats) làm proxy độ mạnh.
     hasPrevo: Boolean(species.prevo),
@@ -104,6 +123,37 @@ function normalizeEntry(species, key) {
   }
 }
 
+function enrichSpeciesLinks(list) {
+  const byId = new Map()
+  for (const entry of list) {
+    for (const key of [entry.species, entry.name]) byId.set(toID(key), entry)
+  }
+  return list.map((entry) => {
+    const base = entry.baseSpeciesId ? byId.get(toID(entry.baseSpeciesId)) : null
+    const hydrated = base ? {
+      ...entry,
+      gender: entry.gender ?? base.gender,
+      genderRatio: entry.genderRatio ?? base.genderRatio,
+      eggGroups: entry.eggGroups?.length ? entry.eggGroups : base.eggGroups,
+      catchRate: entry.catchRate ?? base.catchRate,
+      baseFriendship: entry.baseFriendship ?? base.baseFriendship,
+    } : entry
+    let root = hydrated
+    const seen = new Set()
+    while (root?.prevo && !seen.has(toID(root.prevo))) {
+      seen.add(toID(root.prevo))
+      const previous = byId.get(toID(root.prevo))
+      if (!previous) break
+      root = previous
+    }
+    return {
+      ...hydrated,
+      eggSpecies: root?.species ?? hydrated.species,
+      eggSpeciesName: root?.name ?? hydrated.name,
+    }
+  })
+}
+
 /**
  * Tải toàn bộ pokedex (ưu tiên cache trong localStorage nếu còn mới), trả về
  * mảng {name, species, spriteId, types}. Ném lỗi nếu cả cache lẫn mạng đều
@@ -115,7 +165,7 @@ export async function loadFullPokedex() {
   const cachedDb = await readLargeCache(CACHE_KEY)
   if (cachedDb && Date.now() - cachedDb.savedAt < CACHE_MAX_AGE && cachedDb.list?.length > 500) {
     removeLegacyLocalCache(CACHE_KEY)
-    removeLegacyLocalCache(LEGACY_CACHE_KEY)
+    for (const key of LEGACY_CACHE_KEYS) removeLegacyLocalCache(key)
     return cachedDb.list
   }
 
@@ -127,7 +177,7 @@ export async function loadFullPokedex() {
       if (Date.now() - parsed.savedAt < CACHE_MAX_AGE && parsed.list?.length > 500) {
         await writeLargeCache(CACHE_KEY, parsed)
         removeLegacyLocalCache(CACHE_KEY)
-        removeLegacyLocalCache(LEGACY_CACHE_KEY)
+        for (const key of LEGACY_CACHE_KEYS) removeLegacyLocalCache(key)
         return parsed.list
       }
     }
@@ -138,9 +188,9 @@ export async function loadFullPokedex() {
   const res = await fetch(POKEDEX_URL)
   if (!res.ok) throw new Error(`Không tải được pokedex.json (${res.status})`)
   const data = await res.json()
-  const list = Object.entries(data)
+  const list = enrichSpeciesLinks(Object.entries(data)
     .map(([key, species]) => normalizeEntry(species, key))
-    .filter(Boolean)
+    .filter(Boolean))
 
   if (list.length < 500) {
     throw new Error('Dữ liệu tải về bất thường (quá ít loài) — có thể định dạng đã đổi.')
@@ -148,6 +198,6 @@ export async function loadFullPokedex() {
 
   await writeLargeCache(CACHE_KEY, { savedAt: Date.now(), list })
   removeLegacyLocalCache(CACHE_KEY)
-  removeLegacyLocalCache(LEGACY_CACHE_KEY)
+  for (const key of LEGACY_CACHE_KEYS) removeLegacyLocalCache(key)
   return list
 }

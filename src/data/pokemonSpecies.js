@@ -6,6 +6,7 @@ import { createStableId, publicPokemonCode } from './persistentIdentity.js'
 import { ALL_TYPES, getEffectivenessMulti } from './pokemonTypes.js'
 import { resolveAbilityForEntry } from './pokemonAbilities.js'
 import { DEFAULT_FRIENDSHIP, friendshipTier, normalizeFriendship } from './pokemonFriendship.js'
+import { genderLabel, genderSymbol, normalizePokemonGender, rollGenderForSpecies } from './pokemonGender.js'
 
 export const POKEMON_SPECIES = [
   { name: 'Bulbasaur', species: 'bulbasaur', types: ['grass', 'poison'] },
@@ -269,15 +270,6 @@ export function recomputeMonStats(mon) {
   const wasFainted = Number(mon.hp) <= 0
   const adjustedHp = (mon.hp ?? newMax) + hpDelta
   return { ...mon, stats, maxHp: newMax, hp: wasFainted ? 0 : Math.max(1, Math.min(newMax, adjustedHp)) }
-}
-
-function rollGenderForSpecies(speciesEntry) {
-  if (speciesEntry?.gender === 'N') return 'unknown'
-  if (speciesEntry?.gender === 'M') return 'male'
-  if (speciesEntry?.gender === 'F') return 'female'
-  const maleChance = Number(speciesEntry?.genderRatio?.M)
-  if (Number.isFinite(maleChance)) return Math.random() < maleChance ? 'male' : 'female'
-  return Math.random() < 0.5 ? 'male' : 'female'
 }
 
 function rollTeraType(speciesEntry) {
@@ -900,7 +892,7 @@ export function validateEvolutionRequirements(mon, fromEntry, targetEntry, conte
   }
   const condition = String(targetEntry.evoCondition ?? '').toLowerCase()
   const part = String(context.storyDate?.part ?? '').toLowerCase()
-  if (targetEntry.evoGender && String(mon.gender).toLowerCase() !== String(targetEntry.evoGender).toLowerCase()) {
+  if (targetEntry.evoGender && normalizePokemonGender(mon.gender) !== normalizePokemonGender(targetEntry.evoGender)) {
     return { ok: false, reason: `cần giới tính ${targetEntry.evoGender}` }
   }
   if (targetEntry.evoRegion) {
@@ -1129,6 +1121,7 @@ export function describeMonForPrompt(mon) {
   let line = parts.join('')
   if (mon.nature) line += ` — Nature ${describeNatureBehavior(mon)}`
   if (mon.ability) line += ` — Ability ${mon.ability}`
+  if (mon.gender !== undefined && mon.gender !== null) line += ` — giới tính ${genderSymbol(mon.gender)} ${genderLabel(mon.gender)}`
   const friendship = normalizeFriendship(mon)
   const bond = friendshipTier(friendship.friendship)
   line += ` — độ thân mật ${friendship.friendship}/255 (${bond.label}: ${bond.note})`

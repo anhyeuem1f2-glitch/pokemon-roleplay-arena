@@ -1,4 +1,5 @@
 import { createStableId, ensurePokemonIdentity } from './persistentIdentity.js'
+import { ensurePokemonGender } from './pokemonGender.js'
 
 export const CONTEST_CATEGORIES = [
   { key: 'cool', label: 'Cool', stat: 'atk' },
@@ -19,18 +20,17 @@ export function normalizePokemonLife(value) {
   }
 }
 
-export function rollPokemonLifeTraits(mon, ownerTrainerId = null) {
+export function rollPokemonLifeTraits(mon, ownerTrainerId = null, speciesEntry = null) {
   const base = ensurePokemonIdentity(mon, ownerTrainerId)
   if (!base) return base
   const shiny = mon.shiny === undefined ? Math.random() < 1 / 4096 : Boolean(mon.shiny)
-  const gender = mon.gender ?? (Math.random() < 0.5 ? 'male' : 'female')
   const sizeClass = mon.sizeClass ?? (Math.random() < 0.06 ? 'tiny' : Math.random() > 0.94 ? 'jumbo' : 'average')
   const marks = [...(base.marks ?? [])]
   if (marks.length === 0 && Math.random() < 1 / 80) {
     const pool = ['Dấu Ấn Hiếu Kỳ', 'Dấu Ấn Điềm Tĩnh', 'Dấu Ấn Năng Động', 'Dấu Ấn Hay Đói', 'Dấu Ấn Lang Thang']
     marks.push(pool[Math.floor(Math.random() * pool.length)])
   }
-  return { ...base, shiny, gender, sizeClass, marks }
+  return ensurePokemonGender({ ...base, shiny, sizeClass, marks }, speciesEntry)
 }
 
 export function breedingCompatibility(first, second) {

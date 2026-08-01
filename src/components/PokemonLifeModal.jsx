@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { awardContest, campWithPokemon, careForEgg, CONTEST_CATEGORIES, contestScore, createEgg, rollPokemonLifeTraits } from '../data/pokemonLife.js'
 import { buildMonSmart, normalizeAcquiredMon, recomputeMonStats } from '../data/pokemonSpecies.js'
+import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 
 const sameMon = (a, b) => Boolean(a && b && (a.uid === b.uid || a.pokemonId === b.pokemonId))
 
@@ -59,7 +60,7 @@ export default function PokemonLifeModal({ onClose }) {
   function hatch(egg) {
     const entry = pokedexSpecies.find((item) => String(item.species).toLowerCase() === String(egg.species).toLowerCase() || item.name.toLowerCase() === String(egg.speciesName).toLowerCase())
     if (!entry) return setNotice('Chưa tìm thấy dữ liệu loài để nở trứng.')
-    let mon = rollPokemonLifeTraits(normalizeAcquiredMon(buildMonSmart(entry, 1, movesDb)), trainerId)
+    let mon = rollPokemonLifeTraits(normalizeAcquiredMon(buildMonSmart(entry, 1, movesDb)), trainerId, entry)
     mon = recomputeMonStats({
       ...mon,
       nature: egg.inheritedNature ?? mon.nature,
@@ -97,7 +98,7 @@ export default function PokemonLifeModal({ onClose }) {
           {tab === 'camp' && <Section title="Picnic / cắm trại"><MonSelect owned={owned} value={selectedId} onChange={setSelectedId} /><button className="btn" onClick={camp} style={{ marginTop: 10 }}>⛺ Ăn và nghỉ cùng nhau</button><p>Hồi độ no cho cả nhóm và +3 thân mật. Không tự hồi HP để giữ luật Trung tâm Pokémon/vật phẩm.</p></Section>}
           {tab === 'eggs' && <><Section title="Nhân giống"><div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}><MonSelect owned={owned} value={firstId} onChange={setFirstId} /><MonSelect owned={owned} value={secondId} onChange={setSecondId} /></div><button className="btn" onClick={breed} style={{ marginTop: 10 }}>🥚 Kiểm tra và nhận trứng</button><p>Dùng Egg Group, giới tính và Ditto đúng luật; loài Undiscovered không thể sinh sản. Trứng nở thành dạng cơ bản của dòng tiến hóa.</p></Section><div style={{ display: 'grid', gap: 8 }}>{pokemonLife.eggs.map((egg) => <Section key={egg.id} title={`${egg.eggCode} · ${egg.speciesName}`}><div>Ấp: {egg.care}/{egg.neededCare}</div>{egg.status === 'ready' ? <button className="btn" onClick={() => hatch(egg)}>Nở trứng</button> : <button className="btn" onClick={() => care(egg)}>Chăm sóc</button>}</Section>)}</div></>}
           {tab === 'contest' && <Section title="Pokémon Contest"><MonSelect owned={owned} value={selectedId} onChange={setSelectedId} /><select value={category} onChange={(event) => setCategory(event.target.value)} style={{ marginLeft: 8 }}>{CONTEST_CATEGORIES.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select><button className="btn" onClick={contest} style={{ marginLeft: 8 }}>Biểu diễn</button><div style={{ marginTop: 12 }}>Thành tích gần đây: {pokemonLife.contestRecords.slice(-5).reverse().map((record) => <div key={record.id}>{record.category} · {record.score} · {record.rank}</div>)}</div></Section>}
-          {tab === 'collection' && <div style={{ display: 'grid', gap: 8 }}>{owned.map((mon) => <Section key={mon.uid} title={`${mon.shiny ? '✨ ' : ''}${mon.name} · ${mon.pokemonId}`}><div>Giới tính: {mon.gender} · kích thước: {mon.sizeClass}</div><div>Ribbon: {(mon.ribbons ?? []).join(', ') || 'chưa có'}</div><div>Mark: {(mon.marks ?? []).join(', ') || 'chưa có'}</div></Section>)}</div>}
+          {tab === 'collection' && <div style={{ display: 'grid', gap: 8 }}>{owned.map((mon) => <Section key={mon.uid} title={`${mon.shiny ? '✨ ' : ''}${mon.name} · ${mon.pokemonId}`}><div>Giới tính: {genderSymbol(mon.gender)} {genderLabel(mon.gender)} · kích thước: {mon.sizeClass}</div><div>Ribbon: {(mon.ribbons ?? []).join(', ') || 'chưa có'}</div><div>Mark: {(mon.marks ?? []).join(', ') || 'chưa có'}</div></Section>)}</div>}
         </div>
       </div>
     </div>

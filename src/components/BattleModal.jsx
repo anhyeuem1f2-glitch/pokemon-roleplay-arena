@@ -5,6 +5,7 @@ import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
 import { buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, syncMonInParty } from '../data/pokemonSpecies.js'
+import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
 import { musicManager } from '../utils/musicManager.js'
@@ -1155,8 +1156,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             // Đợt 71: dặn model biết đây là Pokémon có chủ (app vẫn chặn
             // cứng ở dưới, đây chỉ là lớp cho lời kể hợp lý hơn).
             isWild ? '' : 'QUAN TRỌNG: bạn ĐÃ CÓ CHỦ và trung thành với huấn luyện viên của mình. TUYỆT ĐỐI không dùng kết quả "join" — bạn không bao giờ bỏ chủ để theo người lạ. Cùng lắm là "calm" (nguôi giận, ngừng đánh).',
-            `Đối phương (bạn đóng vai): ${enemyMon.name} Lv${enemyMon.level}, hệ ${enemyMon.types.join('/')}, HP còn ${hpPct}%${isBoss ? ', là boss huyền thoại kiêu hãnh' : ''}. Nature và khí chất: ${describeNatureBehavior(enemyMon)}.`,
-            `Pokémon phe người chơi: ${playerMon.name} Lv${playerMon.level}, HP còn ${Math.round((playerMon.hp / playerMon.maxHp) * 100)}%. Nature và khí chất: ${describeNatureBehavior(playerMon)}.`,
+            `Đối phương (bạn đóng vai): ${enemyMon.name} ${genderSymbol(enemyMon.gender)} ${genderLabel(enemyMon.gender)}, Lv${enemyMon.level}, hệ ${enemyMon.types.join('/')}, HP còn ${hpPct}%${isBoss ? ', là boss huyền thoại kiêu hãnh' : ''}. Nature và khí chất: ${describeNatureBehavior(enemyMon)}.`,
+            `Pokémon phe người chơi: ${playerMon.name} ${genderSymbol(playerMon.gender)} ${genderLabel(playerMon.gender)}, Lv${playerMon.level}, HP còn ${Math.round((playerMon.hp / playerMon.maxHp) * 100)}%. Nature và khí chất: ${describeNatureBehavior(playerMon)}.`,
             `Người chơi vừa NÓI với bạn (thuyết phục dừng đánh / dụ dỗ đi theo / doạ nạt / trò chuyện). Phản hồi NGẮN 1-3 câu đúng bản chất loài VÀ Nature hiện tại: phản ứng bằng hành vi, tiếng kêu, ánh mắt, cử chỉ — KHÔNG nói tiếng người. Nature là khí chất nền, phải biến đổi tự nhiên theo tình trạng HP và hoàn cảnh thay vì lặp máy móc một cử chỉ.`,
             `Sau đó KẾT THÚC bằng đúng 1 dòng: [[TALK result=continue|calm|join|flee]] theo quy tắc:`,
             `- continue: chưa lay chuyển được (mặc định khi lời nói thiếu thuyết phục).`,

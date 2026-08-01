@@ -5,6 +5,7 @@ import { describeNature, expProgress, isSameMon, MAX_LEVEL } from '../data/pokem
 import { abilityLabel } from '../data/pokemonAbilities.js'
 import { describeFriendship, friendshipTier, normalizeFriendship } from '../data/pokemonFriendship.js'
 import { heldItemDescription, heldItemLabel } from '../data/pokemonHeldItems.js'
+import { genderLabel, genderRatioLabel, genderSymbol } from '../data/pokemonGender.js'
 
 const STAT_LABELS = {
   hp: 'HP', atk: 'Tấn công', def: 'Phòng thủ', spa: 'TC đặc biệt', spd: 'PT đặc biệt', spe: 'Tốc độ',
@@ -32,7 +33,7 @@ function PartyEntry({ mon, selected, onClick }) {
     <button className={`summary-party__entry ${selected ? 'is-selected' : ''}`} onClick={onClick} type="button">
       <span className="summary-party__sprite"><MonAvatar mon={mon} side="enemy" /></span>
       <span className="summary-party__copy">
-        <strong>{mon.name}</strong>
+        <strong>{mon.name} <span aria-label={genderLabel(mon.gender)}>{genderSymbol(mon.gender)}</span></strong>
         <span>Lv.{mon.level}{mon.status ? ` · ${mon.status}` : ''}</span>
         <span className="summary-party__hp"><i style={{ width: `${pct(mon.hp, mon.maxHp)}%` }} /></span>
         <small>{mon.hp}/{mon.maxHp}</small>
@@ -97,7 +98,7 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
           <header className="pokemon-summary__header">
             <div>
               <div className="pokemon-summary__eyebrow">POKÉMON SUMMARY</div>
-              <h2 id="pokemon-summary-title">{current.name} <span>Lv.{current.level}</span></h2>
+              <h2 id="pokemon-summary-title">{current.name} <b title={genderLabel(current.gender)}>{genderSymbol(current.gender)}</b> <span>Lv.{current.level}</span></h2>
               <div className="pokemon-summary__types">{(current.types ?? []).map((type) => <TypeBadge key={type} type={type} />)}</div>
             </div>
             <button className="pokemon-summary__close" onClick={onClose} type="button">Đóng</button>
@@ -129,7 +130,10 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
 
               <div className="summary-info-grid">
                 <div className="summary-info-card">
-                  <span>MÃ CÁ THỂ</span><strong>{current.pokemonId ?? current.uid ?? '—'}</strong><small>{current.shiny ? '✨ Shiny' : 'Màu thường'} · {current.gender ?? 'unknown'} · {current.sizeClass ?? 'average'}</small>
+                  <span>MÃ CÁ THỂ</span><strong>{current.pokemonId ?? current.uid ?? '—'}</strong><small>{current.shiny ? '✨ Shiny' : 'Màu thường'} · {current.sizeClass ?? 'average'}</small>
+                </div>
+                <div className="summary-info-card">
+                  <span>GIỚI TÍNH</span><strong>{genderSymbol(current.gender)} {genderLabel(current.gender)}</strong><small>{genderRatioLabel(current)}</small>
                 </div>
                 <div className="summary-info-card">
                   <span>TÍNH CÁCH</span><strong>{describeNature(current.nature)}</strong>

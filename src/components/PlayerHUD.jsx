@@ -4,6 +4,8 @@ import { useGame } from '../context/GameContext.jsx'
 import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
+import MonAvatar from './MonAvatar.jsx'
+import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import AvatarPicker from './AvatarPicker.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { describeCustomMechanicEffects } from '../data/playerPerks.js'
@@ -217,7 +219,7 @@ export default function PlayerHUD({ mobile = false }) {
             <button
               key={i}
               onClick={() => mon && setInfoMon(mon)}
-              title={mon ? `${mon.name} Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${(mon.hp ?? 0) <= 0 ? ' (đã gục — cần Trung tâm Pokémon)' : ''}${mon.status ? ` [${mon.status}]` : ''} — bấm xem chi tiết` : 'Ô trống'}
+              title={mon ? `${mon.name} ${genderSymbol(mon.gender)} ${genderLabel(mon.gender)} · Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${(mon.hp ?? 0) <= 0 ? ' (đã gục — cần Trung tâm Pokémon)' : ''}${mon.status ? ` [${mon.status}]` : ''} — bấm xem chi tiết` : 'Ô trống'}
               style={{
                 aspectRatio: '1',
                 border: mon ? '1px solid var(--line)' : '1px dashed var(--line)',
@@ -234,17 +236,9 @@ export default function PlayerHUD({ mobile = false }) {
             >
               {mon ? (
                 <>
-                  <img
-                    src={`https://play.pokemonshowdown.com/sprites/home/${(mon.spriteId ?? mon.species).replace(/[^a-z0-9-]/g, '')}.png`}
-                    alt={mon.name}
-                    style={{ width: '78%', height: '68%', objectFit: 'contain' }}
-                    onError={(e) => {
-                      // Sprite lỗi → chữ cái đầu (fallback giống MonAvatar).
-                      e.currentTarget.outerHTML = `<span style="font-size:15px;color:var(--text-mid)">${mon.name[0]}</span>`
-                    }}
-                  />
+                  <MonAvatar mon={mon} side="enemy" size={44} />
                   <span style={{ fontSize: 8.5, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
-                    Lv{mon.level}
+                    {genderSymbol(mon.gender)} · Lv{mon.level}
                   </span>
                   {/* Đợt 71: máu KHÔNG còn tự hồi sau trận nữa, nên đội hình
                       phải nhìn thấy được con nào đang thương tích — không thì

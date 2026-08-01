@@ -7,6 +7,7 @@ import TypeBadge from './TypeBadge.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyPerksToMon } from '../data/playerPerks.js'
 import { describeNatureBehavior, normalizeAcquiredMon } from '../data/pokemonSpecies.js'
+import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 
 // ============ CHẾ ĐỘ SAFARI (đợt 37) ============
@@ -99,7 +100,7 @@ export default function SafariModal({ onClose, onSafariEnd }) {
           role: 'system',
           content: [
             `Bạn là trọng tài cho một cảnh DỤ DỖ Pokémon hoang trong khu Safari (KHÔNG đánh nhau).`,
-            `Pokémon: ${enemyMon.name}, hệ ${enemyMon.types.join('/')}. Nature và khí chất: ${describeNatureBehavior(enemyMon)}. Người chơi đang tìm cách nói/hành động để nó tin tưởng và chịu theo về.`,
+            `Pokémon: ${enemyMon.name} ${genderSymbol(enemyMon.gender)} ${genderLabel(enemyMon.gender)}, hệ ${enemyMon.types.join('/')}. Nature và khí chất: ${describeNatureBehavior(enemyMon)}. Người chơi đang tìm cách nói/hành động để nó tin tưởng và chịu theo về.`,
             `Đọc lời/hành động của người chơi và chấm mức độ THUYẾT PHỤC dựa trên tập tính loài, Nature hiện tại, sự chân thành và cách tiếp cận. Cùng một lời nói có thể hiệu quả khác nhau với Nature Timid, Adamant, Careful hay Naive.`,
             `Viết 1-2 câu MÔ TẢ phản ứng đúng loài VÀ đúng Nature của Pokémon (tiếng Việt), rồi kết thúc bằng đúng 1 dòng tag: [[DUDO catch=+N flee=-M]] với N (0-20) là mức tăng khả năng bắt, M (0-15) là mức giảm khả năng bỏ chạy. Lời dở/khiến nó sợ thì N nhỏ hoặc 0 và có thể flee=+.`,
           ].join('\n'),

@@ -18,6 +18,7 @@ import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.
 import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
 import { verifyAdminCode } from '../data/adminMode.js'
 import { normalizeStoryTone } from '../data/storyTones.js'
+import { ensurePokemonGender } from '../data/pokemonGender.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -807,7 +808,8 @@ export function GameProvider({ children }) {
       const entry = (pokedexSpecies ?? []).find((item) =>
         abilityId(item.species) === key || abilityId(item.name) === key,
       )
-      const normalized = ensureMonAbility(normalizeFriendship(mon, entry?.baseFriendship), pokedexSpecies)
+      const withGender = ensurePokemonGender(mon, entry)
+      const normalized = ensureMonAbility(normalizeFriendship(withGender, entry?.baseFriendship), pokedexSpecies)
       return {
         ...normalized,
         heldItem: normalizeHeldItem(normalized.heldItem),
@@ -819,7 +821,26 @@ export function GameProvider({ children }) {
     setPlayerMon((cur) => upgrade(cur))
     setParty((cur) => (cur ?? []).map(upgrade))
     setPcBox((cur) => (cur ?? []).map(upgrade))
-  }, [pokedexStatus, pokedexSpecies, setParty, setPcBox, setPlayerMon])
+    setEnemyMon((cur) => upgrade(cur))
+    // Snapshot đối thủ trong lịch sử cũng được vá để mở lại trận/lượt cũ vẫn
+    // có đúng giới tính và sprite, không chỉ Pokémon đang đứng trên HUD.
+    setMessages((cur) => (cur ?? []).map((message) => {
+      let changed = false
+      const next = { ...message }
+      const upgradeOne = (mon) => {
+        const upgraded = upgrade(mon)
+        if (upgraded !== mon) changed = true
+        return upgraded
+      }
+      if (message.enemySnapshot) next.enemySnapshot = upgradeOne(message.enemySnapshot)
+      if (Array.isArray(message.enemySnapshots)) next.enemySnapshots = message.enemySnapshots.map(upgradeOne)
+      if (message.battleRuntime?.enemy) next.battleRuntime = { ...message.battleRuntime, enemy: upgradeOne(message.battleRuntime.enemy) }
+      if (Array.isArray(message.doubleBattleRuntime?.enemies)) {
+        next.doubleBattleRuntime = { ...message.doubleBattleRuntime, enemies: message.doubleBattleRuntime.enemies.map(upgradeOne) }
+      }
+      return changed ? next : message
+    }))
+  }, [pokedexStatus, pokedexSpecies, setMessages, setParty, setPcBox, setPlayerMon])
 
   // --- Dữ liệu chiêu thức thật + learnset theo level, tự tải cùng lúc với
   // pokedex. movesDb = null cho tới khi tải xong — pickMoves() trong

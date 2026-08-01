@@ -2663,3 +2663,26 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `test-dot*.mjs`, ZIP cũ hay các file preset. ZIP đợt 95 chỉ chứa đúng `src/` và `README.md`.
+
+## Cập nhật (đợt 96) — giới tính Pokémon, tỉ lệ loài và sprite đực/cái
+
+**MỖI CÁ THỂ POKÉMON NAY CÓ GIỚI TÍNH THẬT.** Pokémon mới được bốc `♂ Đực`, `♀ Cái` hoặc `◇ Vô giới tính` theo metadata canon của từng loài, đối chiếu với bảng Gender ratio trên Pokémon Database. Engine hiểu đủ loài 50/50, tỉ lệ lệch như 87,5/12,5, loài chỉ có một giới và loài vô giới tính; không còn dùng 50/50 chung cho tất cả. Trường hợp nguồn Pokédex không ghi `genderRatio` vì đó là mặc định được hiểu đúng là 50/50, không bị coi là thiếu dữ liệu.
+
+**SAVE ĐANG CHƠI ĐƯỢC NÂNG TỰ ĐỘNG.** Sau khi Pokédex đầy đủ sẵn sàng, app quét Pokémon đang hoạt động, cả đội hình, toàn bộ PC, đối thủ hiện tại và snapshot trận cũ. Cá thể đã có giới tính hợp lệ được giữ nguyên; cá thể cũ thiếu giới tính được bốc theo đúng tỉ lệ loài bằng seed từ mã cá thể, nên cùng một `uid` không thể thành đực ở HUD nhưng thành cái trong PC hoặc đổi giới khi mở lại. Loài chỉ đực/chỉ cái/vô giới tính bị sửa về canon nếu save cũ từng ghi sai. Người chơi không phải tạo hành trình mới, import lại hay tự sửa save.
+
+**SPRITE ƯU TIÊN ĐÚNG NGOẠI HÌNH GIỚI TÍNH.** Cá thể cái thử bộ sprite `-f` trước ở ảnh động, Pokémon HOME và ảnh Pokédex; nếu loài không có khác biệt ngoại hình thì tự rơi về ảnh cơ bản. Cá thể đực dùng ảnh đực/cơ bản. Form đã có hậu tố giới tính như `Meowstic-F` không bị nối sai thành `-f-f`. Cả modal khoe Pokémon và sáu ô đội hình HUD dùng chung pipeline này.
+
+**UI VÀ NHẬP VAI ĐỀU NHÌN THẤY.** Trang Pokémon Summary hiện ký hiệu giới tính ngay cạnh tên, có thẻ `GIỚI TÍNH` riêng cùng tỉ lệ đực/cái của loài; danh sách đội, Đời sống Pokémon và tooltip HUD cũng dùng nhãn tiếng Việt. Hồ sơ gửi vào API chính, Battle và Safari có giới tính của cá thể để chính văn dùng đại từ, hành vi và các chi tiết nhập vai phù hợp, thay vì đây chỉ là biến trang trí.
+
+**TIẾN HOÁ/NHÂN GIỐNG DÙNG ĐÚNG GIỚI TÍNH.** Luật Egg Group + Ditto tiếp tục dùng giới tính cá thể đã migrate. Điều kiện tiến hoá từ Pokédex dạng `M/F` nay được chuẩn hoá về cùng hệ `male/female`, sửa lỗi nhánh tiến hoá theo giới tính có thể bị từ chối dù cá thể đúng giới.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–96 đều PASS (24/24), 64 module `.js` qua kiểm tra cú pháp. Test đợt 96 bao phủ tỉ lệ 87,5/12,5, mặc định 50/50 (Espurr), chỉ đực/chỉ cái/vô giới tính, migration ổn định theo mã cá thể, không ghi lại cá thể đã đúng, sprite cái → ảnh cơ bản, hiển thị Summary/HUD, prompt nhập vai và cache Pokédex v15.
+
+### File cần cập nhật lên GitHub sau đợt 96
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, ZIP cũ, ảnh Discord hay file nào khác. ZIP đợt 96 chỉ chứa đúng `src/` và `README.md`.

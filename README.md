@@ -1971,7 +1971,7 @@ Hai thay đổi: (1) cờ Dev bỏ hẳn phụ thuộc `import.meta.env.PROD` �
 
 ## Cập nhật (đợt 50) — Trang TÔNG TRUYỆN (độ khó + thể loại), API chau chuốt văn phong, reroll cho tin người chơi, extractor đọc input
 
-**1. Trang "Tông truyện" mới trong wizard tạo nhân vật** (giữa Xuất thân và Mở đầu): chọn ĐỘ KHÓ — ✨ Sảng văn (dễ, main được ưu ái, không chết), 🌸 Anime (chuẩn, thế giới tươi sáng đúng chất anime), ⚖ Thực tế (khó, hậu quả thật, CÓ THỂ chết → [GAME OVER]; note yêu cầu rõ: "KHÔNG cố tỏ ra tăm tối/tàn khốc để gây ấn tượng" — fix phàn nàn giọng văn đen tối quá). Bên dưới chọn tối đa 3 THỂ LOẠI trong 16 loại (sảng văn, hài, romance, harem, bi kịch, trinh thám, kinh dị, học đường, thi đấu, sinh tồn, gây dựng thế lực...). Lưu persist (`storyTone`), note tông chèn system message vào MỌI lượt gọi API chính (RoleplayChat + mở đầu + giả lập). Câu "Tông REALISTIC... mặt tối" hardcode cũ bị xoá.
+**1. Trang "Tông truyện" mới trong wizard tạo nhân vật** (giữa Xuất thân và Mở đầu): chọn ĐỘ KHÓ — ✨ Sảng văn (dễ, main được ưu ái, không chết), 🌸 Anime (chuẩn, thế giới tươi sáng đúng chất anime), ⚖ Thực tế (khó, hậu quả thật, CÓ THỂ chết → [GAME OVER]; note yêu cầu rõ: "KHÔNG cố tỏ ra tăm tối/tàn khốc để gây ấn tượng" — fix phàn nàn giọng văn đen tối quá). Bên dưới có 16 tag thể loại (sảng văn, hài, romance, harem, bi kịch, trinh thám, kinh dị, học đường, thi đấu, sinh tồn, gây dựng thế lực...). Bản đầu từng giới hạn 3 tag; từ đợt 95 giới hạn này đã được gỡ. Lưu persist (`storyTone`), note tông chèn system message vào MỌI lượt gọi API chính (RoleplayChat + mở đầu + giả lập). Câu "Tông REALISTIC... mặt tối" hardcode cũ bị xoá.
 
 **2. Slot "API Combat Anime" đổi vai thành "API chau chuốt văn phong"** (anime battle chưa mở beta nên slot thừa): nếu cấu hình, sau mỗi lượt model phụ đánh bóng câu chữ theo tông truyện — luật sắt không đổi nội dung/sự kiện/thoại, chạy SAU khi bóc tag (tag không bị nuốt), lỗi/kết quả ngắn bất thường → giữ nguyên văn. Viewer 🧬 ghi rõ "✍ Văn đã qua API chau chuốt". BattleModal talk vẫn dùng slot này như cũ, không hỏng.
 
@@ -2642,3 +2642,24 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/` (đặc biệt các file nhạc nặng), `test-dot*.mjs`, bốn file preset JSON, ảnh báo lỗi hay ZIP bàn giao. ZIP đợt 94 chỉ chứa đúng `src/` và `README.md`.
+
+## Cập nhật (đợt 95) — bỏ giới hạn 3 tag và cho chỉnh văn phong khi đang chơi
+
+**TẠO NHÂN VẬT KHÔNG CÒN TRẦN 3 TAG.** Người chơi có thể chọn tuỳ ý từ 0 tới toàn bộ 16 tag văn phong. Bộ chọn hiện rõ số lượng đã chọn và không còn âm thầm bỏ thao tác từ tag thứ tư. State được chuẩn hoá để bỏ key lạ và tag trùng nhưng không cắt số lượng; save cũ vẫn đọc bình thường.
+
+**CHỈNH TAG NGAY TRONG HÀNH TRÌNH.** HUD phải có nút `🎭 Tag truyện · N`. Bảng mới cho bật/tắt từng tag, `Chọn tất cả`, `Bỏ hết` và lưu lựa chọn cho các lượt sau. Thay đổi được persist cùng save và `buildToneNote` đọc lại ở mỗi lần gọi API, nên lượt kể kế tiếp lập tức dùng chất văn mới mà không cần bắt đầu lại hay tải lại trang.
+
+**KHÔNG MỞ LẠI THIÊN PHÚ HOẶC LUẬT CHẾ ĐỘ.** Bảng chỉ gọi `setStoryTone` để đổi mảng `genres`; độ khó/chế độ được hiển thị nhưng không cho sửa. Nó không có đường ghi player traits, inventory, tiến trình thế giới hay bất kỳ biến gameplay nào. Khóa thiên phú sau khi bắt đầu vẫn giữ nguyên.
+
+**PHỐI NHIỀU TAG KHÔNG BỊ NHỒI ÉP.** Prompt đổi tên thành `TAG VĂN PHONG` và dặn API chỉ nhấn các tag hợp với cảnh hiện tại, luân phiên chất liệu ở cảnh sau, không cố nhét cả 16 tag vào cùng một đoạn. Nhờ vậy có thể phối đời thường + chăm sóc + romance cho nhịp chill, rồi chuyển sang phiêu lưu/thi đấu khi cảnh phù hợp.
+
+**Kiểm tra trong gói bàn giao:** regression đợt 73–95 đều PASS (23/23), 63 module `.js` qua kiểm tra cú pháp. Test đợt 95 xác nhận nhận đủ toàn bộ 16 tag, loại tag trùng/lạ mà không cắt số lượng, prompt chứa các chất liệu đã chọn, wizard không còn điều kiện `>= 3`, HUD có bảng chỉnh lúc chơi và bảng này không chạm vào state thiên phú/gameplay.
+
+### File cần cập nhật lên GitHub sau đợt 95
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `test-dot*.mjs`, ZIP cũ hay các file preset. ZIP đợt 95 chỉ chứa đúng `src/` và `README.md`.

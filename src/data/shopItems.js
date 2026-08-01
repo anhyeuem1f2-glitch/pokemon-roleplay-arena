@@ -10,6 +10,10 @@ export const SHOP_ITEMS = [
   { id: 'greatball', name: 'Great Ball', price: 600, category: 'ball', desc: 'Tỉ lệ bắt tốt hơn Poké Ball.' },
   { id: 'ultraball', name: 'Ultra Ball', price: 1200, category: 'ball', desc: 'Tỉ lệ bắt cao, dùng cho Pokémon mạnh.' },
   { id: 'masterball', name: 'Master Ball', price: 0, category: 'ball', noShop: true, desc: 'Bắt chắc chắn Pokémon hoang dã. Vật phẩm độc nhất/hiếm, không bán đại trà.' },
+  // Vật chứa đang có Pokémon nhưng chưa xác minh loài. Đây KHÔNG phải bóng
+  // rỗng để dùng bắt Pokémon; khi chính văn mở bóng và xác định loài, app tự
+  // tiêu thụ một vật chứa rồi mới tạo cá thể Pokémon tương ứng.
+  { id: 'unknown-pokemon-ball', name: 'Poké Ball chưa xác định', price: 0, category: 'special', noShop: true, desc: 'Poké Ball có nội dung/tình trạng chưa xác định. Không thể dùng như bóng rỗng; cần kiểm tra hoặc mở trong chính văn.' },
   // --- Hồi phục Pokémon ---
   { id: 'potion', name: 'Potion', price: 300, category: 'heal', desc: 'Hồi 20 HP cho Pokémon.' },
   { id: 'superpotion', name: 'Super Potion', price: 700, category: 'heal', desc: 'Hồi 60 HP cho Pokémon.' },
@@ -121,6 +125,7 @@ const ITEM_ALIASES = {
   greatball: ['great ball', 'bong lon'],
   ultraball: ['ultra ball', 'sieu bong'],
   masterball: ['master ball', 'bong bac thay'],
+  'unknown-pokemon-ball': ['poke ball chua xac dinh', 'pokeball chua xac dinh', 'qua bong chua xac dinh', 'poke ball niem phong'],
   potion: ['thuoc hoi mau', 'binh thuoc'],
   revive: ['hoi sinh', 'thuoc hoi sinh'],
   fullrestore: ['full restore', 'hoi phuc toan phan'],

@@ -27,7 +27,7 @@ import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../dat
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
-import { validateStateAgainstProse, describeRejectedState, proseSupportsMove } from '../utils/stateEvidence.js'
+import { validateStateAgainstProse, describeRejectedState, proseSupportsMove, proseSupportsMysteryBallReveal } from '../utils/stateEvidence.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
@@ -316,16 +316,13 @@ function filterSupplementalDuplicates(extra, applied) {
   const appliedAwards = new Set((applied?.collectionAwards ?? []).map((entry) => `${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`))
   const appliedLegendaryAccess = new Set((applied?.legendaryAccess ?? []).map((entry) => monKey(entry.species)))
   const appliedLoots = new Set((applied?.loots ?? []).map((entry) => `${monKey(entry.type)}|${monKey(entry.size)}`))
-  const appliedMoneyEntries = applied?.moneyEntries?.length
-    ? applied.moneyEntries.map(Number)
-    : applied?.money ? [Number(applied.money)] : []
   const extraMoneyEntries = extra?.moneyEntries?.length
     ? extra.moneyEntries.map(Number)
     : extra?.money ? [Number(extra.money)] : []
-  const filteredMoneyEntries = extraMoneyEntries.filter((value) =>
-    !appliedMoneyEntries.includes(value)
-    && !(extraMoneyEntries.length === 1 && Number(applied?.money) === value),
-  )
+  // Không xoá mù một delta chỉ vì bằng số đã áp: chính văn có thể chứa hai
+  // lần trả 500 thật. Validator phía sau đếm số bằng chứng và nhận
+  // `alreadyApplied` để chỉ cho dùng phần còn lại.
+  const filteredMoneyEntries = extraMoneyEntries
   return {
     ...extra,
     moneyEntries: filteredMoneyEntries,
@@ -707,6 +704,7 @@ export default function RoleplayChat() {
     let previewParty = [...(latestPartyRef.current ?? [])]
     const evolutionDebits = new Map()
     const appliedFriendshipDirectives = new Set()
+    let mysteryBallRevealsApplied = 0
     // Cho phép một lượt hợp lệ vừa hoàn tất nghi thức, vừa gặp/thuyết phục
     // huyền thoại. Dùng bản tiến trình dự kiến đã qua evidence thay vì closure
     // worldProgress cũ chưa kịp rerender.
@@ -942,6 +940,9 @@ export default function RoleplayChat() {
           setPcBox((cur) => [...(cur ?? []), newMon])
           report.lines.push(`✅ Nhận Pokémon: ${newMon.name} Lv.${newMon.level} · đội đầy, đã gửi vào PC`)
         }
+        if (proseSupportsMysteryBallReveal(storyText, pk.species, { inventory: latestInventoryRef.current })) {
+          mysteryBallRevealsApplied += 1
+        }
       }
 
       for (const [index, directive] of (parsed.friendships ?? []).entries()) {
@@ -981,7 +982,17 @@ export default function RoleplayChat() {
         const entry = resolveHeldItemByName(directive.item) ?? resolveItemByName(directive.item)
         if (entry && isHoldableItem(entry)) equipDebits.set(entry.id, (equipDebits.get(entry.id) ?? 0) + 1)
       }
-      const itemChanges = (parsed.items ?? []).map((raw) => {
+      const declaredMysteryDebits = (parsed.items ?? []).filter((item) => (
+        item.qty < 0 && resolveItemByName(item.name)?.id === 'unknown-pokemon-ball'
+      )).reduce((sum, item) => sum + Math.abs(item.qty), 0)
+      // POKEMON được xác minh từ bóng chưa rõ loài sẽ tự tiêu thụ đúng một
+      // vật chứa. Không phụ thuộc model nhớ xuất thêm ITEM -1 hay không.
+      const automaticMysteryDebits = Math.max(0, mysteryBallRevealsApplied - declaredMysteryDebits)
+      const rawItemChanges = [
+        ...(parsed.items ?? []),
+        ...(automaticMysteryDebits > 0 ? [{ name: 'Poké Ball chưa xác định', qty: -automaticMysteryDebits, automaticMysteryReveal: true }] : []),
+      ]
+      const itemChanges = rawItemChanges.map((raw) => {
         const entry = resolveItemByName(raw.name)
         let qty = raw.qty
         let absorbedByEquip = 0
@@ -1724,6 +1735,7 @@ export default function RoleplayChat() {
                 inventory: latestInventoryRef.current,
                 location: latestPlayerLocationRef.current,
                 blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
+                alreadyApplied: stateParsed,
               })
               const extra = extraEvidence.parsed
               const extraApplyReport = applyParsedState(extra, turnNow, stateEvidenceText, turnMessageId)

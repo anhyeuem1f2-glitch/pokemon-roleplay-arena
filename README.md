@@ -2740,3 +2740,21 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 `test-dot99.mjs` là regression đi kèm bản bàn giao để kiểm tra cục bộ, không bắt buộc đưa lên repository deploy.
+
+## Cập nhật (đợt 100) — gender bám canon mọi lượt + tường lửa lựa chọn hành động
+
+**GIỚI TÍNH KHÔNG CÒN CHỈ ĐƯỢC CHỐT Ở LÚC NHẬN POKÉMON.** Sau mỗi chính văn canon, pipeline Pokémon quét evidence giới tính của đúng cá thể và đồng bộ cùng một transform vào `playerMon`, party và PC. Vì vậy ca một Pokémon đã roll đực nhưng lượt tiến hoá/form sau đó chính văn xác nhận `female`, `giống cái`, `dạng cái`, `♀` hoặc gọi rõ là `cô bé` sẽ sửa state cá thể ngay trong chính lượt đó; Pokémon Summary/HUD/battle sau đó đọc đúng cùng giá trị. Evidence mới nhất trong cùng lượt thắng evidence cũ, còn loài canon chỉ đực/chỉ cái/vô giới tính vẫn không thể bị văn bất khả thi lật sai.
+
+**SAVE CŨ CŨNG ĐƯỢC SỬA THEO LỊCH SỬ CANON MỚI NHẤT.** Migration gender không còn chỉ đọc tin nguồn nhận Pokémon. Khi Pokédex sẵn sàng, app quét lịch sử assistant từ mới về cũ theo tên hiện tại, species và dạng trước tiến hoá để tìm lần xác nhận giới tính gần nhất; `genderEvidenceMessageId` được lưu để biết evidence đến từ lượt nào. Đối thủ/snapshot không dùng lịch sử sở hữu của người chơi, tránh Pokémon NPC cùng loài bị kéo theo giới tính của Pokémon trong đội.
+
+**FIX TRIỆT ĐỂ BẢNG LỰA CHỌN ĂN NHẦM PRESET.** Parser cũ coi mọi `<selection>`, `<choice>` hoặc danh sách A–F là lựa chọn người chơi, nên các scaffold như `Tag trạng thái`, `Phân đoạn`, `Góc nhìn`, `Định hướng câu chuyện`, `Văn phong` có thể biến thành các nút giả như ảnh beta. Parser mới dùng whitelist action block, legacy block chỉ được nhận khi có marker `[A|Nhãn]` rõ ràng, lọc semantic các câu meta và chỉ chấp nhận đúng bốn action A–D. Một block có vẻ là action nhưng không vượt validator sẽ fail closed và kích hoạt API sinh lựa chọn chuyên dụng, không hiện rác lên UI.
+
+**KHÔNG CÒN BLIND-STRIP `<selection>/<choice>`.** Cleanup trước đây vừa có thể ăn nhầm generic block của preset, vừa để parser lựa chọn hiểu sai mục đích của nó. Nay generic block chỉ bị gỡ khi được xác nhận là action thật hoặc scaffold meta mạnh; chính văn xung quanh luôn được giữ. API chuyên lựa chọn tự retry một lần với prompt chặt hơn nếu lượt đầu không cho đủ bốn input hành động hợp lệ.
+
+**THÊM NÚT `↻ Gợi ý lại`.** Bảng lựa chọn cuối lượt có nút làm mới, gọi lại tuyến action API trên đúng chính văn/lịch sử của lượt hiện tại. Kết quả vẫn gắn theo `message.id` và kiểm tra content chưa bị sửa/reroll trước khi commit, nên callback cũ không thể ghi gợi ý vào nhánh truyện mới.
+
+**Kiểm tra đợt 100:** `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đều PASS; `test-dot100.mjs` PASS 12 kiểm tra mới. Toàn bộ 64 module `.js` qua `node --check`; 52 file `.jsx` qua parse cú pháp TypeScript. Regression mới bao phủ female sau tiến hoá, evidence mới nhất thắng, canon loài một giới, scaffold `<selection>` không thành action, cleanup không nuốt chính văn, đúng bốn action A–D, đồng bộ gender active/party/PC, migration lịch sử và nút sinh lại lựa chọn.
+
+### File bàn giao đợt 100
+
+Bản full được đóng tên **`pokemon-new.zip`** để có thể giải nén trực tiếp và ghi đè vào thư mục dự án `pokemon-new` hiện tại. Không đưa `.git` hay `node_modules` vào ZIP.

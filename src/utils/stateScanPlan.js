@@ -38,6 +38,10 @@ const CUE_GROUPS = [
   /\b(?:s[aá]ng\s*h[oô]m\s*sau|qua\s*[dđ][eê]m|ng[aà]y\s*tr[oô]i\s*qua|luy[eệ]n\s*t[aậ]p|hu[aấ]n\s*luy[eệ]n)\b/iu,
   /\b(?:nhi[eệ]m\s*v[uụ]|huy\s*hi[eệ]u|danh\s*ti[eế]ng|truy\s*n[aã]|l[eệ]nh\s*b[aắ]t|tri[eệ]u\s*h[oồ]i)\b/iu,
   /\b(?:g[aặ]p|xu[aấ]t\s*hi[eệ]n|gi[aá]o\s*s[uư]|y\s*t[aá]|nh[aâ]n\s*vi[eê]n|c[aả]nh\s*s[aá]t|trainer|gym\s*leader)\b/iu,
+  // Biến/tài sản tự sáng tạo: quyền VIP, giấy phép, thiết bị, danh hiệu, chìa
+  // khóa, trạng thái máy móc... Không biết schema trước nhưng vẫn nên kích
+  // hoạt pass cứu hộ semantic thay vì đợi một tag mới.
+  /\b(?:quy[eề]n\s*(?:truy\s*c[aậ]p|vip)|th[eẻ]\s*vip|v[eé]\s*vip|gi[aấ]y\s*ph[eé]p|ch[iì]a\s*kh[oó]a|danh\s*hi[eệ]u|thi[eế]t\s*b[iị]|k[ií]ch\s*ho[aạ]t|v[oô]\s*hi[eệ]u\s*h[oó]a|tr[aạ]ng\s*th[aá]i|m[aậ]t\s*m[aã]|quy[eề]n\s*s[oở]\s*h[uữ]u)\b/iu,
 ]
 
 const STATE_TAG_RE = /\[\[\s*(?:MONEY|REL|BODY|POKEMON|EVOLVE|EVOLUTION|LEVEL|LV|FRIEND|FRIENDSHIP|ITEM|EQUIP|UNEQUIP|SHOP|LOOT|POKECENTER|HUNGER|DATE|TRAIN|MOVE|NPC|FACT|BADGE|QUEST|REP|WANTED|LEGENDARY_ACCESS|RIBBON|MARK)\b/giu
@@ -72,7 +76,7 @@ export function estimateStateChangeLoad(storyText, explicitOperationCount = 0) {
 }
 
 export function shouldUseFocusedStateRecovery(storyText, explicitOperationCount = 0) {
-  return estimateStateChangeLoad(storyText, explicitOperationCount) >= 4
+  return estimateStateChangeLoad(storyText, explicitOperationCount) >= 3
 }
 
 /**

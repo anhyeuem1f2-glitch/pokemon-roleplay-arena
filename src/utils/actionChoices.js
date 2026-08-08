@@ -6,7 +6,7 @@
 // hành động. Vì vậy parser mới dùng whitelist + bộ lọc semantic fail-closed.
 
 export const ACTION_CHOICES_INSTRUCTION = `LỰA CHỌN HÀNH ĐỘNG CHO NGƯỜI CHƠI (bắt buộc sau mỗi lượt kể bình thường):
-- Sau khi hoàn tất CHÍNH VĂN và các tag trạng thái, xuất thêm đúng một khối <actions>...</actions>. Nếu preset dùng <content>, đặt <actions> SAU </content>, không nhét vào chính văn.
+- Sau khi hoàn tất CHÍNH VĂN, xuất thêm đúng một khối <actions>...</actions>. Nếu preset dùng <content>, đặt <actions> SAU </content>, không nhét vào chính văn.
 - Tạo đúng 4 lựa chọn bằng tiếng Việt, bám sát đúng tình huống vừa xảy ra và tính cách/thân phận của người chơi. Mỗi lựa chọn phải là hành động hoặc lời nói có thể gửi ngay ở lượt sau; không phải lời bình luận về truyện, quy tắc prompt hay chỉ dẫn văn phong.
 - Bốn hướng phải khác nhau rõ: A thận trọng/quan sát; B chủ động thúc đẩy cốt truyện; C tương tác với NPC hoặc Pokémon; D sáng tạo, mạo hiểm hoặc tấu hài nhưng vẫn hợp logic cảnh.
 - Không dùng kiến thức mà nhân vật chưa biết. Không quyết định phản ứng/kết quả thay NPC, không tự tuyên bố hành động đã thành công, không ép người chơi phạm luật game.

@@ -51,6 +51,7 @@ function StateApiSlot({ number, config, setConfig }) {
         userText: 'Tôi mua đồ rồi nghỉ chân.',
         appliedTags: {},
         hasPokemon: true,
+        scanMode: number === 1 ? 'extractor' : 'auditor',
       })
       setTest(tags
         ? { ok: true, msg: `OK — model tìm được: ${tags.replace(/\n/g, ' · ')}` }
@@ -69,7 +70,7 @@ function StateApiSlot({ number, config, setConfig }) {
         onChange={(next) => setConfig(next ? { ...EMPTY_CONFIG } : null)}
         label={`Bật AI soi biến ${number}`}
         hint={enabled
-          ? `AI soi biến ${number} sẽ đọc lại chính văn; mọi đề xuất vẫn phải qua validator.`
+          ? `AI soi biến ${number} sẽ đọc lại chính văn; candidate mới phải kèm evidence nguyên văn rồi vẫn qua validator.`
           : number === 1 ? 'Tắt: hệ thống dùng tuyến API dự phòng/mặc định.' : 'Tắt: chỉ dùng một AI soi biến.'}
       />
       {enabled && (

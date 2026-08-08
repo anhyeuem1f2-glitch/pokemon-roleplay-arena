@@ -405,7 +405,7 @@ export function maybeMakeNudge({ identityKey, location, turn, mode = 'anime', wo
   const dstate = loadState()
   const sinceLast = turn - dstate.lastNudgeTurn
   if (sinceLast <= cfg.cooldown) return null
-  const modeFactor = mode === 'sang' ? 1.18 : mode === 'realistic' ? 0.82 : 1
+  const modeFactor = mode === 'realistic' ? 0.82 : 1
   const beatFactor = beat.gentle ? 0.45 : 1
   const chance = Math.min(cfg.cap, (cfg.base + cfg.ramp * (sinceLast - cfg.cooldown - 1)) * modeFactor * beatFactor)
   if (rng() >= chance) return null

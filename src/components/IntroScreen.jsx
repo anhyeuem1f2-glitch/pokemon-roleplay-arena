@@ -6,6 +6,7 @@ import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
+import { buildWildMon, normalizeAcquiredMon } from '../data/pokemonSpecies.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
 import { validateStateAgainstProse } from '../utils/stateEvidence.js'
 import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
@@ -26,7 +27,7 @@ import { resetDirectorState } from '../data/storyDirector.js'
 import { IDENTITIES_V2, buildIdentityContext, getIdentityV2, startingMoneyForIdentity } from '../data/identities.js'
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
-import { resolveItemByName } from '../data/shopItems.js'
+import { SHOP_ITEMS, resolveItemByName } from '../data/shopItems.js'
 import { generateLootItems } from '../data/shopGenerator.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
@@ -36,10 +37,9 @@ import { musicManager } from '../utils/musicManager.js'
 // Thiết kế lại toàn bộ theo yêu cầu "bớt phèn": wizard nhiều trang, mọi lựa
 // chọn quan trọng đều có MÔ TẢ đầy đủ (card thân phận theo nhóm, blurb từng
 // vùng, mô tả tình huống mở đầu), thanh tiến trình, trang tổng kết.
-// THAY ĐỔI LỚN: BỎ mục Pokémon khởi đầu — người chơi LUÔN bắt đầu tay
-// trắng; việc nhận Pokémon đầu tiên là cột mốc của chương đầu (hoặc muộn
-// hơn tuỳ tuổi/hoàn cảnh), cấp qua tag [[POKEMON]]. Roleplay, không phải
-// màn chọn tướng.
+// Thực tế/Anime vẫn mặc định bắt đầu tay trắng để Pokémon đầu tiên là một
+// cột mốc roleplay. Riêng Sandbox cho phép cấu hình state khởi đầu tự do
+// (Pokémon/level/tiền/vật phẩm/sức mạnh) rồi sau đó vận hành theo luật Anime.
 
 const GENDERS = ['Nam', 'Nữ', 'Khác / không tiết lộ']
 const TITLE_INTRO_SESSION_KEY = 'trainer-arena-title-seen-v1'
@@ -51,6 +51,7 @@ const STEPS = [
   // Đợt 61: tính cách + siêu năng lực — chống việc AI mặc định vẽ nhân vật
   // chính thành lạnh lùng/thực dụng.
   { key: 'traits', label: 'Tính cách' },
+  { key: 'sandbox', label: 'Sandbox' },
   { key: 'origin', label: 'Xuất thân' },
   // Chế độ đã chọn ở bước đầu; đây chỉ là trang thể loại.
   { key: 'tone', label: 'Tông truyện' },
@@ -213,6 +214,16 @@ export default function IntroScreen({ onOpenSettings }) {
   const [personality, setPersonality] = useState([])
   const [superpower, setSuperpower] = useState('none')
   const [customPower, setCustomPower] = useState('')
+  // Sandbox: state khởi đầu do người chơi tự chốt. Không dùng AI để suy ra
+  // các giá trị này, tránh màn mở đầu kể một đằng HUD ghi một nẻo.
+  const [sandboxMoney, setSandboxMoney] = useState('100000')
+  const [sandboxStarters, setSandboxStarters] = useState([])
+  const [sandboxStarterSpecies, setSandboxStarterSpecies] = useState('')
+  const [sandboxStarterLevel, setSandboxStarterLevel] = useState('5')
+  const [sandboxItems, setSandboxItems] = useState([])
+  const [sandboxItemId, setSandboxItemId] = useState('pokeball')
+  const [sandboxItemQty, setSandboxItemQty] = useState('1')
+  const [sandboxItemInfinite, setSandboxItemInfinite] = useState(false)
   // Mở đầu
   const [openingKey, setOpeningKey] = useState('auto')
   const [desiredOpening, setDesiredOpening] = useState('')
@@ -228,6 +239,7 @@ export default function IntroScreen({ onOpenSettings }) {
       playerIdentity, customName, customDesc,
       originRegionKey, originAreaKey,
       personality, superpower, customPower,
+      sandboxMoney, sandboxStarters, sandboxItems,
       storyTone,
       openingKey, desiredOpening,
     }
@@ -253,6 +265,9 @@ export default function IntroScreen({ onOpenSettings }) {
     const safeTraits = sanitizeTraitsForMode({ personality: d.personality, superpower: d.superpower, customPower: d.customPower }, incomingTone)
     setSuperpower(safeTraits.superpower)
     setCustomPower(safeTraits.customPower)
+    setSandboxMoney(String(d.sandboxMoney ?? '100000'))
+    setSandboxStarters(Array.isArray(d.sandboxStarters) ? d.sandboxStarters : [])
+    setSandboxItems(Array.isArray(d.sandboxItems) ? d.sandboxItems : [])
     if (d.storyTone) setStoryTone(incomingTone)
     setOpeningKey(d.openingKey ?? 'auto')
     setDesiredOpening(d.desiredOpening ?? '')
@@ -264,10 +279,35 @@ export default function IntroScreen({ onOpenSettings }) {
   const identity = isCustomIdentity
     ? { name: customName.trim() || 'Thân phận riêng', desc: customDesc.trim() }
     : getIdentityV2(playerIdentity)
+  const sandboxMode = normalizeGameMode(storyTone) === 'sandbox'
+  const activeSteps = STEPS.filter((entry) => entry.key !== 'sandbox' || sandboxMode)
+
+  function addSandboxStarter() {
+    const wanted = sandboxStarterSpecies.trim().toLowerCase()
+    const species = pokedexSpecies.find((entry) => entry.name.toLowerCase() === wanted)
+    if (!species) {
+      setError('Không tìm thấy Pokémon này trong Pokédex đã tải. Hãy chọn đúng tên trong danh sách gợi ý.')
+      return
+    }
+    const level = Math.max(1, Math.min(100, Math.floor(Number(sandboxStarterLevel) || 1)))
+    setSandboxStarters((current) => [...current, { species: species.name, level }])
+    setSandboxStarterSpecies('')
+    setSandboxStarterLevel(String(level))
+    setError(null)
+  }
+
+  function addSandboxItem() {
+    const entry = SHOP_ITEMS.find((item) => item.id === sandboxItemId)
+    if (!entry) return
+    const qty = Math.max(1, Math.min(999999999, Math.floor(Number(sandboxItemQty) || 1)))
+    setSandboxItems((current) => [...current, { id: entry.id, name: entry.name, qty, infinite: Boolean(sandboxItemInfinite) }])
+    setSandboxItemQty('1')
+    setSandboxItemInfinite(false)
+  }
 
   function stepError() {
     // Validate khi bấm Tiếp tục ở từng trang.
-    if (STEPS[step].key === 'identity' && isCustomIdentity && !customDesc.trim()) {
+    if (activeSteps[step]?.key === 'identity' && isCustomIdentity && !customDesc.trim()) {
       return 'Thân phận tự tạo cần ít nhất phần mô tả — hoặc chọn một thân phận có sẵn.'
     }
     return null
@@ -280,7 +320,7 @@ export default function IntroScreen({ onOpenSettings }) {
       return
     }
     setError(null)
-    setStep((s) => Math.min(s + 1, STEPS.length - 1))
+    setStep((s) => Math.min(s + 1, activeSteps.length - 1))
   }
 
   async function handleBegin() {
@@ -317,17 +357,29 @@ export default function IntroScreen({ onOpenSettings }) {
     const y = Math.max(1, Math.min(9999, Number(startYear) || 2000))
     setStoryDate({ day: d, month: m, year: y, part: 'sáng' })
 
-    // LUÔN tay trắng (đợt 34): nhận Pokémon đầu tiên là cột mốc trong truyện.
+    // Thực tế/Anime vẫn tay trắng; Sandbox dựng state starter trước opening.
     // Đợt 69: lưu tính cách/thiên phú để MỌI LƯỢT sau đều gửi cho AI.
     // Đợt 73: cùng object này được app phân tích thành cơ chế tùy chỉnh thật.
     const traits = sanitizeTraitsForMode({ personality, superpower, customPower, perks: [] }, storyTone)
     setPlayerTraits(traits)
     const journeyTrainerId = resetTrainerIdentity()
-    setPlayerMon(null)
-    setParty([])
-    // Đợt 71: hòm PC cũng phải sạch khi bắt đầu hành trình mới, không thì
-    // Pokémon của run trước còn nằm trong máy tính của run sau.
-    setPcBox([])
+    const sandboxOwned = sandboxMode ? sandboxStarters.flatMap((starter, index) => {
+      const entry = pokedexSpecies.find((species) => species.name.toLowerCase() === String(starter.species).toLowerCase())
+      if (!entry) return []
+      const level = Math.max(1, Math.min(100, Math.floor(Number(starter.level) || 1)))
+      const built = normalizeAcquiredMon(buildWildMon(entry, level, movesDb))
+      return [ensurePokemonIdentity({
+        ...applyPerksToMon(built, traits),
+        acquisitionSourceId: `sandbox-${journeyTrainerId}:starter:${index}:${entry.species ?? entry.name.toLowerCase()}`,
+      }, journeyTrainerId)]
+    }) : []
+    const openingParty = sandboxOwned.slice(0, 6)
+    const openingPc = sandboxOwned.slice(6)
+    setPlayerMon(openingParty[0] ?? null)
+    setParty(openingParty)
+    // Sandbox cho phép bao nhiêu starter cũng được; slot 7+ vào PC thay vì
+    // phá giới hạn 6 ô chiến đấu của engine. Các mode khác vẫn bắt đầu sạch.
+    setPcBox(openingPc)
     setPokedexRecords({})
     setWorldProgress({ ...DEFAULT_WORLD_PROGRESS, wanted: { ...DEFAULT_WORLD_PROGRESS.wanted } })
     setPokemonLife({ ...DEFAULT_POKEMON_LIFE })
@@ -342,7 +394,22 @@ export default function IntroScreen({ onOpenSettings }) {
     // RESET HÀNH TRÌNH CŨ (đợt 46): trước đây tiền/túi đồ/quan hệ/thương
     // tích/độ no của run trước dính sang run mới (vì đều persist) — hành
     // trình MỚI phải sạch sẽ từ đầu.
-    const openingInventory = syncTraitGrantedItems([], traits)
+    const sandboxOpeningItems = sandboxMode ? sandboxItems.reduce((items, configuredItem) => {
+      const entry = SHOP_ITEMS.find((item) => item.id === configuredItem.id) ?? resolveItemByName(configuredItem.name)
+      if (!entry) return items
+      const qty = Math.max(1, Math.floor(Number(configuredItem.qty) || 1))
+      const infinite = Boolean(configuredItem.infinite)
+      const at = items.findIndex((item) => item.id === entry.id)
+      if (at < 0) items.push({ ...entry, qty, infinite })
+      else items[at] = {
+        ...entry,
+        ...items[at],
+        qty: items[at].infinite || infinite ? Math.max(1, Number(items[at].qty) || 1) : (Number(items[at].qty) || 0) + qty,
+        infinite: Boolean(items[at].infinite || infinite),
+      }
+      return items
+    }, []) : []
+    const openingInventory = syncTraitGrantedItems(sandboxOpeningItems, traits)
     setInventory(openingInventory)
     setRelationships([])
     setBodyStatus({ head: 0, torso: 0, leftArm: 0, rightArm: 0, leftLeg: 0, rightLeg: 0 })
@@ -350,7 +417,9 @@ export default function IntroScreen({ onOpenSettings }) {
     // Tiền khởi đầu đi theo thân phận. Trước đây mọi người bị ép về 3.000 kể
     // cả “Con cháu đại gia tộc”, khiến thiết lập nhân vật tự mâu thuẫn.
     const ageNum = Number(age) || null
-    const startingMoney = startingMoneyForIdentity(playerIdentity, characterSetup)
+    const startingMoney = sandboxMode
+      ? Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(sandboxMoney) || 0)))
+      : startingMoneyForIdentity(playerIdentity, characterSetup)
     const openingProfile = { ...playerProfile, name: finalName, age: ageNum ?? playerProfile.age, money: startingMoney, identityEconomyVersion: 1 }
     setPlayerProfile((prof) => ({ ...prof, ...openingProfile }))
 
@@ -366,7 +435,7 @@ export default function IntroScreen({ onOpenSettings }) {
       appearance.trim() ? `Ngoại hình: ${appearance.trim()}.` : '',
       `Thân phận: ${identity.name} — ${identity.desc} Để thân phận thấm vào bối cảnh một cách TỰ NHIÊN, không kể lể dồn dập.`,
       // Tính cách + siêu năng lực (đợt 61).
-      buildCharacterTraitsNote(traits),
+      buildCharacterTraitsNote(traits, normalizeGameMode(storyTone)),
       originArea
         ? `VỊ TRÍ MỞ ĐẦU CỐ ĐỊNH: ${originArea.name}, vùng ${originRegion?.name}. Đây là state đã chọn, mở đầu PHẢI diễn ra tại đây; không thay bằng Pallet Town, Kanto hay quê mặc định khác. Chỉ được rời nơi này sau một cảnh di chuyển rõ ràng và tag [[MOVE]].`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
@@ -376,7 +445,9 @@ export default function IntroScreen({ onOpenSettings }) {
       // đuổi người chơi lên đường mà chưa giới thiệu/trao Pokémon nào (người
       // chơi beta phản ánh). Giờ: mặc định vẫn để dành làm cột mốc, NHƯNG
       // nếu cảnh mở màn xoay quanh việc nhận Pokémon thì phải diễn TRỌN VẸN.
-      `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật thì dùng tag [[POKEMON Tên | Lv..]].`,
+      sandboxMode
+        ? `SANDBOX — STATE KHỞI ĐẦU ĐÃ CHỐT TRƯỚC KHI KỂ: tiền=${startingMoney}; Pokémon đã sở hữu=${openingParty.length + openingPc.length ? [...openingParty, ...openingPc].map((mon) => `${mon.name} Lv${mon.level}`).join(', ') : 'không có'}; vật phẩm=${openingInventory.length ? openingInventory.map((item) => `${item.name} ${item.infinite ? '∞' : `x${item.qty}`}`).join(', ') : 'không có'}. Đây là dữ liệu thật đã nằm trong save: KHÔNG dùng MONEY/ITEM/POKEMON để cấp lại chúng trong mở đầu. Hãy coi chúng là tài sản/cộng sự có sẵn trước cảnh đầu và bắt đầu câu chuyện theo nhịp Anime.`
+        : `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật thì dùng tag [[POKEMON Tên | Lv..]].`,
       opening
         ? `TÌNH HUỐNG MỞ ĐẦU BẮT BUỘC BÁM THEO (đây là mong muốn của người chơi, phải là hạt nhân của đoạn mở đầu): ${opening.seed}`
         : openingKey === 'custom' && desiredOpening.trim()
@@ -427,7 +498,7 @@ export default function IntroScreen({ onOpenSettings }) {
       let parsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
       parsed = validateStateAgainstProse(parsed, parsed.cleaned, {
         playerName: finalName,
-        party: [],
+        party: openingParty,
         mode: normalizeGameMode(storyTone),
         adminMode: false,
         inventory: openingInventory,
@@ -508,24 +579,31 @@ export default function IntroScreen({ onOpenSettings }) {
         { role: 'user', hidden: true, resultLabel: 'Bắt đầu câu chuyện', content: directive },
         { role: 'assistant', content: openingText, actionChoices },
       ])
-      // AI lỡ cấp Pokémon ngay mở đầu (đã cấm nhưng đề phòng) → vẫn tôn trọng tag.
+      // Nếu chính văn mở đầu trao thêm Pokémon hợp lệ, vẫn tôn trọng tag.
+      // Sandbox có thể đã đủ 6 slot từ trước: cá thể thứ 7+ phải vào PC,
+      // tuyệt đối không bị mất chỉ vì party đã đầy.
+      const resolvedOpeningParty = [...openingParty]
+      const resolvedOpeningPc = [...openingPc]
       for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
         const entry = pokedexSpecies.find((sp) => sp.name.toLowerCase() === pk.species.toLowerCase())
         const access = legendaryAccess(entry, openingWorldProgress, storyTone)
         if (entry && access.allowed) {
-          const { buildMonSmart, buildWildMon, normalizeAcquiredMon } = await import('../data/pokemonSpecies.js')
+          const { buildMonSmart } = await import('../data/pokemonSpecies.js')
           // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
           const buildOwnedMon = normalizeGameMode(storyTone) === 'realistic' ? buildMonSmart : buildWildMon
           const mon = ensurePokemonIdentity({
             ...applyPerksToMon(normalizeAcquiredMon(buildOwnedMon(entry, pk.level, movesDb)), traits),
             acquisitionSourceId: `intro-${journeyTrainerId}:pokemon:${pk.species.toLowerCase()}:${pokemonIndex}`,
           }, journeyTrainerId)
-          setPlayerMon((cur) => cur ?? mon)
-          setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
+          if (resolvedOpeningParty.length < 6) resolvedOpeningParty.push(mon)
+          else resolvedOpeningPc.push(mon)
         } else if (entry) {
           console.warn(`[intro] Chặn ${entry.name}: ${access.reason}`)
         }
       }
+      setParty(resolvedOpeningParty)
+      setPcBox(resolvedOpeningPc)
+      setPlayerMon(resolvedOpeningParty[0] ?? null)
       const embCfg = memoryApiConfig?.embedding
       archiveExchange(
         `Mở đầu: ${finalName} (${identity.name}), xuất thân ${originArea?.name ?? originRegion?.name}, ngày ${d}/${m}/${y}.`,
@@ -610,7 +688,7 @@ export default function IntroScreen({ onOpenSettings }) {
     )
   }
 
-  const stepKey = STEPS[step].key
+  const stepKey = activeSteps[step]?.key ?? activeSteps[0].key
 
   if (loading) {
     return (
@@ -627,7 +705,7 @@ export default function IntroScreen({ onOpenSettings }) {
       <div className="panel panel--wizard" style={{ width: 'min(720px, 100%)', maxHeight: '94vh', display: 'flex', flexDirection: 'column' }}>
         {/* Thanh tiến trình */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, overflowX: 'auto', paddingBottom: 3 }}>
-          {STEPS.map((s2, i) => (
+          {activeSteps.map((s2, i) => (
             <React.Fragment key={s2.key}>
               <button
                 onClick={() => i < step && setStep(i)}
@@ -651,7 +729,7 @@ export default function IntroScreen({ onOpenSettings }) {
                   {s2.label}
                 </span>
               </button>
-              {i < STEPS.length - 1 && <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />}
+              {i < activeSteps.length - 1 && <span style={{ flex: 1, height: 1, background: 'var(--line)' }} />}
             </React.Fragment>
           ))}
         </div>
@@ -660,6 +738,7 @@ export default function IntroScreen({ onOpenSettings }) {
           {stepKey === 'profile' && 'Bạn là ai?'}
           {stepKey === 'identity' && 'Thân phận — xuất phát điểm xã hội của bạn'}
           {stepKey === 'traits' && 'Tính cách & năng lực — nhân vật của bạn là người thế nào?'}
+          {stepKey === 'sandbox' && 'Sandbox — chốt tài nguyên & Pokémon khởi đầu'}
           {stepKey === 'origin' && 'Quê nhà & thời điểm bắt đầu'}
           {stepKey === 'tone' && 'Thể loại — câu chuyện mang hương vị nào?'}
           {stepKey === 'opening' && 'Câu chuyện bắt đầu thế nào?'}
@@ -695,7 +774,7 @@ export default function IntroScreen({ onOpenSettings }) {
                 ))}
               </div>
               <div style={{ marginTop: 12, padding: 11, border: '1px dashed var(--line)', borderRadius: 10, color: 'var(--text-dim)', fontSize: 11, lineHeight: 1.65 }}>
-                Giao dịch multiplayer thử nghiệm chỉ xuất hiện ở <b style={{ color: 'var(--text-hi)' }}>Thực tế</b>. Anime và Sảng văn có thể linh hoạt trong lời kể nhưng không được tạo gói chuyển quyền sở hữu Pokémon.
+                Giao dịch multiplayer thử nghiệm chỉ xuất hiện ở <b style={{ color: 'var(--text-hi)' }}>Thực tế</b>. Anime và Sandbox có thể linh hoạt trong lời kể nhưng không được tạo gói chuyển quyền sở hữu Pokémon.
               </div>
             </div>
           )}
@@ -777,8 +856,9 @@ export default function IntroScreen({ onOpenSettings }) {
               <div className="field" style={{ background: 'rgba(95,215,232,0.06)', border: '1px solid var(--line)', borderRadius: 10, padding: 10 }}>
                 <label style={{ color: 'var(--mint)' }}>Về Pokémon khởi đầu</label>
                 <small style={{ color: 'var(--text-mid)', lineHeight: 1.6 }}>
-                  Bạn sẽ bắt đầu KHÔNG có Pokémon. Việc nhận Pokémon đầu tiên là một cột mốc trong truyện —
-                  chương đầu, hoặc muộn hơn tuỳ tuổi và hoàn cảnh nhân vật. Đây là roleplay, không phải màn chọn tướng.
+                  {sandboxMode
+                    ? 'Sandbox cho phép tự chọn bao nhiêu Pokémon khởi đầu tuỳ thích ở trang Sandbox. Tối đa 6 cá thể vào party; phần còn lại tự vào PC.'
+                    : 'Bạn sẽ bắt đầu KHÔNG có Pokémon. Việc nhận Pokémon đầu tiên là một cột mốc trong truyện — chương đầu, hoặc muộn hơn tuỳ tuổi và hoàn cảnh nhân vật.'}
                 </small>
               </div>
             </>
@@ -890,7 +970,7 @@ export default function IntroScreen({ onOpenSettings }) {
                 <textarea
                   className="input"
                   style={{ width: '100%', marginTop: 10, minHeight: 70 }}
-                  placeholder="Mô tả siêu năng lực của bạn (VD: điều khiển thời tiết trong phạm vi nhỏ, nói chuyện với Pokémon hệ Ma...)"
+                  placeholder={sandboxMode ? 'Mô tả tự do một hoặc nhiều năng lực/cơ chế (có thể rất mạnh). VD: điều khiển thời tiết; toàn đội nhận EXP; vật phẩm X vô hạn...' : 'Mô tả siêu năng lực của bạn (VD: điều khiển thời tiết trong phạm vi nhỏ, nói chuyện với Pokémon hệ Ma...)'}
                   value={customPower}
                   onChange={(e) => setCustomPower(e.target.value)}
                 />
@@ -912,8 +992,9 @@ export default function IntroScreen({ onOpenSettings }) {
                 )
               })()}
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 10 }}>
-                Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến
-                nhân vật thành bất khả chiến bại.
+                {sandboxMode
+                  ? 'Sandbox không ép trần sức mạnh ở khâu tạo nhân vật. Hãy mô tả rõ cơ chế bạn muốn; sau khi vào truyện, thế giới phản ứng theo nhịp Anime.'
+                  : 'Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến nhân vật thành bất khả chiến bại.'}
               </div>
 
               <div
@@ -926,7 +1007,80 @@ export default function IntroScreen({ onOpenSettings }) {
                 <strong style={{ color: 'var(--mint)' }}>⚙ Luật năng lực theo chế độ</strong><br />
                 {normalizeGameMode(storyTone) === 'realistic'
                   ? 'Thực tế: chỉ chọn đúng một năng lực dựng sẵn (hoặc người thường). Không có ô tự tạo, Max IV/EV, nhân EXP, vật phẩm vô hạn hay cheat.'
-                  : 'Anime/Sảng văn: năng lực tự mô tả có thể tạo cơ chế số liệu nếu viết rõ. Các năng lực dựng sẵn vẫn chủ yếu ảnh hưởng nhập vai.'}
+                  : sandboxMode
+                    ? 'Sandbox: có thể mô tả nhiều năng lực/cơ chế trong ô tự tạo. State khởi đầu được cấu hình ở trang Sandbox; khi vào truyện gameplay dùng luật Anime.'
+                    : 'Anime: năng lực tự mô tả có thể tạo cơ chế số liệu nếu viết rõ. Các năng lực dựng sẵn vẫn chủ yếu ảnh hưởng nhập vai.'}
+              </div>
+            </div>
+          )}
+
+          {stepKey === 'sandbox' && (
+            <div>
+              <p className="page-subtitle">
+                Chốt state khởi đầu tự do. Những gì đặt ở đây được ghi thẳng vào save trước khi AI viết mở đầu; sau đó hành trình vận hành như Anime.
+              </p>
+
+              <div className="field">
+                <label>Tiền khởi đầu</label>
+                <input
+                  type="number" min="0" step="1" value={sandboxMoney}
+                  onChange={(event) => setSandboxMoney(event.target.value)}
+                  placeholder="VD: 1000000"
+                />
+                <small style={{ color: 'var(--text-dim)' }}>Không lấy mức tiền từ thân phận khi ở Sandbox.</small>
+              </div>
+
+              <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--line)', borderRadius: 10 }}>
+                <div style={{ color: 'var(--amber)', fontWeight: 800, marginBottom: 8 }}>Pokémon khởi đầu · không giới hạn số lượng</div>
+                <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) 110px auto', gap: 8 }}>
+                  <div>
+                    <input
+                      list="sandbox-pokemon-list"
+                      value={sandboxStarterSpecies}
+                      onChange={(event) => setSandboxStarterSpecies(event.target.value)}
+                      placeholder="Tên Pokémon, VD: Garchomp"
+                    />
+                    <datalist id="sandbox-pokemon-list">
+                      {pokedexSpecies.map((entry) => <option key={entry.species ?? entry.name} value={entry.name} />)}
+                    </datalist>
+                  </div>
+                  <input type="number" min="1" max="100" value={sandboxStarterLevel} onChange={(event) => setSandboxStarterLevel(event.target.value)} title="Level 1-100" />
+                  <button className="btn btn--primary" type="button" onClick={addSandboxStarter}>+ Thêm</button>
+                </div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>Level không bị giới hạn theo tiến trình: chọn bất kỳ Lv1–100. Có thể thêm nhiều cá thể cùng loài.</div>
+                {sandboxStarters.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                    {sandboxStarters.map((entry, index) => (
+                      <div key={`${entry.species}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: '7px 9px', border: '1px solid var(--line)', borderRadius: 8 }}>
+                        <span style={{ color: 'var(--text-hi)', fontSize: 12 }}>{index < 6 ? `Party ${index + 1}` : `PC ${index - 5}`} · {entry.species} · Lv.{entry.level}</span>
+                        <button className="btn" type="button" onClick={() => setSandboxStarters((current) => current.filter((_, at) => at !== index))}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--line)', borderRadius: 10 }}>
+                <div style={{ color: 'var(--mint)', fontWeight: 800, marginBottom: 8 }}>Vật phẩm khởi đầu</div>
+                <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) 100px auto auto', gap: 8, alignItems: 'center' }}>
+                  <select value={sandboxItemId} onChange={(event) => setSandboxItemId(event.target.value)}>
+                    {SHOP_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  </select>
+                  <input type="number" min="1" value={sandboxItemQty} onChange={(event) => setSandboxItemQty(event.target.value)} />
+                  <label style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 11.5, color: 'var(--text-mid)' }}>
+                    <input type="checkbox" checked={sandboxItemInfinite} onChange={(event) => setSandboxItemInfinite(event.target.checked)} /> ∞
+                  </label>
+                  <button className="btn" type="button" onClick={addSandboxItem}>+ Thêm</button>
+                </div>
+                {sandboxItems.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                    {sandboxItems.map((entry, index) => (
+                      <button key={`${entry.id}-${index}`} className="btn" type="button" title="Bấm để xoá" onClick={() => setSandboxItems((current) => current.filter((_, at) => at !== index))}>
+                        {entry.name} {entry.infinite ? '∞' : `x${entry.qty}`} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1080,7 +1234,7 @@ export default function IntroScreen({ onOpenSettings }) {
 
         {/* LƯU hồ sơ nhân vật (đợt 61) — hiện ở trang cuối để lần sau chơi lại
             không phải setup từ đầu. */}
-        {step === STEPS.length - 1 && (
+        {step === activeSteps.length - 1 && (
           <div style={{ display: 'flex', gap: 6, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               className="input"
@@ -1113,7 +1267,7 @@ export default function IntroScreen({ onOpenSettings }) {
             ← {step === 0 ? 'Màn hình chính' : 'Quay lại'}
           </button>
           <span style={{ flex: 1 }} />
-          {step < STEPS.length - 1 ? (
+          {step < activeSteps.length - 1 ? (
             <button className="btn btn--primary" onClick={goNext}>Tiếp tục →</button>
           ) : (
             <button className="btn btn--primary" onClick={handleBegin} disabled={loading}>

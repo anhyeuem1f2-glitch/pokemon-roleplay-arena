@@ -59,6 +59,8 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
   const [rerolling, setRerolling] = useState(false)
   const [scanStatus, setScanStatus] = useState('')
   const meta = message?.meta ?? {}
+  const stateAudit = meta.stateAudit ?? null
+  const auditPasses = Array.isArray(stateAudit?.passes) ? stateAudit.passes : []
   const [presetVariables, setPresetVariables] = useState(meta.presetUiVariables ?? [])
   useEffect(() => {
     setPresetVariables(message?.meta?.presetUiVariables ?? extractPresetUiVariables(message?.meta?.raw ?? ''))
@@ -177,6 +179,36 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                 {scanStatus && (
                   <div style={{ marginBottom: 12, padding: '9px 11px', border: '1px solid var(--mint)', borderRadius: 9, color: 'var(--mint)', fontSize: 11.5 }}>
                     {scanStatus}
+                  </div>
+                )}
+
+                {stateAudit && (
+                  <div style={{ marginBottom: 12, padding: 11, border: '1px solid var(--line)', borderRadius: 10, background: 'rgba(95,215,232,.035)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div style={{ color: 'var(--mint)', fontWeight: 800, fontSize: 11.5 }}>🔎 State Audit v{stateAudit.version ?? 1}</div>
+                      <div style={{ color: 'var(--text-dim)', fontSize: 9.5 }}>Canon: {stateAudit.canon === 'displayText' ? 'chính văn hiển thị' : (stateAudit.canon ?? 'không rõ')}</div>
+                    </div>
+                    {stateAudit.main && (
+                      <div style={{ marginTop: 7, color: 'var(--text-mid)', fontSize: 10.5 }}>
+                        Model chính: <b style={{ color: 'var(--mint)' }}>{stateAudit.main.accepted ?? 0}</b> candidate hợp lệ
+                        {(stateAudit.main.rejected ?? 0) > 0 ? <> · <b style={{ color: '#e9a06b' }}>{stateAudit.main.rejected}</b> bị bác</> : ''}
+                      </div>
+                    )}
+                    {auditPasses.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                        {auditPasses.map((pass, index) => (
+                          <div key={`${index}-${pass.pass}-${pass.role}`} style={{ padding: '7px 9px', borderRadius: 8, background: 'var(--bg-deep)', border: '1px solid var(--line)', fontSize: 10.5, lineHeight: 1.55 }}>
+                            <span style={{ color: 'var(--text-hi)', fontWeight: 750 }}>AI {pass.pass} · {pass.role === 'auditor' ? 'Auditor' : 'Extractor'}{pass.reroll ? ' · quét lại' : ''}</span>
+                            <span style={{ color: 'var(--text-dim)' }}> · {pass.evidenceAnchored ? 'evidence nguyên văn' : 'tương thích tag cũ'}</span>
+                            {pass.error ? (
+                              <span style={{ color: '#e9a06b' }}> · lỗi: {pass.error}</span>
+                            ) : (
+                              <span style={{ color: 'var(--text-mid)' }}> · đề xuất {pass.proposed ?? 0} → nhận {pass.accepted ?? 0}{(pass.rejected ?? 0) > 0 ? ` · bác ${pass.rejected}` : ''}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

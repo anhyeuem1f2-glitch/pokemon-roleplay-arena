@@ -14,15 +14,19 @@ export const GAME_MODES = [
     desc: 'Sandbox như anime: ý chí, kỳ tích và huyền thoại có thể đi theo cách người chơi muốn. Không có trao đổi dữ liệu giữa người chơi.',
   },
   {
-    key: 'sang',
-    label: '✨ Sảng văn',
-    short: 'Cơ duyên và cheat chủ động',
-    desc: 'Sandbox toàn quyền: cho phép năng lực tự tạo, tăng trưởng nhanh, cheat và huyền thoại theo ý người chơi. Không có trao đổi dữ liệu giữa người chơi.',
+    key: 'sandbox',
+    label: '🧰 Sandbox',
+    short: 'Tự do thiết lập, chơi theo luật Anime',
+    desc: 'Tự do cấu hình lúc tạo nhân vật: Pokémon khởi đầu, level, tiền, vật phẩm và sức mạnh. Sau khi bắt đầu, thế giới vận hành theo luật Anime; không có trao đổi dữ liệu giữa người chơi.',
   },
 ]
 
 export function normalizeGameMode(value) {
-  const key = typeof value === 'string' ? value : value?.difficulty
+  const rawKey = typeof value === 'string' ? value : value?.difficulty
+  // Save cũ dùng key `sang`; từ đợt 99 migrate mềm sang Sandbox để không
+  // làm hỏng hành trình hiện có. Sandbox chỉ tự do ở khâu khởi tạo; khi đã
+  // vào game thì luật kể chuyện/gameplay tương đương Anime.
+  const key = rawKey === 'sang' ? 'sandbox' : rawKey
   return GAME_MODES.some((mode) => mode.key === key) ? key : 'anime'
 }
 
@@ -61,7 +65,7 @@ export function legendaryAccess(speciesEntry, worldProgress, modeValue, adminOve
   if (adminOverride) return { allowed: true, tier, reason: 'Admin override đã xác thực cho phiên kiểm thử' }
 
   const mode = normalizeGameMode(modeValue)
-  // Anime và Sảng văn là sandbox kể chuyện: không dùng huy hiệu/nhiệm vụ hay
+  // Anime và Sandbox là tuyến kể chuyện mềm: không dùng huy hiệu/nhiệm vụ hay
   // cổng dữ liệu để bác điều người chơi muốn vẽ. Luật sinh thái cứng chỉ thuộc
   // chế độ Thực tế; AI vẫn có thể tự giữ giọng kể phù hợp với mode.
   if (mode !== 'realistic') {
@@ -104,7 +108,7 @@ export function buildModeRulesNote(modeValue, worldProgress) {
   } else if (mode === 'anime') {
     common.push('CHẾ ĐỘ ANIME: đây là sandbox kể chuyện. Cho phép kỳ tích, gặp hoặc đồng hành cùng huyền thoại theo mạch anime và ý muốn người chơi; không áp cổng huy hiệu, nhiệm vụ hay điều kiện triệu hồi cứng. Hậu quả pháp luật thiên về giáo dục/chuộc lỗi. Không dùng hệ trao đổi dữ liệu giữa người chơi.')
   } else {
-    common.push('CHẾ ĐỘ SẢNG VĂN: đây là sandbox toàn quyền; cơ duyên, cheat, triệu hồi/gặp và thu phục huyền thoại có thể diễn ra theo điều người chơi muốn. Chỉ cần khai tag dữ liệu để app đồng bộ, không áp cổng huy hiệu, nhiệm vụ, sinh thái hay nghi thức cứng. Không dùng hệ trao đổi dữ liệu giữa người chơi.')
+    common.push('CHẾ ĐỘ SANDBOX: quyền tự do đặc biệt chỉ nằm ở KHÂU TẠO NHÂN VẬT (Pokémon khởi đầu, level, tiền, vật phẩm, sức mạnh có thể tự cấu hình). Sau khi hành trình bắt đầu, hãy vận hành như CHẾ ĐỘ ANIME: cho phép kỳ tích, gặp hoặc đồng hành cùng huyền thoại theo mạch anime và ý muốn người chơi; không áp cổng huy hiệu, nhiệm vụ hay điều kiện triệu hồi cứng. Không tự coi mọi tuyên bố tài nguyên/cheat giữa lúc chơi là state thật nếu chính văn chưa xác nhận và app chưa cập nhật. Không dùng hệ trao đổi dữ liệu giữa người chơi.')
   }
   return common.join('\n')
 }

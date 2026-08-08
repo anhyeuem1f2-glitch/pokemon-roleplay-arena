@@ -6,12 +6,12 @@
 
 export const DIFFICULTIES = [
   {
-    key: 'sang',
-    label: '✨ Sảng văn (dễ)',
-    desc: 'Nhân vật chính thuận buồm xuôi gió, đối thủ vừa miếng, thắng lợi đều đặn — chơi để sướng, không để khổ.',
+    key: 'sandbox',
+    label: '🧰 Sandbox',
+    desc: 'Tự do thiết lập ban đầu; khi vào truyện, nhịp và hậu quả vận hành như Anime.',
     note: [
-      'ĐỘ KHÓ — SẢNG VĂN (dễ): người chơi là nhân vật chính được thế giới ưu ái. Cơ duyên đến đều, NPC đối địch vừa sức và thường non tay hơn, thất bại (nếu có) chỉ là bàn đạp cho màn lội ngược dòng.',
-      'Giọng văn thoải mái, nhịp nhanh, thắng lợi phải ĐÃ — miêu tả kỹ khoảnh khắc toả sáng của người chơi. Không giết nhân vật chính, không đẩy vào ngõ cụt.',
+      'CHẾ ĐỘ — SANDBOX: mọi tự do đặc biệt về Pokémon khởi đầu, cấp độ, tiền, vật phẩm và sức mạnh đã được chốt ở màn tạo nhân vật thành state thật.',
+      'SAU KHI BẮT ĐẦU HÀNH TRÌNH, dùng nhịp ANIME (chuẩn): thế giới tươi sáng, tình bạn và kỳ tích có chỗ đứng, đối thủ có thể mạnh nhưng fair-play; không tự cấp thêm tài nguyên hay cheat chỉ vì đang ở Sandbox nếu chính văn chưa làm nó xảy ra.',
     ].join(' '),
   },
   {
@@ -79,8 +79,9 @@ export const DEFAULT_STORY_TONE = { difficulty: 'anime', genres: [] }
 // lạ/trùng để save cũ hoặc file import không làm prompt phình vô hạn.
 export function normalizeStoryTone(tone) {
   const raw = tone && typeof tone === 'object' ? tone : DEFAULT_STORY_TONE
-  const difficulty = DIFFICULTIES.some((entry) => entry.key === raw.difficulty)
-    ? raw.difficulty
+  const legacyDifficulty = raw.difficulty === 'sang' ? 'sandbox' : raw.difficulty
+  const difficulty = DIFFICULTIES.some((entry) => entry.key === legacyDifficulty)
+    ? legacyDifficulty
     : DEFAULT_STORY_TONE.difficulty
   const allowed = new Set(GENRES.map((entry) => entry.key))
   const genres = [...new Set(Array.isArray(raw.genres) ? raw.genres : [])]

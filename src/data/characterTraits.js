@@ -38,7 +38,8 @@ export const SUPERPOWERS = [
 /** Note tính cách + siêu năng lực chèn vào prompt (null nếu không chọn gì).
  * Đợt 70: gộp thêm THIÊN PHÚ CƠ CHẾ (playerPerks.js) — trước đây perk chỉ
  * chạy trong code, AI không hề biết nên kể mâu thuẫn với số liệu trên HUD. */
-export function buildCharacterTraitsNote({ personality = [], superpower = 'none', customPower = '', perks = [] }) {
+export function buildCharacterTraitsNote({ personality = [], superpower = 'none', customPower = '', perks = [] }, modeValue = 'anime') {
+  const sandbox = (typeof modeValue === 'string' ? modeValue : modeValue?.difficulty) === 'sandbox'
   const parts = []
   const traits = personality.map((k) => PERSONALITY_TRAITS.find((t) => t.key === k)?.note).filter(Boolean)
   if (traits.length) {
@@ -54,7 +55,9 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
     const customMechanicNote = buildCustomMechanicNote({ personality, superpower, customPower, perks })
     parts.push(
       `SIÊU NĂNG LỰC ĐẶC BIỆT (người chơi TỰ ĐẶT RA — hãy tôn trọng đúng như họ viết): ${customPower.trim()}. `
-      + 'Thể hiện năng lực này CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại. '
+      + (sandbox
+        ? 'SANDBOX: không tự hạ cấp, cân bằng lại hay thêm cái giá/giới hạn mà người chơi không viết. Năng lực này là thiết lập canon của nhân vật; diễn biến sau đó vẫn kể theo nhịp Anime. '
+        : 'Thể hiện năng lực này CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại. ')
       + 'QUAN TRỌNG: nếu năng lực này dẫn tới thay đổi có thể ĐO ĐƯỢC mà app chưa tự xử lý (nhận vật phẩm, đổi tiền, '
       + 'nhận Pokémon, tăng cấp trực tiếp...), hãy dùng ĐÚNG TAG tương ứng ở phần giao thức để nó thành thật trong dữ liệu game, '
       + 'thay vì chỉ kể suông rồi để số liệu đứng yên.'
@@ -63,7 +66,7 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
   } else if (superpower && superpower !== 'none') {
     const p = SUPERPOWERS.find((s) => s.key === superpower)
     if (p?.note) {
-      parts.push(`SIÊU NĂNG LỰC ĐẶC BIỆT: ${p.note}. Thể hiện CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại, năng lực có giới hạn và cái giá của nó.`)
+      parts.push(`SIÊU NĂNG LỰC ĐẶC BIỆT: ${p.note}. ${sandbox ? 'SANDBOX: đây là thiết lập canon đã chọn; không tự thêm giới hạn/cái giá ngoài mô tả.' : 'Thể hiện CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại, năng lực có giới hạn và cái giá của nó.'}`)
     }
   }
   const perksNote = buildPerksNote(perks)

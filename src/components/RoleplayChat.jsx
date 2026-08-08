@@ -424,6 +424,17 @@ function mergeStateManifests(base, extra) {
   return merged
 }
 
+function countParsedStateOperations(parsed) {
+  if (!parsed) return 0
+  let count = (parsed.moneyEntries?.length ?? (parsed.money ? 1 : 0))
+  for (const field of STATE_ARRAY_FIELDS) count += parsed[field]?.length ?? 0
+  if (parsed.dateAdvance) count += 1
+  if (parsed.datePart) count += 1
+  if (parsed.training) count += 1
+  if (parsed.pokecenter) count += 1
+  return count
+}
+
 function scheduleIdleStateTask(task) {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     return window.requestIdleCallback(() => task(), { timeout: 2500 })
@@ -992,7 +1003,7 @@ export default function RoleplayChat() {
           continue
         }
 
-        // Thực tế mới nắn level theo sinh thái. Anime/Sảng văn phải giữ đúng
+        // Thực tế mới nắn level theo sinh thái. Anime/Sandbox phải giữ đúng
         // level người chơi/AI đã tuyên bố và không biến Pokémon sở hữu thành boss.
         const saneLv = realisticMode
           ? receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
@@ -1456,7 +1467,7 @@ export default function RoleplayChat() {
       // ĐỘI HÌNH + HÀNH VI THEO TÍNH CÁCH (đợt 63): Pokémon phải cư xử đúng
       // cá tính (nature) chứ không con nào cũng ngoan như nhau.
       // TÍNH CÁCH + THIÊN PHÚ (đợt 69): gửi MỌI LƯỢT, không chỉ lượt mở đầu.
-      const traitsNote = buildCharacterTraitsNote(playerTraits ?? {})
+      const traitsNote = buildCharacterTraitsNote(playerTraits ?? {}, normalizeGameMode(storyTone))
       if (traitsNote) history = [...history, { role: 'user', content: `[Hệ thống — ${traitsNote} Không nhắc tới ghi chú này.]` }]
 
       const partyNote = buildPartyBehaviorNote(party, playerMon)
@@ -1470,9 +1481,7 @@ export default function RoleplayChat() {
       // để AI chủ động dựng cảnh sống động quanh hành động của người chơi.
       const creativeFreedomNote = currentMode === 'realistic'
         ? '[Hệ thống — QUYỀN TỰ DO SÁNG TẠO CÓ NHỊP: input của người chơi là HÀNH ĐỘNG/Ý ĐỊNH của nhân vật chính, không phải kịch bản giới hạn và cũng không tự xác lập kết quả ngoài quyền nhân vật. Hãy làm cảnh sống bằng phản ứng hợp logic của NPC/Pokémon, giác quan và hệ quả đã gieo. KHÔNG bắt buộc nhét sự cố, người lạ, tin nghe lỏm hay hook mới vào mỗi lượt; đối thoại, chăm sóc, cắm trại và im lặng có ý nghĩa phải được thở. Ưu tiên nối sợi dây cũ trước khi mở sợi dây mới. Không hỏi lại người chơi; không viết danh sách lựa chọn lẫn trong chính văn. Khối <actions> dành cho giao diện vẫn tạo riêng. Không nhắc tới ghi chú này.]'
-        : currentMode === 'anime'
-          ? '[Hệ thống — QUYỀN TÁC GIẢ ANIME: người chơi được chủ động đặt tiền đề, kỳ tích, cuộc gặp, kết quả cao trào và cả việc huyền thoại xuất hiện/đồng hành như trong anime. Hãy biến điều họ vẽ thành chính văn sống động, vẫn cho NPC/Pokémon có cảm xúc và tính cách riêng nhưng không dùng luật Thực tế, sinh cảnh, huy hiệu, nhiệm vụ hay nghi thức để bác ý muốn đó. Giữ nhịp cảnh tự nhiên; không bắt buộc nhét hook mới. Dùng tag state chuẩn để đồng bộ app. Không nhắc ghi chú này.]'
-          : '[Hệ thống — QUYỀN TÁC GIẢ SẢNG VĂN: tuyên bố của người chơi về cheat, cơ duyên, tài nguyên, năng lực, chiến thắng, triệu hồi/gặp/bắt huyền thoại là chỉ dẫn tác giả được phép thành canon. Thực hiện hào phóng theo đúng ý họ và xuất tag state chuẩn; không áp chống cheat, sinh cảnh, huy hiệu, nhiệm vụ hay nghi thức của Thực tế. Không tự làm yếu hoặc diễn giải lại chỉ dẫn thành nhầm lẫn. Không nhắc ghi chú này.]'
+        : '[Hệ thống — QUYỀN TÁC GIẢ ANIME: người chơi được chủ động đặt tiền đề, kỳ tích, cuộc gặp, kết quả cao trào và cả việc huyền thoại xuất hiện/đồng hành như trong anime. Hãy biến điều họ vẽ thành chính văn sống động, vẫn cho NPC/Pokémon có cảm xúc và tính cách riêng nhưng không dùng luật Thực tế, sinh cảnh, huy hiệu, nhiệm vụ hay nghi thức để bác ý muốn đó. Nếu mode là Sandbox, các tài nguyên/Pokémon/sức mạnh tự do đã được chốt lúc tạo nhân vật; trong lúc chơi không tự cộng thêm state chỉ vì nhãn Sandbox. Giữ nhịp cảnh tự nhiên; không bắt buộc nhét hook mới. Dùng tag state chuẩn để đồng bộ app. Không nhắc ghi chú này.]'
       history = [...history, {
         role: 'user',
         content: creativeFreedomNote,
@@ -1709,6 +1718,15 @@ export default function RoleplayChat() {
         preAppliedState,
         presetUiVariables: extractPresetUiVariables(reply),
         blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
+        stateAudit: {
+          version: 2,
+          canon: 'displayText',
+          main: {
+            accepted: countParsedStateOperations(stateParsed),
+            rejected: finalEvidenceCheck.rejected.length + rejectedShops.length,
+          },
+          passes: [],
+        },
         changes: [
           ...describeParsedChanges(stateParsed, movedTo, '', mainApplyReport),
           ...(displayText !== stateEvidenceText ? ['✍ Văn đã qua API chau chuốt văn phong'] : []),
@@ -1830,18 +1848,47 @@ export default function RoleplayChat() {
               if (!stateCfg?.baseUrl || !stateCfg?.model) continue
               let extraTagsText = ''
               try {
-                extraTagsText = await extractMissingStateTags(stateCfg, {
+                const scanResult = await extractMissingStateTags(stateCfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   appliedTags: scanLedger,
                   hasPokemon: Boolean(latestPlayerMonRef.current) || (stateParsed.pokemons ?? []).length > 0,
                   contextNote: identityContext,
+                  stateSnapshot: {
+                    money: (Number(playerProfile?.money) || 0) + (Number(scanLedger?.money) || 0),
+                    party: (latestPartyRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null })),
+                    pc: (latestPcBoxRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level })),
+                    inventory: (latestInventoryRef.current ?? []).map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
+                    location: latestPlayerLocationRef.current,
+                  },
+                  scanMode: scanIndex === 0 ? 'extractor' : 'auditor',
+                  returnDetails: true,
                 })
+                extraTagsText = scanResult?.tagsText ?? ''
+                const passAuditBase = {
+                  pass: scanIndex + 1,
+                  role: scanIndex === 0 ? 'extractor' : 'auditor',
+                  evidenceAnchored: Boolean(scanResult?.structured),
+                  proposed: scanResult?.proposedCount ?? (extraTagsText ? countParsedStateOperations(parseStoryStateTags(extraTagsText)) : 0),
+                  evidenceRejected: scanResult?.evidenceRejected ?? 0,
+                }
+                if (!extraTagsText) {
+                  setMessages((msgs) => msgs.map((message) => message.id === turnMessageId ? {
+                    ...message,
+                    meta: {
+                      ...(message.meta ?? {}),
+                      stateAudit: {
+                        ...(message.meta?.stateAudit ?? turnMeta.stateAudit),
+                        passes: [...(message.meta?.stateAudit?.passes ?? []), { ...passAuditBase, accepted: 0, rejected: passAuditBase.evidenceRejected ?? 0 }],
+                      },
+                    },
+                  } : message))
+                  continue
+                }
               } catch (scanError) {
                 console.warn(`[state-api-${scanIndex + 1}] bỏ qua:`, scanError.message)
                 continue
               }
-              if (!extraTagsText) continue
               const sourceMessage = latestMessagesRef.current.find((message) => message.id === turnMessageId)
               // Người chơi có thể reroll/xoá/sửa tin trong lúc API phụ đang
               // chạy. Tuyệt đối không áp tag của nhánh cũ vào state hiện tại.
@@ -1896,6 +1943,14 @@ export default function RoleplayChat() {
                       ...(current.meta ?? {}),
                       changes: [...(current.meta?.changes ?? []), ...extraLines],
                       appliedState: mergeStateManifests(current.meta?.appliedState ?? turnAppliedManifest, extra),
+                      stateAudit: {
+                        ...(current.meta?.stateAudit ?? turnMeta.stateAudit),
+                        passes: [...(current.meta?.stateAudit?.passes ?? []), {
+                          ...passAuditBase,
+                          accepted: countParsedStateOperations(extra),
+                          rejected: (passAuditBase.evidenceRejected ?? 0) + extraEvidence.rejected.length,
+                        }],
+                      },
                     },
                   }
                   return msgs.map((m2, index) => (index === at ? updated : m2))
@@ -1958,24 +2013,57 @@ export default function RoleplayChat() {
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
+      const rerollAuditPasses = []
       let messagePatch = {}
       for (let scanIndex = 0; scanIndex < cfgs.length; scanIndex += 1) {
         const cfg = cfgs[scanIndex]
         if (!cfg?.baseUrl || !cfg?.model) continue
         let tagsText = ''
+        let scanResult = null
         try {
-          tagsText = await extractMissingStateTags(cfg, {
+          scanResult = await extractMissingStateTags(cfg, {
             storyText,
             userText,
             appliedTags: applied,
             hasPokemon: Boolean(latestPlayerMonRef.current) || (applied.pokemons ?? []).length > 0,
             contextNote: identityContext,
+            stateSnapshot: {
+              money: Number(playerProfile?.money) || 0,
+              party: (latestPartyRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null })),
+              pc: (latestPcBoxRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level })),
+              inventory: (latestInventoryRef.current ?? []).map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
+              location: latestPlayerLocationRef.current,
+            },
+            scanMode: scanIndex === 0 ? 'extractor' : 'auditor',
+            returnDetails: true,
           })
+          tagsText = scanResult?.tagsText ?? ''
         } catch (scanError) {
           lines.push(`⚠ AI soi biến ${scanIndex + 1} lỗi: ${scanError.message}`)
+          rerollAuditPasses.push({
+            pass: scanIndex + 1,
+            role: scanIndex === 0 ? 'extractor' : 'auditor',
+            evidenceAnchored: false,
+            proposed: 0,
+            accepted: 0,
+            rejected: 0,
+            error: scanError.message,
+            reroll: true,
+          })
           continue
         }
-        if (!tagsText?.trim()) continue
+        const auditBase = {
+          pass: scanIndex + 1,
+          role: scanIndex === 0 ? 'extractor' : 'auditor',
+          evidenceAnchored: Boolean(scanResult?.structured),
+          proposed: scanResult?.proposedCount ?? (tagsText ? countParsedStateOperations(parseStoryStateTags(tagsText)) : 0),
+          evidenceRejected: scanResult?.evidenceRejected ?? 0,
+          reroll: true,
+        }
+        if (!tagsText?.trim()) {
+          rerollAuditPasses.push({ ...auditBase, accepted: 0, rejected: auditBase.evidenceRejected ?? 0 })
+          continue
+        }
 
         let parsed = filterUiPreAppliedState(parseStoryStateTags(tagsText), source.meta?.preAppliedState)
         parsed = filterSupplementalDuplicates(parsed, applied)
@@ -2005,6 +2093,11 @@ export default function RoleplayChat() {
           setPlayerLocation(movedTo)
         }
         lines.push(...describeParsedChanges(extra, movedTo, `(quét lại ${scanIndex + 1})`, report))
+        rerollAuditPasses.push({
+          ...auditBase,
+          accepted: countParsedStateOperations(extra),
+          rejected: (auditBase.evidenceRejected ?? 0) + evidence.rejected.length,
+        })
         if (extra.shops?.[0]) messagePatch = { ...messagePatch, shop: extra.shops[0], shopName: extra.shops[0].name, shopValidated: true }
         if (extra.pokecenter) messagePatch = { ...messagePatch, pokecenter: extra.pokecenter.name }
         applied = mergeStateManifests(applied, extra)
@@ -2017,6 +2110,12 @@ export default function RoleplayChat() {
           evidenceText: storyText,
           appliedState: applied,
           changes: [...(message.meta?.changes ?? []), ...lines],
+          stateAudit: {
+            version: 2,
+            canon: 'displayText',
+            ...(message.meta?.stateAudit ?? {}),
+            passes: [...(message.meta?.stateAudit?.passes ?? []), ...rerollAuditPasses],
+          },
         },
       } : message))
       return {

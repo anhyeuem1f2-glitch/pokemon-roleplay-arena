@@ -9,7 +9,7 @@
 
 import { chatCompletion } from './aiClient.js'
 
-const SYSTEM = `Bạn là bộ trích xuất TRẠNG THÁI cho một game nhập vai Pokémon. Nhiệm vụ: đọc CHÍNH VĂN của lượt kể và DANH SÁCH TAG ĐÃ ÁP, rồi xuất BỔ SUNG các tag còn thiếu cho những thay đổi RÕ RÀNG trong văn bản.
+const BASE_SYSTEM = `Bạn là bộ trích xuất TRẠNG THÁI cho một game nhập vai Pokémon. Nhiệm vụ: đọc CHÍNH VĂN của lượt kể và DANH SÁCH TAG ĐÃ ÁP, rồi xuất BỔ SUNG các tag còn thiếu cho những thay đổi RÕ RÀNG trong văn bản.
 
 Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác):
 [[MONEY +500]] hoặc [[MONEY -200]] — tiền người chơi thay đổi (mua bán, thưởng, mất).
@@ -43,15 +43,77 @@ QUY TẮC:
 - KHÔNG lặp lại thay đổi đã nằm trong danh sách tag đã áp.
 - Nếu chính văn nói một Pokémon CŨ lên cấp, bắt buộc dùng [[LEVEL]], tuyệt đối không đổi thành [[POKEMON]].
 - Nếu chính văn nói Pokémon tiến hoá, bắt buộc dùng [[EVOLVE tên cũ | tên mới]]. Nếu đồng thời lên cấp, xuất LEVEL tên cũ trước rồi EVOLVE; tuyệt đối không dùng POKEMON tên mới vì sẽ làm phân thân.
-- Không có gì để bổ sung → trả về đúng chuỗi: KHONG_CO
-- Chỉ trả về các dòng tag (hoặc KHONG_CO). Không giải thích, không markdown.`
+- Không có gì để bổ sung → trả về đúng chuỗi: KHONG_CO.`
+
+const STRUCTURED_OUTPUT = `
+ĐỊNH DẠNG KIỂM CHỨNG BẮT BUỘC:
+- Nếu có thay đổi, KHÔNG trả tag trần. Trả đúng một khối <STATE_PATCH> chứa JSON hợp lệ:
+<STATE_PATCH>
+{"proposals":[{"tag":"[[MONEY -200]]","evidence":"trích nguyên văn liên tục từ CHÍNH VĂN chứng minh giao dịch đã hoàn tất"}]}
+</STATE_PATCH>
+- Mỗi proposal phải có đúng 1 tag và 1 evidence. evidence phải là đoạn TRÍCH NGUYÊN VĂN LIÊN TỤC từ CHÍNH VĂN lượt này, đủ để chứng minh sự kiện đã xảy ra; không được chép từ INPUT người chơi hay tự diễn giải. Có thể trích nhiều câu liên tiếp nếu sự kiện trải qua nhiều câu.
+- Nếu cùng một tag/delta xảy ra hai lần thật, xuất hai proposal với hai evidence khác nhau.
+- App sẽ loại proposal nếu evidence không tìm thấy trong chính văn.
+- Không markdown, không giải thích ngoài KHONG_CO hoặc khối <STATE_PATCH>.`
+
+function buildSystem(scanMode = 'extractor') {
+  const role = scanMode === 'auditor'
+    ? `VAI TRÒ LƯỢT NÀY — AUDITOR: coi TAG ĐÃ ÁP là ledger đã commit. Rà lại TỪ ĐẦU ĐẾN CUỐI chính văn theo checklist MONEY, REL, BODY, POKEMON, EVOLVE, LEVEL, FRIEND, ITEM, EQUIP/UNEQUIP, SHOP, LOOT, POKECENTER, HUNGER, DATE, TRAIN, MOVE, NPC, FACT, BADGE, QUEST, REP, WANTED, LEGENDARY_ACCESS, RIBBON/MARK. Chỉ đề xuất phần CÒN THIẾU; đặc biệt tìm các sự kiện diễn đạt gián tiếp/nhiều câu mà extractor trước có thể bỏ sót.`
+    : `VAI TRÒ LƯỢT NÀY — EXTRACTOR: rà toàn bộ chính văn một lượt theo mọi loại state, ưu tiên độ bao phủ nhưng tuyệt đối không suy diễn ngoài điều đã hoàn tất trong văn.`
+  return `${BASE_SYSTEM}\n\n${role}\n${STRUCTURED_OUTPUT}`
+}
+
+export function parseStatePatchResponse(reply, storyText = '') {
+  const text = (reply ?? '').trim()
+  if (!text || text === 'KHONG_CO') return { tagsText: null, proposals: [], structured: false, proposedCount: 0, evidenceRejected: 0 }
+
+  const block = text.match(/<STATE_PATCH>\s*([\s\S]*?)\s*<\/STATE_PATCH>/i)
+  if (block) {
+    try {
+      const payload = JSON.parse(block[1].trim())
+      const proposals = Array.isArray(payload?.proposals) ? payload.proposals : []
+      const normalize = (value) => String(value ?? '')
+        .normalize('NFKC')
+        .toLocaleLowerCase('vi-VN')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const haystack = normalize(storyText)
+      const accepted = []
+      for (const proposal of proposals) {
+        const tag = String(proposal?.tag ?? '').replace(/\s+/g, ' ').trim()
+        const evidence = String(proposal?.evidence ?? '').trim()
+        if (!/^\[\[[\s\S]+\]\]$/.test(tag)) continue
+        const needle = normalize(evidence)
+        if (needle.length < 8 || !haystack.includes(needle)) continue
+        accepted.push({ tag, evidence })
+      }
+      return {
+        tagsText: accepted.length ? accepted.map((proposal) => proposal.tag).join('\n') : null,
+        proposals: accepted,
+        structured: true,
+        proposedCount: proposals.length,
+        evidenceRejected: Math.max(0, proposals.length - accepted.length),
+      }
+    } catch (error) {
+      console.warn('[state-api] STATE_PATCH JSON lỗi, bỏ lượt scan này:', error.message)
+      return { tagsText: null, proposals: [], structured: true, malformed: true, proposedCount: 0, evidenceRejected: 0 }
+    }
+  }
+
+  // Tương thích provider/model cũ chưa theo format mới: chỉ nhận tag trần khi
+  // KHÔNG có marker STATE_PATCH. Candidate vẫn phải qua stateEvidence phía app.
+  const tagLines = [...text.matchAll(/\[\[[\s\S]*?\]\]/g)]
+    .map((match) => match[0].replace(/\s+/g, ' ').trim())
+  return { tagsText: tagLines.length ? tagLines.join('\n') : null, proposals: [], structured: false, proposedCount: tagLines.length, evidenceRejected: 0 }
+}
 
 /**
- * Gọi API cập nhật biến. Trả về chuỗi tag bổ sung, hoặc null nếu không có.
+ * Gọi API cập nhật biến. Mặc định trả về chuỗi tag bổ sung để tương thích
+ * code cũ; `returnDetails=true` trả thêm metadata evidence-anchor cho audit.
  * @param {{baseUrl,apiKey,model}} cfg
  * @param {{storyText: string, appliedTags: object, hasPokemon: boolean}} params
  */
-export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon, userText = '', contextNote = '' }) {
+export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon, userText = '', contextNote = '', stateSnapshot = null, scanMode = 'extractor', returnDetails = false }) {
   if (!storyText?.trim()) return null
   const applied = JSON.stringify(appliedTags)
   const user = [
@@ -59,6 +121,7 @@ export async function extractMissingStateTags(cfg, { storyText, appliedTags, has
     // CHÍNH TẢ tên Pokémon/nhân vật; phải hiểu theo ngữ cảnh và luôn khai
     // tag bằng TÊN CHUẨN (VD người chơi gõ "chamnder" → tag dùng Charmander).
     contextNote.trim() ? `${contextNote.trim()}\n` : '',
+    stateSnapshot ? `STATE HIỆN TẠI TRƯỚC KHI BỔ SUNG (chỉ dùng để phân biệt tài sản/Pokémon cũ với thứ mới trong chính văn; không tự sửa state vì snapshot):\n${JSON.stringify(stateSnapshot)}\n` : '',
     userText.trim() ? `INPUT NGƯỜI CHƠI LƯỢT NÀY (có thể sai chính tả — hiểu theo ngữ cảnh, tag dùng tên CHUẨN):\n${userText}\n` : '',
     `CHÍNH VĂN LƯỢT NÀY:\n${storyText}`,
     '',
@@ -69,15 +132,10 @@ export async function extractMissingStateTags(cfg, { storyText, appliedTags, has
   ].join('\n')
 
   const reply = await chatCompletion(cfg, [
-    { role: 'system', content: SYSTEM },
+    { role: 'system', content: buildSystem(scanMode) },
     { role: 'user', content: user },
   ], { temperature: 0, maxTokens: 4096 })
 
-  const text = (reply ?? '').trim()
-  if (!text || text === 'KHONG_CO') return null
-  // Lấy mọi tag không tham lam, kể cả preset/model dồn nhiều tag lên cùng một
-  // dòng. Parser cũ chỉ giữ “mỗi dòng đúng một tag”, khiến danh sách dài mất sạch.
-  const tagLines = [...text.matchAll(/\[\[[\s\S]*?\]\]/g)]
-    .map((match) => match[0].replace(/\s+/g, ' ').trim())
-  return tagLines.length ? tagLines.join('\n') : null
+  const result = parseStatePatchResponse(reply, storyText)
+  return returnDetails ? result : result.tagsText
 }

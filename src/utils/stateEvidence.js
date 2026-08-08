@@ -345,11 +345,11 @@ const TIME_PASS = ['ngày trôi qua', 'đêm trôi qua', 'sáng hôm sau', 'qua 
 const TIME_TRANSITION = ['đã sang', 'chuyển sang', 'trời đã', 'khi trời', 'lúc này là', 'bây giờ là', 'sáng hôm sau']
 const TRAINING = ['luyện tập', 'huấn luyện', 'tập luyện', 'tập chiêu', 'đối luyện', 'chạy bền', 'khổ luyện', 'tập thể lực']
 const CENTER_INSIDE = ['bước vào trung tâm pokemon', 'đi vào trung tâm pokemon', 'bên trong trung tâm pokemon', 'đứng trước quầy y tá', 'y tá joy chào']
-const MONEY_CONTEXT = ['tiền', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng cộng', 'hóa đơn', 'thành tiền', 'số dư', 'thanh toán', 'trả', 'thưởng', 'mua', 'bán', 'bị cướp', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'gia tộc', 'gia đình']
-const MONEY_GAIN = ['nhận', 'được thưởng', 'thưởng cho', 'kiếm được', 'được trả công', 'trao tiền', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển', 'chuyển tiền', 'chuyển khoản', 'gia tộc gửi', 'gia đình gửi', 'ứng tiền', 'giải ngân', 'ghi có', 'số dư tăng']
-const MONEY_LOSS = ['trả', 'thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'khấu trừ', 'bị trừ', 'trừ đi', 'quẹt thẻ', 'quẹt', 'giải ngân']
+const MONEY_CONTEXT = ['tiền', 'tiền mặt', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng', 'tổng cộng', 'tổng tiền', 'hóa đơn', 'hoá đơn', 'thành tiền', 'số tiền', 'số dư', 'thanh toán', 'trả tiền', 'chi tiền', 'tiền thưởng', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'máy pos', 'pos', 'thẻ', 'ghi có', 'ghi nợ']
+const MONEY_GAIN = ['nhận tiền', 'nhận khoản', 'nhận được', 'được nhận', 'gửi khoản hỗ trợ', 'gửi tiền vào', 'gửi vào tài khoản', 'được thưởng', 'thưởng cho', 'kiếm được', 'được trả công', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển vào', 'chuyển đến', 'tiền vào', 'chuyển tiền vào', 'chuyển khoản vào', 'gia tộc gửi', 'gia đình gửi', 'được gửi', 'ứng tiền', 'giải ngân cho', 'ghi có', 'cộng vào', 'số dư tăng', 'tài khoản tăng']
+const MONEY_LOSS = ['trả', 'đã trả', 'chuyển tiền cho', 'chuyển khoản đi', 'thanh toán', 'đã thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'đưa cho', 'đặt tiền', 'đặt lên quầy', 'khấu trừ', 'bị trừ', 'trừ đi', 'trừ khỏi', 'quẹt thẻ', 'quẹt', 'thẻ bị trừ', 'ghi nợ', 'số dư giảm', 'tài khoản giảm']
 const SHOP_SELECT_ITEM = ['mua', 'lấy', 'lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'đơn hàng', 'giỏ hàng', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe']
-const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'nhận hóa đơn']
+const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'giao dịch thành công', 'giao dịch hoàn tất', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'trừ khỏi', 'thẻ bị trừ', 'máy pos xác nhận', 'máy pos báo', 'nhận hóa đơn', 'xuất hóa đơn']
 const SHOP_PACK_COMPLETE = ['đóng gói toàn bộ', 'xách theo đống hàng', 'xách theo hàng', 'toàn bộ đống vật tư']
 const UNKNOWN_BALL_CONTEXT = [
   'chưa kiểm tra', 'chưa mở', 'chưa xác định', 'không biết bên trong', 'không rõ bên trong',
@@ -403,28 +403,338 @@ function dedupeEntries(entries, type, rejected) {
   return out
 }
 
-function transactionEvidenceCount(text, amount) {
-  const lines = storySentences(text)
-  const verbs = amount > 0 ? MONEY_GAIN : MONEY_LOSS
-  let count = 0
-  for (let i = 0; i < lines.length; i++) {
-    const amountLine = lines[i]
-    if (!containsFormattedNumber(amountLine, amount) || !hasAny(amountLine, MONEY_CONTEXT)) continue
-    if (completedActionClause(amountLine, verbs)) {
-      count += 1
+function dedupeTurnTarget(entries, type, rejected, keyOf) {
+  const seen = new Set()
+  const out = []
+  for (const entry of entries ?? []) {
+    const key = keyOf(entry)
+    if (!key || !seen.has(key)) {
+      if (key) seen.add(key)
+      out.push(entry)
       continue
     }
-    // Văn dài/danh sách mua nhiều món có thể đặt câu thanh toán tận cuối cảnh.
-    // Quét hết phần còn lại của lượt thay vì giới hạn cứng năm câu.
-    for (let j = i + 1; j < lines.length; j++) {
-      const paymentLine = lines[j]
-      if (completedActionClause(paymentLine, verbs)) {
-        count += 1
-        break
+    reject(rejected, type, entry, 'cùng target đã có một thay đổi hợp lệ trong lượt này — bỏ candidate thứ hai để tránh AI chấm cùng sự kiện hai lần')
+  }
+  return out
+}
+
+const MONEY_TOTAL_MARKERS = ['tổng', 'tổng cộng', 'tổng tiền', 'tổng thanh toán', 'tổng phải trả', 'tổng hóa đơn', 'tổng hoá đơn', 'thành tiền', 'hóa đơn', 'hoá đơn', 'số tiền phải trả', 'cần thanh toán', 'phải thanh toán']
+const MONEY_BALANCE_MARKERS = ['số dư', 'tài khoản', 'ví', 'còn lại', 'còn', 'từ', 'xuống', 'lên', 'tăng lên', 'giảm còn']
+const MONEY_PRICE_ONLY = ['giá', 'niêm yết', 'đơn giá', 'giá bán', 'giá mua']
+const MONEY_CURRENCY_RE = /(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|đồng)/iu
+
+function parseMoneyNumberToken(raw, suffix = '') {
+  const compact = String(raw ?? '').replace(/\s+/g, '').trim()
+  if (!compact) return null
+  let numeric
+  if (/^\d{1,3}(?:[.,]\d{3})+$/.test(compact)) numeric = Number(compact.replace(/[.,]/g, ''))
+  else if (/^\d+$/.test(compact)) numeric = Number(compact)
+  else {
+    const normalized = compact.replace(/,/g, '.')
+    numeric = Number(normalized)
+  }
+  if (!Number.isFinite(numeric)) return null
+  const unit = fold(suffix)
+  if (['k', 'nghin', 'ngan'].includes(unit)) numeric *= 1_000
+  else if (['tr', 'm', 'trieu'].includes(unit)) numeric *= 1_000_000
+  else if (['ty'].includes(unit)) numeric *= 1_000_000_000
+  return Math.round(numeric)
+}
+
+function extractMoneyNumbers(text) {
+  const raw = String(text ?? '')
+  const re = /(?:₽\s*)?(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|nghìn|ngàn|nghin|ngan|triệu|trieu|tr|m|tỷ|ty))?(?:\s*(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|đồng))?/giu
+  const out = []
+  for (const match of raw.matchAll(re)) {
+    const value = parseMoneyNumberToken(match[1], match[2] ?? '')
+    if (!Number.isFinite(value)) continue
+    out.push({
+      value,
+      raw: match[0],
+      index: match.index ?? 0,
+      // Dùng để phân biệt “mua 3 Potion, trả 1.500₽”: số 3 là quantity,
+      // không bao giờ được tự hiểu thành 3 tiền.
+      explicitMoney: Boolean(match[2]) || MONEY_CURRENCY_RE.test(match[0]),
+    })
+  }
+  return out
+}
+
+function containsMoneyAmount(text, value) {
+  if (containsFormattedNumber(text, value)) return true
+  const wanted = Math.abs(Math.trunc(Number(value)))
+  return extractMoneyNumbers(text).some((entry) => Math.abs(entry.value) === wanted)
+}
+
+// Một câu có thể chứa cả tổng giao dịch lẫn số dư sau giao dịch. Không được
+// lấy “con số cuối câu”: chọn số gần marker TOTAL nhất, ưu tiên số nằm ngay
+// sau marker. Ví dụ “tổng thanh toán 15.000₽, số dư còn 285.000₽” phải neo
+// vào 15.000 chứ tuyệt đối không phải 285.000.
+function anchoredMoneyAmount(text, markers, amounts = extractMoneyNumbers(text)) {
+  if (!amounts.length) return null
+  const explicit = amounts.filter((entry) => entry.explicitMoney)
+  // Nếu trong cùng câu đã có token tiền tệ rõ (₽/Pokédollar/15k...), các
+  // con số trần như x3, Lv70, Route 5 không được cạnh tranh làm amount.
+  const candidates = explicit.length ? explicit : amounts
+  const raw = String(text ?? '').normalize('NFKC').toLocaleLowerCase('vi')
+  const ranges = []
+  for (const marker of markers) {
+    const token = String(marker).normalize('NFKC').toLocaleLowerCase('vi')
+    let from = 0
+    while (token && from < raw.length) {
+      const at = raw.indexOf(token, from)
+      if (at < 0) break
+      ranges.push({ start: at, end: at + token.length })
+      from = at + Math.max(1, token.length)
+    }
+  }
+  if (!ranges.length) return null
+  let best = null
+  for (const amount of candidates) {
+    for (const range of ranges) {
+      const amountStart = amount.index ?? 0
+      const amountEnd = amountStart + String(amount.raw ?? '').length
+      // Số đứng sau marker được ưu tiên mạnh; số đứng trước vẫn hợp lệ cho
+      // kiểu “15.000₽ là tổng cộng”. Giới hạn khoảng cách để marker ở đầu
+      // đoạn không kéo nhầm số dư ở cuối câu.
+      const after = amountStart >= range.end
+      const distance = after ? amountStart - range.end : range.start - amountEnd
+      if (distance < -2 || distance > 80) continue
+      const score = (after ? 0 : 25) + Math.max(0, distance)
+      // Nếu hai TOTAL cùng chất lượng (báo giá cũ → sửa giá mới trong cùng
+      // câu), marker xuất hiện sau thắng vì gần trạng thái chốt giao dịch hơn.
+      if (!best || score < best.score || (score === best.score && range.start > best.rangeStart)) {
+        best = { amount, score, rangeStart: range.start }
       }
     }
   }
-  return count
+  return best?.amount ?? null
+}
+
+function completedMoneyClauseAmount(text, direction) {
+  const patterns = direction > 0 ? MONEY_GAIN : MONEY_LOSS
+  for (const clause of storyClauses(text)) {
+    if (!completedActionClause(clause, patterns) && !(direction < 0 && hasAny(clause, SHOP_PAYMENT_COMPLETE))) continue
+    const amounts = extractMoneyNumbers(clause)
+    if (!amounts.length) continue
+    const total = anchoredMoneyAmount(clause, MONEY_TOTAL_MARKERS, amounts)
+    if (total) return total
+    const actionMarkers = direction > 0
+      ? ['nhận tiền', 'nhận khoản', 'được thưởng', 'trả công', 'hoàn tiền', 'thu về', 'chuyển vào', 'ghi có', 'cộng vào']
+      : ['trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền', 'bị trừ', 'khấu trừ', 'quẹt thẻ', 'chuyển khoản']
+    const actionAnchor = anchoredMoneyAmount(clause, actionMarkers, amounts)
+    if (actionAnchor) return actionAnchor
+    const explicit = amounts.filter((entry) => entry.explicitMoney)
+    // Nếu có currency/suffix thì chỉ số đó được quyền làm tiền. Số trần chỉ
+    // được dùng khi cả mệnh đề có đúng một số và là động tác tiền rõ ràng.
+    if (explicit.length === 1) return explicit[0]
+    if (!explicit.length && amounts.length === 1 && hasAny(clause, [
+      'trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền',
+      'bị trừ', 'khấu trừ', 'chuyển khoản', 'nhận tiền', 'được thưởng', 'ghi có',
+    ])) return amounts[0]
+  }
+  return null
+}
+
+function moneyish(text) {
+  return hasAny(text, MONEY_CONTEXT) || MONEY_CURRENCY_RE.test(String(text ?? ''))
+}
+
+function balanceDeltaFromWindow(text) {
+  const lines = storySentences(text)
+  for (let i = 0; i < lines.length; i++) {
+    if (!hasAny(lines[i], ['số dư', 'tài khoản', 'ví'])) continue
+    // Bắt đầu đúng từ câu có neo balance để giá/tổng tiền ở câu trước không
+    // chen vào cặp before/after. Cho phép trạng thái trước/sau tách tối đa 2 câu.
+    const segment = lines.slice(i, Math.min(lines.length, i + 3)).join(' ')
+    if (!hasAny(segment, ['từ', 'trước', 'trước đó', 'ban đầu'])
+      || !hasAny(segment, ['còn', 'còn lại', 'xuống', 'lên', 'sau', 'sau đó', 'số dư mới'])) continue
+    const amountEntries = extractMoneyNumbers(segment)
+    const explicitEntries = amountEntries.filter((entry) => entry.explicitMoney)
+    const sourceEntries = explicitEntries.length >= 2 ? explicitEntries : amountEntries
+    const values = sourceEntries.map((entry) => entry.value).filter((value) => value >= 0)
+    if (values.length < 2) continue
+
+    const normalized = fold(segment)
+    const beforeAt = Math.max(normalized.indexOf('truoc do'), normalized.indexOf('truoc'), normalized.indexOf('ban dau'))
+    const fromAt = normalized.indexOf('tu ')
+    const remainingAt = normalized.search(/(?:^| )con(?: lai)?(?: |$)/)
+    const afterAt = Math.max(normalized.indexOf('sau do'), normalized.indexOf('so du moi'))
+    // “Số dư còn 285k, trước đó 300k” viết AFTER trước BEFORE.
+    if (beforeAt >= 0 && remainingAt >= 0 && remainingAt < beforeAt) return values[0] - values[1]
+    if (beforeAt >= 0 && afterAt >= 0 && afterAt < beforeAt) return values[0] - values[1]
+    // Cách chuẩn “từ 300k xuống còn 285k” hoặc “trước 300k, sau 285k”.
+    if (fromAt >= 0 || beforeAt >= 0) return values[1] - values[0]
+  }
+  return null
+}
+
+function moneyCompletionDirection(text) {
+  const explicitIncoming = hasAny(text, ['gia đình gửi', 'gia tộc gửi', 'gửi khoản hỗ trợ', 'chuyển tiền vào', 'chuyển khoản vào', 'ghi có', 'số dư tăng', 'tài khoản tăng'])
+    && !hasFutureOrConditional(text) && !hasNegation(text)
+  const explicitOutgoing = hasAny(text, ['chuyển tiền cho', 'chuyển khoản đi', 'ghi nợ', 'số dư giảm', 'tài khoản giảm'])
+    && !hasFutureOrConditional(text) && !hasNegation(text)
+  // “tổng thanh toán 15k / cần thanh toán 15k” là NHÃN số tiền phải trả,
+  // không phải động tác đã trả. Gỡ các cụm danh từ/điều kiện này trước khi
+  // tìm MONEY_LOSS; chỉ giao dịch hoàn tất/quẹt/trả thật mới cho direction -1.
+  const actionText = String(text ?? '')
+    .replace(/(?:tổng|tong)\s+(?:tiền\s+)?(?:thanh\s*toán|thanh\s*toan)/giu, ' ')
+    .replace(/(?:cần|can|phải|phai)\s+(?:thanh\s*toán|thanh\s*toan|trả|tra)/giu, ' ')
+    .replace(/(?:số\s*tiền|so\s*tien)\s+(?:phải|phai)\s+(?:trả|tra)/giu, ' ')
+  const loss = explicitOutgoing
+    || Boolean(completedActionClause(actionText, MONEY_LOSS))
+    || Boolean(completedActionClause(actionText, SHOP_PAYMENT_COMPLETE))
+  const gain = explicitIncoming || Boolean(completedActionClause(actionText, MONEY_GAIN))
+  if (loss && !gain) return -1
+  if (gain && !loss) return 1
+  return 0
+}
+
+/**
+ * Trích những giao dịch tiền có thể chứng minh hoàn toàn bằng chính văn.
+ * Đây là parser bảo thủ của app, không phụ thuộc AI: chỉ nhận khi có số tiền
+ * + dấu hiệu tiền tệ/tổng tiền + hành động hoàn tất, hoặc có số dư trước/sau.
+ */
+export function inferMoneyTransactions(text) {
+  const lines = storySentences(text)
+  const events = []
+  const push = (delta, start, end, kind) => {
+    const value = Math.trunc(Number(delta))
+    if (!Number.isFinite(value) || value === 0) return
+    const key = `${value}|${start}|${end}`
+    if (events.some((event) => event.key === key)) return
+    events.push({ key, delta: value, start, end, kind, evidence: lines.slice(start, end + 1).join(' ') })
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const localEnd = Math.min(lines.length - 1, i + 3)
+    const local = lines.slice(i, localEnd + 1).join(' ')
+
+    const balanceDelta = balanceDeltaFromWindow(local)
+    if (balanceDelta) push(balanceDelta, i, localEnd, 'balance')
+
+    const amounts = extractMoneyNumbers(line)
+    if (!amounts.length || !moneyish(line)) continue
+    // Chuyển tiền hỗ trợ vào tài khoản là incoming rõ ràng ngay cả khi câu
+    // không dùng động từ máy móc “nhận được”.
+    if (hasAny(line, ['gia đình gửi', 'gia tộc gửi', 'gửi khoản hỗ trợ', 'chuyển tiền vào', 'chuyển khoản vào', 'ghi có'])
+      && !hasFutureOrConditional(line) && !hasNegation(line)) {
+      const chosen = completedMoneyClauseAmount(line, 1)
+        ?? anchoredMoneyAmount(line, MONEY_TOTAL_MARKERS, amounts)
+        ?? (amounts.filter((entry) => entry.explicitMoney).length === 1 ? amounts.filter((entry) => entry.explicitMoney)[0] : null)
+      if (chosen) push(Math.abs(chosen.value), i, i, 'incoming')
+      continue
+    }
+    const sameDirection = moneyCompletionDirection(line)
+    if (sameDirection) {
+      // Không tự lấy ĐƠN GIÁ làm tổng giao dịch. “Potion giá 500, mua ba chai”
+      // không đủ để app tự trừ 500; cần tổng tiền/biên lai/số dư rõ ràng.
+      const priceOnly = hasAny(line, MONEY_PRICE_ONLY) && !hasAny(line, MONEY_TOTAL_MARKERS)
+      if (priceOnly) continue
+      // Neo vào TOTAL hoặc chính mệnh đề giao dịch. Đây là chốt chống lấy
+      // nhầm “số dư còn lại”/mức tiền khác nằm cùng câu.
+      const chosen = anchoredMoneyAmount(line, MONEY_TOTAL_MARKERS, amounts)
+        ?? completedMoneyClauseAmount(line, sameDirection)
+        ?? (amounts.filter((entry) => entry.explicitMoney).length === 1 ? amounts.filter((entry) => entry.explicitMoney)[0] : null)
+      if (chosen) push(sameDirection * Math.abs(chosen.value), i, i, 'direct')
+      continue
+    }
+
+    // “Tổng cộng 15.000₽.” rồi câu sau mới “Cô quẹt thẻ, giao dịch thành công.”
+    // Chỉ nối tối đa 3 câu và chốt đúng CÂU thanh toán đầu tiên. Nếu trước khi
+    // trả lại xuất hiện một TOTAL mới, coi invoice cũ đã bị thay thế — không
+    // ghép một lần quẹt thẻ vào hai báo giá khác nhau.
+    let completionIndex = -1
+    let laterDirection = 0
+    for (let j = i + 1; j <= localEnd; j++) {
+      const direction = moneyCompletionDirection(lines[j])
+      if (direction) {
+        completionIndex = j
+        laterDirection = direction
+        break
+      }
+      if (hasAny(lines[j], MONEY_TOTAL_MARKERS) && extractMoneyNumbers(lines[j]).length) break
+    }
+    if (!laterDirection || completionIndex < 0) continue
+    const strongAmountAnchor = hasAny(line, MONEY_TOTAL_MARKERS) || MONEY_CURRENCY_RE.test(line)
+    const priceOnly = hasAny(line, MONEY_PRICE_ONLY) && !hasAny(line, MONEY_TOTAL_MARKERS)
+    if (!strongAmountAnchor || priceOnly) continue
+    const chosen = anchoredMoneyAmount(line, MONEY_TOTAL_MARKERS, amounts)
+      ?? (amounts.filter((entry) => entry.explicitMoney).length === 1 ? amounts.filter((entry) => entry.explicitMoney)[0] : null)
+    if (chosen) push(laterDirection * Math.abs(chosen.value), i, completionIndex, 'linked')
+  }
+
+  // Cùng một giao dịch có thể vừa có “tổng 15k” vừa có “số dư từ X→Y”.
+  // Gộp các event chồng lấn có cùng delta thành một giao dịch canon.
+  const deduped = []
+  for (const event of events.sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const duplicate = deduped.find((old) => old.delta === event.delta && !(event.end < old.start || event.start > old.end))
+    if (!duplicate) deduped.push(event)
+    else if ((event.end - event.start) < (duplicate.end - duplicate.start)) Object.assign(duplicate, event)
+  }
+  return deduped
+}
+
+function moneyEvidenceEvents(text, amount) {
+  const wanted = Math.trunc(Number(amount))
+  const inferred = inferMoneyTransactions(text).filter((event) => event.delta === wanted)
+  if (inferred.length) return inferred
+
+  // Fallback cho văn diễn đạt lạ nhưng vẫn có đúng số + động tác hoàn tất.
+  const lines = storySentences(text)
+  const verbs = wanted > 0 ? MONEY_GAIN : MONEY_LOSS
+  const events = []
+  for (let i = 0; i < lines.length; i++) {
+    const amountLine = lines[i]
+    if (!containsMoneyAmount(amountLine, wanted) || !moneyish(amountLine)) continue
+    const end = Math.min(lines.length - 1, i + 3)
+    const local = lines.slice(i, end + 1).join(' ')
+    const direction = wanted > 0 ? 1 : -1
+    if (!completedActionClause(local, verbs) && !(wanted < 0 && completedActionClause(local, SHOP_PAYMENT_COMPLETE))) continue
+    if (hasAny(amountLine, MONEY_PRICE_ONLY) && !hasAny(amountLine, MONEY_TOTAL_MARKERS) && !completedActionClause(amountLine, verbs)) continue
+
+    // Nếu câu có TOTAL, requested amount bắt buộc phải là số neo vào TOTAL;
+    // như vậy một tag sai bằng đúng “số dư còn lại” không thể lọt validator.
+    const amounts = extractMoneyNumbers(amountLine)
+    const totalAnchor = anchoredMoneyAmount(amountLine, MONEY_TOTAL_MARKERS, amounts)
+    if (totalAnchor && Math.abs(totalAnchor.value) !== Math.abs(wanted)) continue
+    const actionAnchor = completedMoneyClauseAmount(amountLine, direction)
+    if (!totalAnchor && actionAnchor && Math.abs(actionAnchor.value) !== Math.abs(wanted)) continue
+
+    events.push({ delta: wanted, start: i, end, kind: 'fallback', evidence: local })
+  }
+  return events
+}
+
+function transactionEvidenceCount(text, amount) {
+  return moneyEvidenceEvents(text, amount).length
+}
+
+/**
+ * Nếu AI quên MONEY nhưng chính văn có giao dịch tuyệt đối rõ, app tự thêm
+ * directive trước validator. alreadyApplied dùng để không áp lại Shop/UI hoặc
+ * một pass trước. Candidate AI hiện có cũng tiêu thụ một evidence slot, vì
+ * vậy app chỉ bổ sung đúng phần còn thiếu.
+ */
+export function reconcileMoneyDirectives(parsed, text, { alreadyApplied = null } = {}) {
+  const existing = parsed?.moneyEntries?.length ? parsed.moneyEntries.map(Number) : (parsed?.money ? [Number(parsed.money)] : [])
+  const inferred = inferMoneyTransactions(text)
+  const remaining = [...inferred]
+  const consume = (value) => {
+    const index = remaining.findIndex((event) => event.delta === Number(value))
+    if (index >= 0) remaining.splice(index, 1)
+  }
+  const prior = alreadyApplied?.moneyEntries?.length ? alreadyApplied.moneyEntries : (alreadyApplied?.money ? [alreadyApplied.money] : [])
+  for (const value of prior) consume(value)
+  for (const value of existing) consume(value)
+  const inferredAdded = remaining.map((event) => event.delta)
+  const moneyEntries = [...existing, ...inferredAdded]
+  return {
+    parsed: { ...parsed, moneyEntries, money: moneyEntries.reduce((sum, value) => sum + Number(value || 0), 0) },
+    inferredAdded,
+    transactions: inferred,
+  }
 }
 
 function proseSupportsItemChange(text, entry) {
@@ -796,6 +1106,18 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.wanted = dedupeEntries(next.wanted, 'wanted', rejected)
   next.legendaryAccess = dedupeEntries(next.legendaryAccess, 'legendaryAccess', rejected)
   next.collectionAwards = dedupeEntries(next.collectionAwards, 'collection', rejected)
+
+  // Các thang điểm/chỉ số chủ quan rất dễ bị model chính + extractor/auditor
+  // “chấm lại” cùng một cảnh với hai con số khác nhau. Trong một lượt canon,
+  // mỗi target chỉ nhận một quyết định cho các nhóm này; model muốn phản ánh
+  // nhiều diễn biến phải xuất DELTA tổng. MONEY/ITEM không dùng luật này vì
+  // chúng có thể có nhiều giao dịch vật lý độc lập và có evidence-count riêng.
+  next.friendships = dedupeTurnTarget(next.friendships, 'friendship', rejected, (entry) => fold(entry.target))
+  next.rel = dedupeTurnTarget(next.rel, 'rel', rejected, (entry) => fold(entry.name))
+  next.body = dedupeTurnTarget(next.body, 'body', rejected, (entry) => entry.part)
+  next.hunger = dedupeTurnTarget(next.hunger, 'hunger', rejected, (entry) => entry.who)
+  next.reputations = dedupeTurnTarget(next.reputations, 'rep', rejected, (entry) => fold(entry.name))
+
   if (parsed?.pokecenter) {
     const named = parsed.pokecenter.name && parsed.pokecenter.name !== 'Trung tâm Pokémon'
       ? mentions(prose, parsed.pokecenter.name) : true
@@ -827,7 +1149,10 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     const used = usedMoneyEvidence.get(key) ?? 0
     const ok = used < available
     if (ok) usedMoneyEvidence.set(key, used + 1)
-    else reject(rejected, 'money', { value }, `chính văn chưa xác nhận đủ số lần giao dịch ${value > 0 ? '+' : ''}${value} tiền`)
+    else {
+      const detected = inferMoneyTransactions(prose).map((event) => `${event.delta > 0 ? '+' : ''}${event.delta}`).join(', ')
+      reject(rejected, 'money', { value }, `không tìm thấy giao dịch đã hoàn tất ${value > 0 ? '+' : ''}${value} trong canon${detected ? `; app đọc được các delta rõ ràng: ${detected}` : '; chỉ thấy giá/ý định hoặc thiếu số tiền xác nhận'}`)
+    }
     return ok
   })
   next.money = next.moneyEntries.reduce((sum, value) => sum + Number(value || 0), 0)

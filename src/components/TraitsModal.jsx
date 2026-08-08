@@ -64,9 +64,7 @@ export default function TraitsModal({ onClose }) {
       ...d,
       personality: d.personality.includes(key)
         ? d.personality.filter((k) => k !== key)
-        : d.personality.length >= 4
-          ? d.personality
-          : [...d.personality, key],
+        : [...d.personality, key],
     }))
   }
 
@@ -145,7 +143,7 @@ export default function TraitsModal({ onClose }) {
             <SectionHeading
               eyebrow="TÍNH KHÍ"
               title="Nhân vật sẽ phản ứng như thế nào?"
-              note="Chọn tối đa 4 nét. Đây là chỉ dẫn nhất quán cho lời kể, không sửa chỉ số game."
+              note="Chọn bao nhiêu nét tuỳ thích. Đây là chỉ dẫn nhất quán cho lời kể, không sửa chỉ số game."
             />
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
               {PERSONALITY_TRAITS.map((t) => (

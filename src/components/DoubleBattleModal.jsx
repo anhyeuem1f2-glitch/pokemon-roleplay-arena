@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
-import { isSameMon, repairEncounterMonMoves } from '../data/pokemonSpecies.js'
+import { isSameMon, repairEncounterMonMoves, sortMovesForDisplay } from '../data/pokemonSpecies.js'
 import { computeDamage, STAGE_ZERO } from './BattleModal.jsx'
 import HealthBar from './HealthBar.jsx'
 import MonAvatar from './MonAvatar.jsx'
@@ -944,10 +944,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             ) : (
               <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 11.5, marginBottom: 7 }}>Chọn hành động cho <strong>{selectedMon?.name}</strong></div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 7 }}>
-                  {(selectedMon?.moves ?? []).map((move) => (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 7, maxHeight: '36vh', overflowY: 'auto', paddingRight: 3 }}>
+                  {sortMovesForDisplay(selectedMon?.moves).map((move) => (
                     <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0 || Number(move.currentPp ?? move.pp ?? 35) <= 0 || !heldItemMoveAllowed(selectedMon, move).allowed} title={heldItemMoveAllowed(selectedMon, move).reason} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span>{move.name} · PP {move.currentPp ?? move.pp ?? 35}/{move.pp ?? 35}</span><TypeBadge type={move.type} />
+                      <span>{move.starred ? '★ ' : ''}{move.name} · PP {move.currentPp ?? move.pp ?? 35}/{move.pp ?? 35}</span><TypeBadge type={move.type} />
                     </button>
                   ))}
                   {(selectedMon?.moves ?? []).length > 0 && (selectedMon.moves ?? []).every((move) => Number(move.currentPp ?? move.pp ?? 35) <= 0) && (

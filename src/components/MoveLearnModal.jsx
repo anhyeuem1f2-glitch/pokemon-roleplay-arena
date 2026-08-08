@@ -35,7 +35,6 @@ export default function MoveLearnModal() {
 
   const candidate = target.pendingMoveLearns[0]
   const queueCount = target.pendingMoveLearns.length
-  const hasFreeSlot = (target.moves ?? []).length < 4
 
   function commit(options) {
     const updated = resolvePendingMoveLearn(target, options)
@@ -63,7 +62,7 @@ export default function MoveLearnModal() {
             <div className="move-learn__hp-track">
               <div style={{ width: `${Math.max(0, Math.min(100, ((target.hp ?? 0) / Math.max(1, target.maxHp ?? 1)) * 100))}%` }} />
             </div>
-            <p>{hasFreeSlot ? 'Pokémon vẫn còn một ô chiêu trống.' : 'Hãy chọn một chiêu cũ để quên.'}</p>
+            <p>Pokémon có thể giữ nhiều chiêu; học chiêu mới không làm mất chiêu cũ.</p>
           </section>
 
           <section className="move-learn__moves-panel">
@@ -81,34 +80,25 @@ export default function MoveLearnModal() {
                   key={`${move.name}-${index}`}
                   type="button"
                   className="move-learn__move-row"
-                  onClick={() => !hasFreeSlot && commit({ replaceIndex: index })}
-                  disabled={hasFreeSlot}
-                  title={hasFreeSlot ? 'Không cần quên chiêu vì vẫn còn ô trống.' : `Quên ${move.name} để học ${candidate.name}`}
+                  disabled
+                  title={`${target.name} vẫn giữ ${move.name}`}
                 >
                   <span className="move-learn__slot">{index + 1}</span>
                   <span className="move-learn__move-copy">
                     <strong>{move.name}</strong>
                     <MoveFacts move={move} compact />
                   </span>
-                  {!hasFreeSlot && <span className="move-learn__forget">QUÊN</span>}
+                  <span className="move-learn__forget">GIỮ</span>
                 </button>
-              ))}
-              {Array.from({ length: Math.max(0, 4 - (target.moves?.length ?? 0)) }).map((_, index) => (
-                <div key={`empty-${index}`} className="move-learn__move-row move-learn__move-row--empty">
-                  <span className="move-learn__slot">{(target.moves?.length ?? 0) + index + 1}</span>
-                  <span>Ô chiêu trống</span>
-                </div>
               ))}
             </div>
           </section>
         </div>
 
         <footer className="move-learn__actions">
-          {hasFreeSlot && (
-            <button className="move-learn__primary" type="button" onClick={() => commit({})}>
-              Học {candidate.name}
-            </button>
-          )}
+          <button className="move-learn__primary" type="button" onClick={() => commit({})}>
+            Học {candidate.name}
+          </button>
           <button className="move-learn__skip" type="button" onClick={() => commit({ skip: true })}>
             Không học chiêu này
           </button>

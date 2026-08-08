@@ -23,7 +23,7 @@ import { archiveExchange, clearArchive } from '../utils/storyArchive.js'
 import { addFact, clearNotebook, upsertNpc } from '../utils/storyNotebook.js'
 import { clearSummary } from '../utils/storySummary.js'
 import { resetDirectorState } from '../data/storyDirector.js'
-import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
+import { IDENTITIES_V2, buildIdentityContext, getIdentityV2, startingMoneyForIdentity } from '../data/identities.js'
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
 import { resolveItemByName } from '../data/shopItems.js'
@@ -302,14 +302,15 @@ export default function IntroScreen({ onOpenSettings }) {
       ?? null
     const resolvedOriginAreaKey = originArea?.key ?? ''
     setPlayerName(finalName)
-    setPlayerCharacter({
+    const characterSetup = {
       gender: gender || '',
       age: age || '',
       appearance: appearance.trim(),
       originRegionKey,
       originAreaKey: resolvedOriginAreaKey,
       customIdentity: isCustomIdentity ? { name: identity.name, desc: identity.desc } : null,
-    })
+    }
+    setPlayerCharacter(characterSetup)
 
     const d = Math.max(1, Math.min(31, Number(startDay) || 1))
     const m = Math.max(1, Math.min(12, Number(startMonth) || 1))
@@ -346,13 +347,16 @@ export default function IntroScreen({ onOpenSettings }) {
     setRelationships([])
     setBodyStatus({ head: 0, torso: 0, leftArm: 0, rightArm: 0, leftLeg: 0, rightLeg: 0 })
     setHunger({ player: 100, mon: 100 })
-    // Giữ nguyên avatarUrl vừa chọn ở bước Hồ sơ, chỉ reset tiền.
-    setPlayerProfile((prof) => ({ ...prof, money: 3000 }))
+    // Tiền khởi đầu đi theo thân phận. Trước đây mọi người bị ép về 3.000 kể
+    // cả “Con cháu đại gia tộc”, khiến thiết lập nhân vật tự mâu thuẫn.
+    const ageNum = Number(age) || null
+    const startingMoney = startingMoneyForIdentity(playerIdentity, characterSetup)
+    const openingProfile = { ...playerProfile, name: finalName, age: ageNum ?? playerProfile.age, money: startingMoney, identityEconomyVersion: 1 }
+    setPlayerProfile((prof) => ({ ...prof, ...openingProfile }))
 
     if (originArea) setPlayerLocation({ regionKey: originRegionKey, areaKey: resolvedOriginAreaKey })
 
     const opening = OPENINGS.find((o) => o.key === openingKey) ?? null
-    const ageNum = Number(age) || null
     const directive = [
       `[Chỉ dẫn hệ thống — không phải lời thoại nhân vật] Hãy viết đoạn MỞ ĐẦU cho câu chuyện.`,
       // Đợt 50: tông truyện do NGƯỜI CHƠI chọn (độ khó + thể loại) thay cho
@@ -399,7 +403,14 @@ export default function IntroScreen({ onOpenSettings }) {
         mainPreset,
         history: [{ role: 'user', content: directive }],
         scanText: `${directive}\n${originArea?.name ?? ''} ${originRegion?.name ?? ''}`,
-        identityContext: `THÂN PHẬN NHÂN VẬT CHÍNH (cố định, phải nhất quán xuyên suốt): ${identity.name} — ${identity.desc}`,
+        identityContext: buildIdentityContext({
+          identityKey: playerIdentity,
+          playerCharacter: characterSetup,
+          playerName: finalName,
+          playerProfile: openingProfile,
+          regionName: originRegion?.name,
+          areaName: originArea?.name,
+        }),
         worldbook,
         toneNote: buildToneNote(storyTone),
         lastUserMessage: directive,
@@ -831,7 +842,7 @@ export default function IntroScreen({ onOpenSettings }) {
                 định thành lạnh lùng, thực dụng). Có thể chọn nhiều nét.
               </p>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-mid)', margin: '4px 0 8px' }}>
-                Tính cách (chọn tối đa 4)
+                Tính cách (chọn bao nhiêu nét tuỳ thích)
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {PERSONALITY_TRAITS.map((t) => {
@@ -841,7 +852,6 @@ export default function IntroScreen({ onOpenSettings }) {
                       key={t.key}
                       onClick={() => setPersonality((cur) => {
                         if (cur.includes(t.key)) return cur.filter((k) => k !== t.key)
-                        if (cur.length >= 4) return cur
                         return [...cur, t.key]
                       })}
                       style={{

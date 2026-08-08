@@ -339,8 +339,8 @@ function effectMultiplier(mv) {
 }
 
 
-// ============ HỌC CHIÊU KHI LÊN CẤP (đợt 82) ============
-// Pokémon chỉ được mang tối đa 4 chiêu. Trước đây app chỉ sinh moveset lúc
+// ============ HỌC CHIÊU KHI LÊN CẤP (đợt 82, mở rộng đợt 98) ============
+// Pokémon được phép nhớ và sử dụng toàn bộ chiêu đã học. Trước đây app chỉ sinh moveset lúc
 // Pokémon được tạo, sau đó lên cấp KHÔNG BAO GIỜ dò learnset lại; save cũ tải
 // trước khi movesDb sẵn sàng còn bị kẹt với 2 chiêu fallback (Ember/Scratch).
 // Các helper dưới đây tạo hàng chờ học chiêu theo level, giữ hàng chờ ngay
@@ -349,6 +349,28 @@ export function moveId(value) {
   return String(value?.id ?? value?.name ?? value ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '')
+}
+
+/** Bản sao sắp xếp ổn định: chiêu được người chơi ghim bằng sao luôn ở đầu. */
+export function sortMovesForDisplay(moves = []) {
+  return [...(Array.isArray(moves) ? moves : [])]
+    .map((move, index) => ({ move, index }))
+    .sort((a, b) => Number(Boolean(b.move?.starred)) - Number(Boolean(a.move?.starred)) || a.index - b.index)
+    .map(({ move }) => move)
+}
+
+/** Đổi trạng thái ghim của một chiêu trên đúng cá thể và đưa nhóm đã ghim lên đầu. */
+export function setMoveStar(mon, targetMoveId, starred = true) {
+  if (!mon) return mon
+  const target = moveId(targetMoveId)
+  if (!target) return mon
+  let changed = false
+  const moves = (mon.moves ?? []).map((move) => {
+    if (moveId(move) !== target || Boolean(move?.starred) === Boolean(starred)) return move
+    changed = true
+    return { ...move, starred: Boolean(starred) }
+  })
+  return changed ? { ...mon, moves: sortMovesForDisplay(moves) } : mon
 }
 
 function learnsetForMon(mon, movesDb) {
@@ -373,6 +395,7 @@ export function levelUpMovesBetween(mon, fromLevel, toLevel, movesDb) {
   if (!mon || !movesDb?.allMoves || toLevel <= fromLevel) return []
   const known = new Set((mon.moves ?? []).map(moveId))
   const pending = new Set((mon.pendingMoveLearns ?? []).map(moveId))
+  const declined = new Set((mon.declinedMoves ?? []).map(moveId))
   const seen = new Set()
   return learnsetForMon(mon, movesDb)
     .filter((entry) => entry.method === 'L' && entry.level > fromLevel && entry.level <= toLevel)
@@ -383,7 +406,7 @@ export function levelUpMovesBetween(mon, fromLevel, toLevel, movesDb) {
     })
     .filter((move) => {
       const id = moveId(move)
-      if (!id || known.has(id) || pending.has(id) || seen.has(id)) return false
+      if (!id || known.has(id) || pending.has(id) || declined.has(id) || seen.has(id)) return false
       seen.add(id)
       return true
     })
@@ -394,12 +417,13 @@ export function queueEvolutionMoves(mon, movesDb) {
   if (!mon || !movesDb?.allMoves) return mon
   const known = new Set((mon.moves ?? []).map(moveId))
   const pending = new Set((mon.pendingMoveLearns ?? []).map(moveId))
+  const declined = new Set((mon.declinedMoves ?? []).map(moveId))
   const additions = []
   for (const entry of learnsetForMon(mon, movesDb)) {
     if (entry.method !== 'L' || entry.level !== 0) continue
     const move = fullMoveFromDb(entry, movesDb)
     const id = moveId(move)
-    if (!move || !id || known.has(id) || pending.has(id)) continue
+    if (!move || !id || known.has(id) || pending.has(id) || declined.has(id)) continue
     additions.push({ ...move, learnedAtLevel: mon.level ?? 1, learnedOnEvolution: true })
     pending.add(id)
   }
@@ -420,36 +444,33 @@ export function queueLevelUpMoves(mon, fromLevel, toLevel, movesDb) {
 /**
  * Sửa save cũ bị chỉ còn 0-2 chiêu hoặc move object thiếu metadata.
  * - Giữ các chiêu hiện có nếu hợp lệ.
- * - Bổ sung từ những chiêu level-up gần nhất mà loài đã đạt tới.
- * - Không vượt quá 4 và không tự thay bộ 4 chiêu hợp lệ của người chơi.
+ * - Bổ sung toàn bộ chiêu level-up mà loài đã đạt tới; không còn trần 4 chiêu.
+ * - Giữ PP và dấu sao của các chiêu người chơi đang có.
  */
 export function repairOwnedMonMoves(mon, movesDb) {
   if (!mon || !movesDb?.allMoves) return mon
   const normalized = []
   const seen = new Set()
+  const declined = new Set((mon.declinedMoves ?? []).map(moveId))
   for (const raw of mon.moves ?? []) {
     const id = moveId(raw)
     if (!id || seen.has(id)) continue
     const full = movesDb.allMoves[id]
     normalized.push(full
-      ? withMovePp({ ...full, id, currentPp: raw?.currentPp })
+      ? withMovePp({ ...full, id, currentPp: raw?.currentPp, starred: Boolean(raw?.starred) })
       : (typeof raw === 'string' ? { id, name: raw, type: 'normal', category: 'Status', power: 0 } : { ...raw, id }))
     seen.add(id)
-    if (normalized.length >= 4) break
   }
 
-  if (normalized.length < 4) {
-    const eligible = learnsetForMon(mon, movesDb)
-      .filter((entry) => entry.method === 'L' && entry.level <= (mon.level ?? 1))
-      .sort((a, b) => b.level - a.level || a.move.localeCompare(b.move))
-    for (const entry of eligible) {
-      if (normalized.length >= 4) break
-      const move = fullMoveFromDb(entry, movesDb)
-      const id = moveId(move)
-      if (!move || !id || seen.has(id)) continue
-      normalized.push(withMovePp(move))
-      seen.add(id)
-    }
+  const eligible = learnsetForMon(mon, movesDb)
+    .filter((entry) => entry.method === 'L' && entry.level <= (mon.level ?? 1))
+    .sort((a, b) => a.level - b.level || a.move.localeCompare(b.move))
+  for (const entry of eligible) {
+    const move = fullMoveFromDb(entry, movesDb)
+    const id = moveId(move)
+    if (!move || !id || seen.has(id) || declined.has(id)) continue
+    normalized.push(withMovePp(move))
+    seen.add(id)
   }
 
   if (!normalized.length) return mon
@@ -462,24 +483,24 @@ export function repairOwnedMonMoves(mon, movesDb) {
     .filter((move) => !seen.has(moveId(move)))
   return {
     ...mon,
-    moves: normalized.slice(0, 4),
+    moves: sortMovesForDisplay(normalized),
     pendingMoveLearns: pending,
-    moveDataVersion: 2,
+    moveDataVersion: 3,
   }
 }
 
-/** Học chiêu đầu hàng chờ; replaceIndex=null chỉ hợp lệ khi còn dưới 4 chiêu. */
-export function resolvePendingMoveLearn(mon, { replaceIndex = null, skip = false } = {}) {
+/** Học chiêu đầu hàng chờ; không còn bắt buộc quên chiêu cũ. */
+export function resolvePendingMoveLearn(mon, { skip = false } = {}) {
   if (!mon?.pendingMoveLearns?.length) return mon
   const [candidate, ...rest] = mon.pendingMoveLearns
-  if (skip) return { ...mon, pendingMoveLearns: rest }
+  if (skip) {
+    const declinedMoves = [...new Set([...(mon.declinedMoves ?? []).map(moveId), moveId(candidate)].filter(Boolean))]
+    return { ...mon, pendingMoveLearns: rest, declinedMoves }
+  }
   const known = new Set((mon.moves ?? []).map(moveId))
   if (known.has(moveId(candidate))) return { ...mon, pendingMoveLearns: rest }
-  const moves = [...(mon.moves ?? [])]
-  if (moves.length < 4) moves.push(candidate)
-  else if (Number.isInteger(replaceIndex) && replaceIndex >= 0 && replaceIndex < 4) moves[replaceIndex] = candidate
-  else return mon
-  return { ...mon, moves: moves.slice(0, 4), pendingMoveLearns: rest }
+  const moves = sortMovesForDisplay([...(mon.moves ?? []), withMovePp(candidate)])
+  return { ...mon, moves, pendingMoveLearns: rest, declinedMoves: (mon.declinedMoves ?? []).filter((id) => moveId(id) !== moveId(candidate)) }
 }
 
 /**
@@ -491,11 +512,10 @@ export function resolvePendingMoveLearn(mon, { replaceIndex = null, skip = false
  * 3. Chia 2 nhóm theo chỉ số TẤN CÔNG cao hơn (Atk vs SpAtk) — ưu tiên học
  *    hết chiêu thuộc nhóm đó trước (tính điểm = power × stat tương ứng ×
  *    hệ số khắc chế đối thủ × hệ số hiệu ứng phụ).
- * 4. Nếu vẫn chưa đủ 4 chiêu, mới lấy thêm từ nhóm chỉ số còn lại (chiêu
- *    power cao) — ưu tiên chiêu không có tác dụng phụ khựng lượt, ưu tiên
- *    chiêu có hiệu ứng phụ tốt.
+ * 4. Các chiêu mạnh/hợp chỉ số được xếp trước, nhưng mọi chiêu hợp lệ vẫn
+ *    được giữ để hệ nhập vai và chiến đấu có thể sử dụng.
  */
-export const ENCOUNTER_MOVESET_VERSION = 3
+export const ENCOUNTER_MOVESET_VERSION = 4
 
 function trainerTmPolicy(level) {
   const lv = Math.max(1, Number(level) || 1)
@@ -556,12 +576,11 @@ function supportMoveScore(move) {
 }
 
 /**
- * Chọn bộ 4 chiêu hợp lệ cho Pokémon gặp trong trận.
+ * Chọn toàn bộ chiêu hợp lệ cho Pokémon gặp trong trận.
  * - Hoang dã: chỉ level-up move đã học tới level hiện tại.
  * - Trainer/NPC: level-up move + số TM giới hạn theo level; trainer cấp thấp
  *   không còn tự nhiên sở hữu Earthquake/Hyper Beam chỉ vì loài đó học TM.
- * - Ưu tiên thiên hướng Atk/SpA, STAB/coverage và giữ tối đa một chiêu hỗ trợ
- *   hữu ích trước khi lấp các ô còn lại.
+ * - Sắp chiêu hữu dụng/đặc trưng lên trước nhưng không vứt bỏ chiêu hợp lệ.
  */
 export function pickEncounterMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, includeTm = false) {
   const entries = encounterMoveEntries(speciesEntry, level, movesDb, includeTm)
@@ -589,7 +608,7 @@ export function pickEncounterMoves(speciesEntry, level, movesDb, stats, opponent
   const seen = new Set()
   let tmPicked = 0
   const take = (entry) => {
-    if (!entry || picked.length >= 4) return false
+    if (!entry) return false
     const id = moveId(entry.move)
     if (!id || seen.has(id)) return false
     if (entry.method === 'M' && tmPicked >= tmPolicy.maxCount) return false
@@ -611,7 +630,7 @@ export function pickEncounterMoves(speciesEntry, level, movesDb, stats, opponent
 
   // Giữ một lựa chọn chiến thuật thật sự hữu ích khi có đủ dữ liệu. Wild
   // cấp rất thấp vẫn ưu tiên các đòn gây sát thương cơ bản.
-  if (level >= 8 && picked.length < 4) {
+  if (level >= 8) {
     const support = ranked(scored.filter((entry) => !entry.damaging))
     if (support.length) take(support[0])
   }
@@ -619,7 +638,7 @@ export function pickEncounterMoves(speciesEntry, level, movesDb, stats, opponent
   for (const entry of ranked(damaging)) take(entry)
   for (const entry of ranked(scored)) take(entry)
 
-  return picked.length ? picked.slice(0, 4) : fallbackMoves(speciesEntry)
+  return picked.length ? picked : fallbackMoves(speciesEntry)
 }
 
 // Tên cũ được giữ nội bộ để tránh làm hỏng các callsite cũ.
@@ -636,7 +655,10 @@ function pickMoves(speciesEntry, level, movesDb, stats, opponentTypes = null, in
 export function repairEncounterMonMoves(mon, speciesEntry, movesDb, opponentTypes = null) {
   if (!mon || !speciesEntry || !movesDb?.allMoves || !movesDb?.learnsets) return mon
   if (mon.movesetLocked) {
-    const normalized = (mon.moves ?? []).map((raw) => movesDb.allMoves[moveId(raw)] ?? raw).filter(Boolean).slice(0, 4)
+    const normalized = sortMovesForDisplay((mon.moves ?? []).map((raw) => {
+      const full = movesDb.allMoves[moveId(raw)]
+      return full ? withMovePp({ ...full, currentPp: raw?.currentPp, starred: Boolean(raw?.starred) }) : raw
+    }).filter(Boolean))
     const changed = normalized.some((move, index) => move !== mon.moves?.[index])
     return changed ? { ...mon, moves: normalized } : mon
   }
@@ -661,7 +683,10 @@ export function repairEncounterMonMoves(mon, speciesEntry, movesDb, opponentType
   const currentById = new Map((mon.moves ?? []).map((move) => [moveId(move), move]))
   return {
     ...mon,
-    moves: expected.map((move) => withMovePp({ ...move, currentPp: currentById.get(moveId(move))?.currentPp })),
+    moves: sortMovesForDisplay(expected.map((move) => {
+      const current = currentById.get(moveId(move))
+      return withMovePp({ ...move, currentPp: current?.currentPp, starred: Boolean(current?.starred) })
+    })),
     movesetSource: mon.isTrainerMon ? 'trainer-level-aware' : 'wild-level-up',
     movesetDataVersion: ENCOUNTER_MOVESET_VERSION,
   }
@@ -674,7 +699,7 @@ function fallbackMoves(speciesEntry) {
     { name: 'Growl', type: 'normal', power: 0, category: 'Status', boosts: { atk: -1 }, target: 'normal' },
     { name: 'Quick Attack', type: 'normal', power: 8, category: 'Physical', priority: 1 },
     { name: 'Leer', type: 'normal', power: 0, category: 'Status', boosts: { def: -1 }, target: 'normal' },
-  ].slice(0, 4)
+  ]
 }
 
 /**
@@ -1142,13 +1167,21 @@ export function buildPartyBehaviorNote(party, activeMon) {
   if (!list.length) return null
   const lines = list.map((m) => {
     const tag = activeMon && isSameMon(m, activeMon) ? ' [đang hoạt động]' : ''
-    return `- ${describeMonForPrompt(m)}${tag}`
+    const known = new Set((m.moves ?? []).map(moveId))
+    const roleplayMoves = []
+    if (known.has('faketears')) roleplayMoves.push('Fake Tears: có thể giả vờ rưng rưng/khóc để xin ăn, xin ôm, né bị mắng hoặc năn nỉ chủ')
+    if (known.has('charm')) roleplayMoves.push('Charm: có thể chủ động làm duyên, dụi người, tạo dáng đáng yêu để xin sự chú ý hoặc thuyết phục chủ')
+    if (known.has('babydolleyes')) roleplayMoves.push('Baby-Doll Eyes: có thể dùng ánh mắt long lanh để làm nũng hoặc xoa dịu căng thẳng')
+    if (known.has('playnice')) roleplayMoves.push('Play Nice: có thể chủ động tỏ vẻ ngoan ngoãn, hoà giải hoặc rủ chơi')
+    const moveHint = roleplayMoves.length ? ` — ứng dụng chiêu ngoài chiến đấu: ${roleplayMoves.join('; ')}` : ''
+    return `- ${describeMonForPrompt(m)}${tag}${moveHint}`
   })
   return [
     'HỒ SƠ HÀNH VI POKÉMON CỦA NGƯỜI CHƠI — CHỈ DẪN NHẬP VAI BẮT BUỘC:',
     '- Nature vừa giữ tác động tăng/giảm chỉ số của game, vừa là khí chất nền quyết định phản ứng, tiếng kêu, thói quen, mức chủ động, cách nghe lời hoặc bướng bỉnh trong chính văn.',
     '- Friendship điều chỉnh mức tin tưởng/phối hợp nhưng KHÔNG xoá cá tính: một Pokémon Adamant rất thân vẫn bướng theo cách thân thiết; một Pokémon Timid gắn bó có thể cố vượt sợ hãi để bảo vệ huấn luyện viên.',
     '- Thể hiện Nature bằng hành động cụ thể và biến hoá theo tình huống; không chỉ gọi tên tính cách, không biến thành một trò lặp lại ở mọi đoạn.',
+    '- Chiêu thức cũng là một phần hành vi nhập vai: Pokémon có thể dùng chiêu trạng thái vô hại như Fake Tears/Charm để làm nũng, xin quà, xin chú ý hoặc né bị mắng nếu hợp Nature, độ thân mật và hoàn cảnh. Đây là cử chỉ trong đời sống, không tự áp hiệu ứng chiến đấu; không lạm dụng ở mọi lượt.',
     '- Chỉ cho Pokémon hành động khi nó đang ở ngoài Poké Ball hoặc bối cảnh cho phép; không tự thả cả đội chỉ để phô diễn Nature. Không nhắc tới hồ sơ hệ thống này trong truyện.',
     ...lines,
   ].join('\n')

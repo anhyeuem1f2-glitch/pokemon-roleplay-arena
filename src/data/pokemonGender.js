@@ -3,7 +3,7 @@
 // Save cũ được bốc bằng seed ổn định để cùng một uid không đổi giới tính giữa
 // playerMon, đội hình, PC và snapshot chiến đấu trong lúc migration.
 
-export const GENDER_DATA_VERSION = 1
+export const GENDER_DATA_VERSION = 2
 
 export function normalizePokemonGender(value) {
   const key = String(value ?? '').trim().toLowerCase()
@@ -51,6 +51,33 @@ function normalizedRatio(speciesEntry) {
 
 export function genderRatioForSpecies(speciesEntry) {
   return normalizedRatio(speciesEntry)
+}
+
+function foldStory(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/đ/g, 'd')
+    .replace(/[^a-z0-9♂♀]+/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Đọc giới tính đã được chính văn xác lập. Chỉ xét câu chứa đúng tên cá thể/
+ * loài và câu kề bên để “cô bé” của NPC khác không làm đổi Pokémon.
+ */
+export function inferPokemonGenderFromStory(storyText, target) {
+  if (!storyText || !target) return null
+  const targetKey = foldStory(target)
+  if (!targetKey) return null
+  const lines = String(storyText).split(/(?<=[.!?…])\s+|\n+/).map((line) => line.trim()).filter(Boolean)
+  const female = /(?:gioi\s*tinh|giong|ca\s*the|con)\s*(?:la\s*)?(?:cai|female)\b|\b(?:female)\b|♀|\bco\s*be\b/
+  const male = /(?:gioi\s*tinh|giong|ca\s*the|con)\s*(?:la\s*)?(?:duc|male)\b|\b(?:male)\b|♂|\bcau\s*be\b/
+  for (let index = 0; index < lines.length; index++) {
+    if (!foldStory(lines[index]).includes(targetKey)) continue
+    const local = foldStory(lines.slice(index, index + 2).join(' '))
+    const isFemale = female.test(local)
+    const isMale = male.test(local)
+    if (isFemale !== isMale) return isFemale ? 'female' : 'male'
+  }
+  return null
 }
 
 function stableUnit(value) {

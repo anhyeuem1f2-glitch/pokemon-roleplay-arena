@@ -4,16 +4,11 @@ import { listModels } from '../services/aiClient.js'
 import { extractMissingStateTags } from '../services/stateExtractor.js'
 import PokemonToggle from './PokemonToggle.jsx'
 
-// ============ API CẬP NHẬT BIẾN (đợt 36) ============
-// Model phụ đọc lại chính văn mỗi lượt và BỔ SUNG các tag trạng thái model
-// chính quên khai ([[MONEY]]/[[POKEMON]]/[[HUNGER]]/[[DATE]]/[[NPC]]/
-// [[FACT]]/[[REL]]) — chống bệnh "truyện chạy mà biến đứng yên". Có nút
-// Tải model + Kiểm tra như mọi API phụ khác.
+const EMPTY_CONFIG = { baseUrl: '', apiKey: '', model: '' }
 
-export default function StateApiSection() {
-  const { stateApiConfig, setStateApiConfig } = useGame()
-  const enabled = Boolean(stateApiConfig)
-  const cfg = stateApiConfig ?? { baseUrl: '', apiKey: '', model: '' }
+function StateApiSlot({ number, config, setConfig }) {
+  const enabled = Boolean(config)
+  const cfg = config ?? EMPTY_CONFIG
   const [models, setModels] = useState(null)
   const [loadingModels, setLoadingModels] = useState(false)
   const [modelsError, setModelsError] = useState(null)
@@ -21,7 +16,7 @@ export default function StateApiSection() {
   const [testing, setTesting] = useState(false)
 
   function update(patch) {
-    setStateApiConfig({ ...cfg, ...patch })
+    setConfig({ ...cfg, ...patch })
   }
 
   async function handleLoadModels() {
@@ -36,7 +31,7 @@ export default function StateApiSection() {
       setModels(ids)
       if (!ids.length) setModelsError('Provider trả về danh sách rỗng.')
     } catch (err) {
-      setModelsError(`${err.message} (vẫn gõ tay được tên model)`)
+      setModelsError(`${err.message} (vẫn có thể gõ tay tên model)`)
       setModels(null)
     } finally {
       setLoadingModels(false)
@@ -52,16 +47,14 @@ export default function StateApiSection() {
     setTest(null)
     try {
       const tags = await extractMissingStateTags(cfg, {
-        storyText:
-          'Bạn trả 300 Pokédollar cho bà chủ quán rồi ngồi xuống ăn bát mì nóng hổi. No bụng, bạn đưa phần thừa cho con Growlithe — nó chén sạch trong nháy mắt.',
+        storyText: 'Bạn trả 300 Pokédollar cho bà chủ quán rồi nhận 2 Poké Ball. Sau đó bạn ngồi ăn no và đưa phần thừa cho Growlithe.',
+        userText: 'Tôi mua đồ rồi nghỉ chân.',
         appliedTags: {},
         hasPokemon: true,
       })
-      setTest(
-        tags
-          ? { ok: true, msg: `OK — model bổ sung được tag: ${tags.replace(/\n/g, ' · ')}` }
-          : { ok: false, msg: 'Model trả lời nhưng không xuất tag nào (thử model thông minh hơn?).' },
-      )
+      setTest(tags
+        ? { ok: true, msg: `OK — model tìm được: ${tags.replace(/\n/g, ' · ')}` }
+        : { ok: false, msg: 'Model trả lời nhưng không tìm thấy biến nào trong đoạn thử.' })
     } catch (err) {
       setTest({ ok: false, msg: err.message })
     } finally {
@@ -70,16 +63,14 @@ export default function StateApiSection() {
   }
 
   return (
-    <div className="field">
-      <label>API cập nhật biến (chống "truyện chạy mà biến đứng yên")</label>
-      <small>
-        Lớp cập nhật biến giờ LUÔN CHẠY sau mỗi lượt (mặc định dùng chính API chính). Bật mục này nếu muốn tách sang một model riêng nhỏ + rẻ để tiết kiệm — model phụ đọc lại chính văn và bổ sung tag trạng thái mà model chính quên khai (tiền, Pokémon, độ no, ngày giờ, NPC, fact, quan hệ). Chạy nền, lỗi tự bỏ qua, temperature 0 tự đặt sẵn.
-      </small>
+    <div className="panel" style={{ padding: 10, marginTop: 8 }}>
       <PokemonToggle
         checked={enabled}
-        onChange={(next) => setStateApiConfig(next ? { baseUrl: '', apiKey: '', model: '' } : null)}
-        label="Bật API cập nhật biến"
-        hint={enabled ? 'Poké Ball đóng — API phụ đang hoạt động.' : 'Poké Ball mở màu xám — đang dùng tuyến mặc định.'}
+        onChange={(next) => setConfig(next ? { ...EMPTY_CONFIG } : null)}
+        label={`Bật AI soi biến ${number}`}
+        hint={enabled
+          ? `AI soi biến ${number} sẽ đọc lại chính văn; mọi đề xuất vẫn phải qua validator.`
+          : number === 1 ? 'Tắt: hệ thống dùng tuyến API dự phòng/mặc định.' : 'Tắt: chỉ dùng một AI soi biến.'}
       />
       {enabled && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -91,12 +82,10 @@ export default function StateApiSection() {
               {loadingModels ? 'Đang tải...' : 'Tải model'}
             </button>
           </div>
-          {models && models.length > 0 && (
+          {models?.length > 0 && (
             <select value={cfg.model} onChange={(e) => update({ model: e.target.value })}>
               <option value="">— Chọn từ {models.length} model —</option>
-              {models.map((id) => (
-                <option key={id} value={id}>{id}</option>
-              ))}
+              {models.map((id) => <option key={id} value={id}>{id}</option>)}
             </select>
           )}
           {modelsError && <small style={{ color: '#d94f4f' }}>{modelsError}</small>}
@@ -108,6 +97,20 @@ export default function StateApiSection() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+export default function StateApiSection() {
+  const { stateApiConfig, setStateApiConfig, stateApiConfig2, setStateApiConfig2 } = useGame()
+  return (
+    <div className="field">
+      <label>Hai AI chuyên soi và cập nhật biến</label>
+      <small>
+        Sau mỗi lượt, các AI đã bật lần lượt đọc toàn bộ chính văn để tìm biến bị bỏ sót. AI thứ hai kiểm tra tiếp trên ledger mới nhất nên không áp trùng kết quả của AI thứ nhất. Cả hai chỉ được đề xuất: app chỉ ghi biến khi sự kiện thật sự có bằng chứng trong chính văn, không tin lời bịa trong tag, input, suy nghĩ hay văn bản bị phủ định.
+      </small>
+      <StateApiSlot number={1} config={stateApiConfig} setConfig={setStateApiConfig} />
+      <StateApiSlot number={2} config={stateApiConfig2} setConfig={setStateApiConfig2} />
     </div>
   )
 }

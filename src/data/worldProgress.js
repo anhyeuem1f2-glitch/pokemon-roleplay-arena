@@ -81,21 +81,19 @@ export function applyWorldDirectives(current, parsed, options = {}) {
     else next.quests.push(record)
   }
 
-  const repCap = mode === 'realistic' ? 15 : mode === 'anime' ? 25 : 40
   for (const rep of parsed.reputations ?? []) {
     const at = next.factions.findIndex((item) => item.name.toLowerCase() === rep.name.toLowerCase())
-    const delta = clamp(rep.delta, -repCap, repCap)
+    const delta = Number(rep.delta) || 0
     if (at >= 0) next.factions[at] = { ...next.factions[at], reputation: clamp(next.factions[at].reputation + delta, -100, 100), note: rep.note || next.factions[at].note, updatedTurn: turn }
     else next.factions.push({ id: `faction-${idPart(rep.name)}`, name: rep.name, reputation: delta, note: rep.note ?? '', updatedTurn: turn })
   }
 
   for (const wanted of parsed.wanted ?? []) {
-    const deltaCap = mode === 'realistic' ? 2 : mode === 'anime' ? 1 : 1
-    const delta = clamp(wanted.delta, -deltaCap, deltaCap)
+    const delta = Number(wanted.delta) || 0
     next.wanted.level = clamp(next.wanted.level + delta, 0, mode === 'realistic' ? 5 : 3)
     next.wanted.bounty = Math.max(0, next.wanted.bounty + clamp(wanted.bounty, -9999999, 9999999))
     if (wanted.region && !next.wanted.regions.includes(wanted.region)) next.wanted.regions.push(wanted.region)
-    if (wanted.reason) next.wanted.history = [...next.wanted.history, { delta, reason: wanted.reason, region: wanted.region, turn, date }].slice(-30)
+    if (wanted.reason) next.wanted.history = [...next.wanted.history, { delta, reason: wanted.reason, region: wanted.region, turn, date }]
   }
   if (mode === 'realistic') {
     for (const access of parsed.legendaryAccess ?? []) {
@@ -117,8 +115,8 @@ export function applyWorldDirectives(current, parsed, options = {}) {
 export function buildWorldProgressNote(progress, modeValue) {
   const state = normalizeWorldProgress(progress)
   const mode = normalizeGameMode(modeValue)
-  const active = state.quests.filter((q) => q.status === 'active').slice(0, 5)
-  const factions = state.factions.filter((f) => Math.abs(f.reputation) >= 10).slice(0, 5)
+  const active = state.quests.filter((q) => q.status === 'active')
+  const factions = state.factions.filter((f) => Math.abs(f.reputation) >= 10)
   return [
     '[Hệ thống — NHẬT KÝ THẾ GIỚI, dữ liệu đã xác lập; giữ nhất quán và không nhắc tới ghi chú này.]',
     `Chế độ: ${mode}. Huy hiệu: ${state.badges.length}${state.badgeTracking ? '' : ' (người chơi đã tắt theo dõi)'}.`,

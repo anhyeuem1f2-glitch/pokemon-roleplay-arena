@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
-import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, repairEncounterMonMoves, repairOwnedMonMoves } from '../data/pokemonSpecies.js'
+import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, isSameMon, repairEncounterMonMoves, repairOwnedMonMoves, setMoveStar } from '../data/pokemonSpecies.js'
 import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
@@ -18,7 +18,8 @@ import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.
 import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
 import { verifyAdminCode } from '../data/adminMode.js'
 import { normalizeStoryTone } from '../data/storyTones.js'
-import { ensurePokemonGender } from '../data/pokemonGender.js'
+import { ensurePokemonGender, inferPokemonGenderFromStory } from '../data/pokemonGender.js'
+import { startingMoneyForIdentity } from '../data/identities.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -453,6 +454,20 @@ export function GameProvider({ children }) {
       else localStorage.removeItem('trainer-arena:state-api')
     } catch { /* ignore */ }
   }, [])
+  const [stateApiConfig2, setStateApiConfig2State] = useState(() => {
+    try {
+      const saved = localStorage.getItem('trainer-arena:state-api-2')
+      if (saved) return JSON.parse(saved)
+    } catch { /* ignore */ }
+    return null
+  })
+  const setStateApiConfig2 = useCallback((cfg) => {
+    setStateApiConfig2State(cfg)
+    try {
+      if (cfg) localStorage.setItem('trainer-arena:state-api-2', JSON.stringify(cfg))
+      else localStorage.removeItem('trainer-arena:state-api-2')
+    } catch { /* ignore */ }
+  }, [])
 
   // --- Thân phận người chơi (đợt 31) — quyết định pool tình huống của Đạo
   // diễn + được khai báo trong system prompt. Key hợp lệ: xem IDENTITIES
@@ -502,6 +517,19 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+  // Migration một lần cho save cũ: bản trước ép mọi thân phận về ₽3.000.
+  // Chỉ nâng tới mức khởi đầu của thân phận giàu, không liên tục bơm lại tiền
+  // sau khi người chơi đã chi tiêu.
+  useEffect(() => {
+    if (!gameStarted || Number(playerProfile?.identityEconomyVersion) >= 1) return
+    const identityStart = startingMoneyForIdentity(playerIdentity, playerCharacter)
+    setPlayerProfile((cur) => ({
+      ...(cur ?? {}),
+      money: identityStart > 3000 ? Math.max(Number(cur?.money) || 0, identityStart) : Number(cur?.money) || 0,
+      identityEconomyVersion: 1,
+    }))
+  }, [gameStarted, playerCharacter, playerIdentity, playerProfile?.identityEconomyVersion, setPlayerProfile])
 
   // --- Sinh lực theo BỘ PHẬN CƠ THỂ (chế độ chân thực — Pokémon tấn công
   // người là bình thường). 0 = lành lặn, tăng dần theo mức thương tổn,
@@ -567,6 +595,15 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [trainerId])
+
+  // Ghim chiêu là thuộc tính của đúng cá thể Pokémon và phải đồng bộ ở cả
+  // active slot, party lẫn PC để không mất sau khi đổi đội hình hoặc tải lại.
+  const setPokemonMoveStar = useCallback((target, targetMoveId, starred) => {
+    const update = (mon) => isSameMon(mon, target) ? setMoveStar(mon, targetMoveId, starred) : mon
+    setPlayerMon((cur) => update(cur))
+    setParty((cur) => (cur ?? []).map(update))
+    setPcBox((cur) => (cur ?? []).map(update))
+  }, [setParty, setPcBox, setPlayerMon])
 
   // Party và PC là hai kho sở hữu khác nhau. Save lỗi cũ hoặc hai callback
   // gần nhau có thể từng ghi cùng một cá thể vào cả hai khóa localStorage;
@@ -802,13 +839,33 @@ export function GameProvider({ children }) {
   // giữ nguyên uid nên F5 không làm đổi Ability hoặc vật phẩm.
   useEffect(() => {
     if (pokedexStatus !== 'ready') return
+    const genderFromAcquisitionStory = (mon, entry) => {
+      const sourceMessageId = String(mon?.acquisitionSourceId ?? '').split(':pokemon:')[0]
+      const exact = sourceMessageId ? (messages ?? []).find((message) => message.id === sourceMessageId) : null
+      const candidates = [
+        exact,
+        ...(messages ?? []).filter((message) => (message.meta?.appliedState?.pokemons ?? []).some((pokemon) =>
+          abilityId(pokemon.species) === abilityId(entry?.species ?? entry?.name ?? mon?.species ?? mon?.name),
+        )).reverse(),
+      ].filter(Boolean)
+      for (const message of candidates) {
+        const story = message.meta?.evidenceText || message.content || ''
+        const inferred = inferPokemonGenderFromStory(story, entry?.name ?? mon?.species ?? mon?.name)
+          ?? inferPokemonGenderFromStory(story, mon?.species ?? mon?.name)
+        if (inferred) return inferred
+      }
+      return null
+    }
     const upgrade = (mon) => {
       if (!mon) return mon
       const key = abilityId(mon.species ?? mon.name)
       const entry = (pokedexSpecies ?? []).find((item) =>
         abilityId(item.species) === key || abilityId(item.name) === key,
       )
-      const withGender = ensurePokemonGender(mon, entry)
+      const narrativeGender = genderFromAcquisitionStory(mon, entry)
+      const withGender = ensurePokemonGender(narrativeGender
+        ? { ...mon, gender: narrativeGender, genderSource: 'story' }
+        : mon, entry)
       const normalized = ensureMonAbility(normalizeFriendship(withGender, entry?.baseFriendship), pokedexSpecies)
       return {
         ...normalized,
@@ -873,9 +930,8 @@ export function GameProvider({ children }) {
   }, [])
 
 
-  // Đợt 82: chữa save cũ bị kẹt 0-2 chiêu và bổ sung metadata chiêu đầy đủ
-  // ngay khi bảng learnset đã sẵn sàng. Không thay bộ 4 chiêu hợp lệ; chỉ
-  // chuẩn hoá object và lấp các ô bị mất bằng level-up move gần nhất.
+  // Đợt 98: chữa save cũ và tự mở rộng sang toàn bộ level-up move hợp lệ ngay
+  // khi learnset sẵn sàng; giữ PP/dấu sao và không còn cắt còn bốn chiêu.
   useEffect(() => {
     if (movesDbStatus !== 'ready' || !movesDb?.allMoves) return
     const repair = (mon) => repairOwnedMonMoves(mon, movesDb)
@@ -982,6 +1038,8 @@ export function GameProvider({ children }) {
     adjustHunger,
     stateApiConfig,
     setStateApiConfig,
+    stateApiConfig2,
+    setStateApiConfig2,
     playerCharacter,
     setPlayerCharacter,
     storyDate,
@@ -995,6 +1053,7 @@ export function GameProvider({ children }) {
     setParty,
     pcBox,
     setPcBox,
+    setPokemonMoveStar,
     worldProgress,
     setWorldProgress,
     pokemonLife,

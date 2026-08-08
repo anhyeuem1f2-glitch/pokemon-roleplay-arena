@@ -51,8 +51,8 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
     try {
       // Tra kho theo từ khoá câu hỏi (bỏ từ ngắn <3 ký tự).
       const words = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 3)
-      const matches = items.filter((it) => words.some((w) => it.name.toLowerCase().includes(w))).slice(0, 8)
-      const sample = items.slice(0, 12).map((it) => `${it.name} ₽${it.price}`).join('; ')
+      const matches = items.filter((it) => words.some((w) => it.name.toLowerCase().includes(w)))
+      const sample = items.map((it) => `${it.name} ₽${it.price}`).join('; ')
       const cfg = apiConfig
       const raw = await chatCompletion(cfg, [
         {
@@ -131,7 +131,7 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
 
   function bump(id, delta) {
     setQty((q) => {
-      const n = Math.max(0, Math.min(99, (q[id] ?? 0) + delta))
+      const n = Math.max(0, (q[id] ?? 0) + delta)
       return { ...q, [id]: n }
     })
   }

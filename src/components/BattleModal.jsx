@@ -4,7 +4,7 @@ import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
-import { buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, syncMonInParty } from '../data/pokemonSpecies.js'
+import { buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, sortMovesForDisplay, syncMonInParty } from '../data/pokemonSpecies.js'
 import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
@@ -1821,8 +1821,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                 <button className="btn" style={{ fontSize: 11 }} onClick={() => setMegaPickOpen(false)}>✕</button>
               </div>
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
-              {playerMon.moves.map((move) => {
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8, maxHeight: '38vh', overflowY: 'auto', paddingRight: 3 }}>
+              {sortMovesForDisplay(playerMon.moves).map((move) => {
                 const zTarget = zArmed && (devUnlockGimmicks ? move.power > 0 : zCrystalMatchesMove(playerMon, move))
                 const ppLeft = Number(move.currentPp ?? move.pp ?? 35)
                 const zDisabled = ppLeft <= 0 || (zArmed && !zTarget) || !heldItemMoveAllowed(playerMon, move).allowed
@@ -1860,7 +1860,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                     }}
                   >
                     <span style={zTarget ? { color: TYPE_COLORS[move.type] ?? '#e8b84a', fontWeight: 700 } : undefined}>
-                      {zTarget ? `⚡Z-${move.name}` : move.name}
+                      {move.starred ? '★ ' : ''}{zTarget ? `⚡Z-${move.name}` : move.name}
                       {move.category && (
                         <span style={{ fontSize: 9, color: 'var(--text-dim)', marginLeft: 6 }}>
                           {move.category === 'Special' ? 'SPEC' : move.category === 'Status' ? 'STT' : 'PHYS'}

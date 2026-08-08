@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react'
+import { useGame } from '../context/GameContext.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
-import { describeNature, expProgress, isSameMon, MAX_LEVEL } from '../data/pokemonSpecies.js'
+import { describeNature, expProgress, isSameMon, MAX_LEVEL, sortMovesForDisplay } from '../data/pokemonSpecies.js'
 import { abilityLabel } from '../data/pokemonAbilities.js'
 import { describeFriendship, friendshipTier, normalizeFriendship } from '../data/pokemonFriendship.js'
 import { heldItemDescription, heldItemLabel } from '../data/pokemonHeldItems.js'
@@ -42,10 +43,17 @@ function PartyEntry({ mon, selected, onClick }) {
   )
 }
 
-function MoveRow({ move, index }) {
+function MoveRow({ move, index, onToggleStar }) {
   return (
     <div className="summary-move">
-      <div className="summary-move__number">{index + 1}</div>
+      <button
+        className="summary-move__number"
+        type="button"
+        aria-label={move.starred ? `Bỏ ghim ${move.name}` : `Ghim ${move.name}`}
+        title={move.starred ? 'Bỏ dấu sao' : 'Đánh dấu sao để đưa chiêu lên đầu'}
+        onClick={() => onToggleStar?.(!move.starred)}
+        style={{ cursor: 'pointer', color: move.starred ? '#e5a91a' : undefined, border: 0, background: 'transparent', padding: 0 }}
+      >{move.starred ? '★' : '☆'}</button>
       <div className="summary-move__main">
         <div className="summary-move__name">{move.name}</div>
         <div className="summary-move__meta">
@@ -62,6 +70,7 @@ function MoveRow({ move, index }) {
 }
 
 export default function PokemonInfoModal({ mon, party = [], activeMon = null, hunger = null, onSelect, onClose }) {
+  const { setPokemonMoveStar } = useGame()
   const [tab, setTab] = useState('summary')
   const current = useMemo(() => {
     if (!mon) return null
@@ -105,7 +114,7 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
           </header>
 
           <nav className="pokemon-summary__tabs" aria-label="Trang thông tin Pokémon">
-            {[['summary', 'Thông tin'], ['stats', 'Chỉ số'], ['moves', `Chiêu thức (${current.moves?.length ?? 0}/4)`]].map(([key, label]) => (
+            {[['summary', 'Thông tin'], ['stats', 'Chỉ số'], ['moves', `Chiêu thức (${current.moves?.length ?? 0})`]].map(([key, label]) => (
               <button key={key} className={tab === key ? 'is-active' : ''} onClick={() => setTab(key)} type="button">{label}</button>
             ))}
           </nav>
@@ -194,13 +203,17 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
           {tab === 'moves' && (
             <div className="summary-page summary-page--moves">
               <div className="summary-moves__head">
-                <div><strong>Bộ chiêu hiện tại</strong><span>Pokémon chỉ có thể mang tối đa 4 chiêu.</span></div>
+                <div><strong>Bộ chiêu hiện tại</strong><span>Không giới hạn số chiêu. Bấm ☆ để ghim chiêu thường dùng lên đầu.</span></div>
                 {current.pendingMoveLearns?.length > 0 && <b>{current.pendingMoveLearns.length} chiêu đang chờ học</b>}
               </div>
               <div className="summary-moves__list">
-                {(current.moves ?? []).map((move, index) => <MoveRow key={`${move.name}-${index}`} move={move} index={index} />)}
-                {Array.from({ length: Math.max(0, 4 - (current.moves?.length ?? 0)) }).map((_, index) => (
-                  <div className="summary-move summary-move--empty" key={`empty-${index}`}>Ô chiêu trống</div>
+                {sortMovesForDisplay(current.moves).map((move, index) => (
+                  <MoveRow
+                    key={`${move.id ?? move.name}-${index}`}
+                    move={move}
+                    index={index}
+                    onToggleStar={(starred) => setPokemonMoveStar(current, move.id ?? move.name, starred)}
+                  />
                 ))}
               </div>
             </div>

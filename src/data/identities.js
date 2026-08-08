@@ -19,9 +19,13 @@ export const IDENTITIES_V2 = [
   { key: 'orphan', poolKey: 'laborer', name: 'Trẻ mồ côi tự lập', desc: 'Lớn lên trong trại trẻ, quen tự xoay xở từ nhỏ. Không có gì để mất và cũng chẳng ai đứng sau — mọi thứ phải tự tay giành lấy.' },
 
   // ---- Gia tộc / quyền quý ----
-  { key: 'clan', poolKey: 'clan', name: 'Con cháu đại gia tộc', desc: 'Hậu duệ một gia tộc trainer danh giá: tiền bạc và quan hệ mở mọi cánh cửa, nhưng hôn ước, lễ nghi và kỳ vọng của trưởng bối cũng khoá chặt không kém.' },
+  {
+    key: 'clan', poolKey: 'clan', name: 'Con cháu đại gia tộc', startingMoney: 300000,
+    desc: 'Hậu duệ một gia tộc trainer danh giá: tiền bạc và quan hệ mở mọi cánh cửa, nhưng hôn ước, lễ nghi và kỳ vọng của trưởng bối cũng khoá chặt không kém.',
+    resources: 'Có tài khoản/gia tộc chống lưng. Nhân vật có thể xin ứng hoặc nhận chuyển tiền từ gia tộc; nếu chính văn xác nhận khoản tiền đã được chuyển thì phải cập nhật MONEY đúng số, không được bác chỉ vì ví hiện tại ít tiền.',
+  },
   { key: 'clan-fallen', poolKey: 'clan', name: 'Hậu duệ gia tộc sa sút', desc: 'Mang họ của một gia tộc từng lừng lẫy nay chỉ còn cái vỏ: danh tiếng cũ vừa là vốn liếng vừa là món nợ, và không thiếu kẻ muốn thấy cái tên này chìm hẳn.' },
-  { key: 'elite-child', poolKey: 'league', name: 'Con của trainer nổi tiếng', desc: 'Cha/mẹ là gương mặt cả vùng biết tới. Đi tới đâu cũng bị so sánh — cái bóng đó là bệ phóng hay gông cùm là tuỳ mình.' },
+  { key: 'elite-child', poolKey: 'league', name: 'Con của trainer nổi tiếng', startingMoney: 80000, desc: 'Cha/mẹ là gương mặt cả vùng biết tới. Đi tới đâu cũng bị so sánh — cái bóng đó là bệ phóng hay gông cùm là tuỳ mình.', resources: 'Gia đình có danh tiếng, quan hệ và khả năng hỗ trợ tài chính hợp lý khi chính văn xác nhận.' },
 
   // ---- Giới xám / tội phạm (tông nghiêm túc) ----
   { key: 'street', poolKey: 'street', name: 'Giang hồ đường phố', desc: 'Lớn lên trong giới ngầm đô thị: biết cửa sau của thành phố, nợ vài ân tình khó trả, và hồ sơ đủ dày để giới điều tra thi thoảng liếc qua.' },
@@ -58,11 +62,52 @@ export const IDENTITIES_V2 = [
 
   // ---- Biểu diễn / dịch vụ ----
   { key: 'performer', poolKey: 'performer', name: 'Nghệ sĩ đường phố cùng Pokémon', desc: 'Kiếm sống bằng những màn diễn nhỏ cùng Pokémon trên phố: ngày đông khách thì no, ngày mưa thì đói — sân khấu là vỉa hè và khán giả là người qua đường.' },
-  { key: 'merchant', poolKey: 'merchant', name: 'Con nhà thương lái rong', desc: 'Nhà buôn chuyến theo mùa giữa các thị trấn: biết giá của mọi thứ, quen mặt mọi chợ, hiểu rằng thông tin là món hàng lời nhất.' },
+  { key: 'merchant', poolKey: 'merchant', name: 'Con nhà thương lái rong', startingMoney: 30000, desc: 'Nhà buôn chuyến theo mùa giữa các thị trấn: biết giá của mọi thứ, quen mặt mọi chợ, hiểu rằng thông tin là món hàng lời nhất.', resources: 'Có vốn hàng và quan hệ thương mại của gia đình; tiền hỗ trợ chỉ tăng khi chính văn xác nhận đã nhận/chuyển khoản.' },
   { key: 'breeder', poolKey: 'breeder', name: 'Con nhà trại nhân giống', desc: 'Gia đình làm nghề nhân giống Pokémon có giấy phép: hiểu huyết thống, tính nết từng dòng — và ghét cay ghét đắng đám buôn lậu làm bẩn nghề.' },
 ]
 
 /** Tra thân phận theo key — không thấy thì fallback tân binh tự do. */
 export function getIdentityV2(key) {
   return IDENTITIES_V2.find((i) => i.key === key) ?? IDENTITIES_V2[0]
+}
+
+const RICH_CUSTOM_IDENTITY = /đại gia|giàu|tài phiệt|tỷ phú|triệu phú|quý tộc|hoàng gia|gia tộc.*(?:tiền|giàu|quyền)|thừa kế/i
+
+/** Tiền khởi đầu là một phần của thân phận, không phải mọi nhân vật đều bị ép về 3.000. */
+export function startingMoneyForIdentity(identityKey, playerCharacter = {}) {
+  const custom = playerCharacter?.customIdentity
+  if (custom && RICH_CUSTOM_IDENTITY.test(`${custom.name ?? ''} ${custom.desc ?? ''}`)) return 300000
+  return Number(getIdentityV2(identityKey)?.startingMoney) || 3000
+}
+
+/**
+ * Khối thiết lập cố định gửi cho cả API chính và API cập nhật biến ở MỌI lượt.
+ * Nhờ vậy thân phận, xuất thân và nguồn lực không bị rơi khỏi cửa sổ hội thoại.
+ */
+export function buildIdentityContext({
+  identityKey, playerCharacter = {}, playerName = '', playerProfile = {},
+  regionName = '', areaName = '',
+} = {}) {
+  const preset = getIdentityV2(identityKey)
+  const custom = playerCharacter?.customIdentity
+  const customLooksRich = custom && RICH_CUSTOM_IDENTITY.test(`${custom.name ?? ''} ${custom.desc ?? ''}`)
+  const identity = custom?.name || custom?.desc
+    ? {
+      ...preset,
+      ...custom,
+      resources: custom.resources ?? preset.resources ?? (customLooksRich
+        ? 'Thân phận tự mô tả có nguồn lực tài chính/gia tộc lớn. Cho phép xin hoặc nhận hỗ trợ hợp logic; khi chính văn xác nhận tiền đã tới tay/tài khoản thì cập nhật MONEY đúng số.'
+        : ''),
+    }
+    : preset
+  const parts = [
+    '[Hệ thống — THIẾT LẬP NHÂN VẬT CỐ ĐỊNH; luôn dùng khi viết và bóc biến, không nhắc tới ghi chú này.]',
+    `Nhân vật chính: ${playerName || playerProfile?.name || 'người chơi'}${playerCharacter?.gender ? `; giới tính ${playerCharacter.gender}` : ''}${playerCharacter?.age || playerProfile?.age ? `; ${playerCharacter.age || playerProfile.age} tuổi` : ''}.`,
+    playerCharacter?.appearance ? `Ngoại hình: ${playerCharacter.appearance}.` : '',
+    `Thân phận: ${identity.name} — ${identity.desc}`,
+    identity.resources ? `Nguồn lực hợp thân phận: ${identity.resources}` : '',
+    regionName || areaName ? `Xuất thân đã chọn: ${areaName || 'chưa chọn thành phố'}, vùng ${regionName || playerCharacter?.originRegionKey || 'chưa rõ'}.` : '',
+    `Tiền đang hiển thị trong ví/save: ₽${Math.max(0, Number(playerProfile?.money) || 0).toLocaleString('vi-VN')}. Đây là tiền hiện có, không xoá quyền tiếp cận nguồn lực hợp thân phận. Mọi khoản thực nhận/chi trong chính văn phải khai MONEY đúng số.`,
+  ]
+  return parts.filter(Boolean).join('\n')
 }

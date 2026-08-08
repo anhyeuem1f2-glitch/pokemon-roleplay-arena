@@ -39,7 +39,9 @@ export function sanitizeTraitsForMode(traits, modeValue) {
   const allowedPower = builtInPowers.has(raw.superpower) ? raw.superpower : 'none'
   const flexiblePower = builtInPowers.has(raw.superpower) || raw.superpower === 'custom' ? raw.superpower : 'none'
   return {
-    personality: Array.isArray(raw.personality) ? raw.personality.slice(0, 4) : [],
+    // Tính cách là dữ liệu nhập vai, không phải perk sức mạnh nên không có lý
+    // do gì ép tối đa 3/4 nét. Chỉ bỏ giá trị rỗng và trùng do save/preset cũ.
+    personality: [...new Set(Array.isArray(raw.personality) ? raw.personality.filter(Boolean) : [])],
     superpower: mode === 'realistic' ? allowedPower : flexiblePower,
     customPower: mode === 'realistic' ? '' : String(raw.customPower ?? ''),
     perks: [],

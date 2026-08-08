@@ -2686,3 +2686,30 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `test-dot*.mjs`, ZIP cũ, ảnh Discord hay file nào khác. ZIP đợt 96 chỉ chứa đúng `src/` và `README.md`.
+
+## Cập nhật (đợt 97–98) — biến bám chính văn hiển thị, hai AI soi biến và bộ chiêu mở rộng
+
+**CHÍNH VĂN HIỂN THỊ LÀ CANON DUY NHẤT.** Pipeline không còn ghi save dựa trên bản nháp ẩn trước bước chau chuốt văn phong. Tag của model chính, AI soi biến 1 và AI soi biến 2 đều chỉ là đề xuất; app đối chiếu lần cuối với đúng đoạn người chơi nhìn thấy rồi mới cập nhật tiền, Pokémon, vật phẩm, quan hệ, vị trí, thời gian, nhiệm vụ và các state khác. Input người chơi, tag tự khai, suy nghĩ, câu phủ định, dự định tương lai hoặc chi tiết bị API văn phong bỏ khỏi bản hiển thị không thể tự sinh biến.
+
+**THÊM AI SOI BIẾN THỨ HAI.** Cài đặt API có hai slot độc lập, mỗi slot có Base URL, API key, model, tải danh sách model và kiểm tra trích xuất riêng. Nếu bật cả hai, chúng chạy nối tiếp: AI 1 quét toàn bộ chính văn; kết quả hợp lệ được nhập vào ledger; AI 2 nhận ledger mới nhất và chỉ tìm phần còn thiếu. Thiết kế này vừa tăng khả năng bắt cách hành văn gián tiếp/danh sách giao dịch dài, vừa ngăn hai model cộng trùng cùng tiền, vật phẩm hoặc Pokémon. Nút `Quét lại biến thật` cũng chạy cả hai theo đúng thứ tự và cùng validator.
+
+**GIẢM BỎ CÁC GIỚI HẠN CẬP NHẬT KHÔNG CẦN THIẾT.** State extractor nhận toàn bộ input/chính văn, không cắt 1.200/12.000 ký tự, không có trần số tag hay năm món hàng. Validator hiểu sự kiện kéo dài nhiều câu/đoạn, tên rút gọn, đại từ, giao dịch thanh toán ở cuối danh sách, chuyển tiền từ gia tộc, Poké Ball chưa xác định và giới tính Pokémon được chính văn xác nhận. Vẫn giữ các chốt thực sự cần thiết: chống phủ định/tương lai, chống áp trùng, chống bịa loài trong bóng chưa mở và luật chống cheat riêng của chế độ Thực tế.
+
+**ESPURR VÀ MỌI POKÉMON NHẬN TỪ TRUYỆN GIỮ ĐÚNG GIỚI TÍNH.** Nếu chính văn ghi cá thể cái/đực, evidence đó thắng kết quả bốc ngẫu nhiên. Save cũ được quét lại từ tin nguồn nhận Pokémon để sửa cá thể từng bị random sai mà không buộc người chơi tải lại save.
+
+**BỎ HOÀN TOÀN TRẦN BỐN CHIÊU.** Pokémon đang sở hữu, Pokémon hoang, NPC/trainer, học chiêu khi lên cấp, sửa save cũ, trận đơn và trận đôi đều dùng danh sách chiêu không giới hạn. Save cũ tự được bổ sung toàn bộ level-up move đã đủ cấp, giữ nguyên PP và lựa chọn đã từ chối. Danh sách dài có vùng cuộn để không che giao diện.
+
+**GHIM CHIÊU BẰNG DẤU SAO.** Trong Pokémon Summary, bấm `☆` để đổi thành `★`; chiêu được ghim nhảy lên đầu ở trang thông tin lẫn màn chọn chiêu chiến đấu. Dấu sao nằm trên đúng mã cá thể Pokémon, đồng bộ giữa Pokémon đang hoạt động, party và PC, persist qua tải lại.
+
+**CHIÊU THỨC THAM GIA NHẬP VAI.** Hồ sơ hành vi gửi cho API nay nhận biết Fake Tears, Charm, Baby-Doll Eyes và Play Nice. Pokémon có thể dùng chúng ngoài chiến đấu để làm nũng, xin ăn/xin ôm, xin chú ý, hoà giải hoặc né bị mắng khi phù hợp Nature, Friendship và hoàn cảnh; không tự áp hiệu ứng chiến đấu và không lặp máy móc ở mọi lượt.
+
+**Kiểm tra trong gói bàn giao:** toàn bộ 26 regression đợt 73–98 PASS; 64 module `.js` qua `node --check`. Test mới bao phủ hai State API nối tiếp và ledger chống trùng, canon là bản văn hiển thị, save có hơn bốn chiêu, Pokémon gặp ngoài thế giới có hơn bốn chiêu, học chiêu thứ năm không quên chiêu cũ, ghim/bỏ ghim ổn định, prompt hành vi Fake Tears/Charm, giới tính theo chính văn, đơn hàng tám loại và ca MOVE/REL/DATE người chơi cung cấp.
+
+### File cần cập nhật lên GitHub sau đợt 98
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/` (đặc biệt nhạc rất nặng), `test-dot*.mjs`, ảnh báo lỗi, preset JSON hay ZIP bàn giao. ZIP đợt 98 chỉ chứa đúng `src/` và `README.md`.

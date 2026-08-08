@@ -20,6 +20,7 @@ import { verifyAdminCode } from '../data/adminMode.js'
 import { normalizeStoryTone } from '../data/storyTones.js'
 import { ensurePokemonGender, inferPokemonGenderForMonFromStory } from '../data/pokemonGender.js'
 import { startingMoneyForIdentity } from '../data/identities.js'
+import { normalizeDynamicState } from '../data/dynamicState.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -634,6 +635,21 @@ export function GameProvider({ children }) {
     })
   }, [])
 
+  // --- Biến động tự do từ Semantic State Engine (đợt 105) ---
+  // Core schema không thể biết trước mọi quyền, tài sản, thiết bị hay luật do
+  // người chơi tự sáng tạo. Kho này giữ các biến mở theo key ổn định thay vì
+  // buộc dev phải tạo thêm một [[TAG]] cho từng ý tưởng mới.
+  const [dynamicState, setDynamicStateState] = useState(() => {
+    try { return normalizeDynamicState(JSON.parse(localStorage.getItem('trainer-arena:dynamic-state') || 'null')) } catch { return normalizeDynamicState(null) }
+  })
+  const setDynamicState = useCallback((next) => {
+    setDynamicStateState((cur) => {
+      const resolved = normalizeDynamicState(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:dynamic-state', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
   // Trứng/cắm trại/Contest là state riêng để không nhồi dữ liệu cá thể vào
   // nhật ký nhiệm vụ. Ribbon/Mark vẫn nằm trên chính Pokémon.
   const [pokemonLife, setPokemonLifeState] = useState(() => {
@@ -1057,6 +1073,8 @@ export function GameProvider({ children }) {
     setPokemonMoveStar,
     worldProgress,
     setWorldProgress,
+    dynamicState,
+    setDynamicState,
     pokemonLife,
     setPokemonLife,
     tradeState,

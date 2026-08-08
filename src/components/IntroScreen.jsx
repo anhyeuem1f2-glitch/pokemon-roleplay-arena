@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
+import { extractSemanticStateEvents } from '../services/semanticStateEngine.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
@@ -28,7 +29,7 @@ import { resetDirectorState } from '../data/storyDirector.js'
 import { IDENTITIES_V2, buildIdentityContext, getIdentityV2, startingMoneyForIdentity } from '../data/identities.js'
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
-import { SHOP_ITEMS, resolveItemByName } from '../data/shopItems.js'
+import { SHOP_ITEMS, resolveItemByName, createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 import { HELD_ITEMS, normalizeHeldItem } from '../data/pokemonHeldItems.js'
 import { normalizeAbilityOptions } from '../data/pokemonAbilities.js'
 import { ALL_TYPES } from '../data/pokemonTypes.js'
@@ -36,6 +37,7 @@ import { generateLootItems } from '../data/shopGenerator.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
 import { musicManager } from '../utils/musicManager.js'
+import { applyDynamicStateUpdates } from '../data/dynamicState.js'
 
 // ============ MÀN TẠO NHÂN VẬT v3 — WIZARD 4 TRANG (đợt 34) ============
 // Thiết kế lại toàn bộ theo yêu cầu "bớt phèn": wizard nhiều trang, mọi lựa
@@ -104,6 +106,28 @@ function starterGenderLabel(value) {
   if (value === 'female') return '♀ Cái'
   if (value === 'unknown') return '◇ Vô giới tính'
   return '🎲 Tự động'
+}
+
+
+
+const INTRO_STATE_ARRAY_FIELDS = [
+  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'levels', 'evolutions',
+  'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items',
+  'badges', 'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards', 'customEvents', 'dynamicUpdates',
+]
+
+function mergeIntroState(base, extra) {
+  const out = {
+    ...(base ?? {}),
+    money: (Number(base?.money) || 0) + (Number(extra?.money) || 0),
+    moneyEntries: [...(base?.moneyEntries ?? []), ...(extra?.moneyEntries ?? [])],
+    dateAdvance: (Number(base?.dateAdvance) || 0) + (Number(extra?.dateAdvance) || 0),
+    training: (Number(base?.training) || 0) + (Number(extra?.training) || 0),
+    datePart: extra?.datePart ?? base?.datePart ?? null,
+    pokecenter: extra?.pokecenter ?? base?.pokecenter ?? null,
+  }
+  for (const field of INTRO_STATE_ARRAY_FIELDS) out[field] = [...(base?.[field] ?? []), ...(extra?.[field] ?? [])]
+  return out
 }
 
 
@@ -192,7 +216,7 @@ export default function IntroScreen({ onOpenSettings }) {
   const {
     apiConfig, character, stylePreset, mainPreset, assistantPrefill,
     setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
-    resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState,
+    resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState, setDynamicState,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
     memoryApiConfig, playerIdentity, setPlayerIdentity,
     setPlayerCharacter, storyDate, setStoryDate, worldbook,
@@ -619,6 +643,7 @@ export default function IntroScreen({ onOpenSettings }) {
     setPcBox(openingPc)
     setPokedexRecords({})
     setWorldProgress({ ...DEFAULT_WORLD_PROGRESS, wanted: { ...DEFAULT_WORLD_PROGRESS.wanted } })
+    setDynamicState({ version: 1, values: {} })
     setPokemonLife({ ...DEFAULT_POKEMON_LIFE })
     setTradeState({ ...DEFAULT_TRADE_STATE })
     clearMemory()
@@ -674,7 +699,7 @@ export default function IntroScreen({ onOpenSettings }) {
       // Tính cách + siêu năng lực (đợt 61).
       buildCharacterTraitsNote(traits, normalizeGameMode(storyTone)),
       originArea
-        ? `VỊ TRÍ MỞ ĐẦU CỐ ĐỊNH: ${originArea.name}, vùng ${originRegion?.name}. Đây là state đã chọn, mở đầu PHẢI diễn ra tại đây; không thay bằng Pallet Town, Kanto hay quê mặc định khác. Chỉ được rời nơi này sau một cảnh di chuyển rõ ràng và tag [[MOVE]].`
+        ? `VỊ TRÍ MỞ ĐẦU CỐ ĐỊNH: ${originArea.name}, vùng ${originRegion?.name}. Đây là state đã chọn, mở đầu PHẢI diễn ra tại đây; không thay bằng Pallet Town, Kanto hay quê mặc định khác. Chỉ được rời nơi này sau một cảnh di chuyển rõ ràng mà chính văn xác nhận.`
         : `Xuất thân: vùng ${originRegion?.name} (tự chọn một nơi cụ thể hợp thân phận).`,
       `Ngày bắt đầu (lịch trong truyện): ngày ${d}/${m}/năm ${y}, buổi sáng, mùa ${getSeason(m)}.`,
       // Đợt 63: nới luật — trước đây CẤM TUYỆT ĐỐI phát Pokémon ở mở đầu,
@@ -684,7 +709,7 @@ export default function IntroScreen({ onOpenSettings }) {
       // nếu cảnh mở màn xoay quanh việc nhận Pokémon thì phải diễn TRỌN VẸN.
       sandboxMode
         ? `SANDBOX — STATE KHỞI ĐẦU ĐÃ CHỐT TRƯỚC KHI KỂ: tiền=${startingMoney}; Pokémon đã sở hữu=${openingParty.length + openingPc.length ? [...openingParty, ...openingPc].map((mon) => `${mon.nickname ? `${mon.nickname} (${mon.name})` : mon.name} Lv${mon.level}${mon.shiny ? ' ✨' : ''}${mon.gender === 'female' ? ' ♀' : mon.gender === 'male' ? ' ♂' : mon.gender === 'unknown' ? ' ◇' : ''} [Nature ${mon.nature}; Ability ${mon.ability}; Tera ${String(mon.teraType ?? 'auto').toUpperCase()}]`).join(', ') : 'không có'}; vật phẩm=${openingInventory.length ? openingInventory.map((item) => `${item.name} ${item.infinite ? '∞' : `x${item.qty}`}`).join(', ') : 'không có'}. Đây là dữ liệu thật đã nằm trong save: KHÔNG dùng MONEY/ITEM/POKEMON để cấp lại chúng trong mở đầu. Hãy coi chúng là tài sản/cộng sự có sẵn trước cảnh đầu và bắt đầu câu chuyện theo nhịp Anime.`
-        : `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật thì dùng tag [[POKEMON Tên | Lv..]].`,
+        : `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật, hãy viết rõ trong chính văn rằng Pokémon nào đã thực sự thuộc về người chơi; Semantic State Engine sẽ tự đồng bộ.`,
       opening
         ? `TÌNH HUỐNG MỞ ĐẦU BẮT BUỘC BÁM THEO (đây là mong muốn của người chơi, phải là hạt nhân của đoạn mở đầu): ${opening.seed}`
         : openingKey === 'custom' && desiredOpening.trim()
@@ -731,9 +756,12 @@ export default function IntroScreen({ onOpenSettings }) {
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
       }
+      // Tag cũ chỉ còn là compatibility. Mở đầu cũng dùng Semantic State
+      // Engine giống các lượt thường, nếu không model mới viết văn tự nhiên sẽ
+      // không còn tag để parser legacy cập nhật state.
       const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
-      let parsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
-      parsed = validateStateAgainstProse(parsed, parsed.cleaned, {
+      let legacyParsed = parseStoryStateTags(cleaned + (rawStateTags.length ? '\n' + rawStateTags.join('\n') : ''))
+      legacyParsed = validateStateAgainstProse(legacyParsed, cleaned, {
         playerName: finalName,
         party: openingParty,
         mode: normalizeGameMode(storyTone),
@@ -741,7 +769,31 @@ export default function IntroScreen({ onOpenSettings }) {
         inventory: openingInventory,
         location: originArea ? { regionKey: originRegionKey, areaKey: resolvedOriginAreaKey } : null,
       }).parsed
-      const openingText = parsed.cleaned
+      let parsed = legacyParsed
+      try {
+        const semantic = await extractSemanticStateEvents(apiConfig, {
+          storyText: cleaned,
+          userText: directive,
+          stateSnapshot: {
+            money: startingMoney,
+            inventory: openingInventory.map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
+            party: openingParty.map((mon) => ({ uid: mon.uid, name: mon.name, species: mon.species, level: mon.level })),
+            pc: openingPc.map((mon) => ({ uid: mon.uid, name: mon.name, species: mon.species, level: mon.level })),
+            location: originArea ? { regionKey: originRegionKey, areaKey: resolvedOriginAreaKey } : null,
+          },
+          appliedState: sandboxMode ? {
+            money: startingMoney,
+            items: openingInventory.map((item) => ({ name: item.name, qty: item.qty })),
+            pokemons: [...openingParty, ...openingPc].map((mon) => ({ species: mon.species ?? mon.name, level: mon.level })),
+          } : null,
+          mode: normalizeGameMode(storyTone),
+          scanMode: 'extractor',
+        })
+        parsed = mergeIntroState(parsed, semantic.parsed)
+      } catch (semanticError) {
+        console.warn('[semantic-state:intro] fallback legacy:', semanticError.message)
+      }
+      const openingText = cleaned
       // Chương mở đầu cũng dùng cùng giao thức trạng thái như các lượt sau.
       // Trước đây tag MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ bị parse rồi bỏ
       // qua, khiến chính văn vừa trao đồ hoặc làm bị thương nhưng HUD vẫn giữ
@@ -784,7 +836,12 @@ export default function IntroScreen({ onOpenSettings }) {
         if (left > 0) resolvedOpeningInventory[index] = { ...resolvedOpeningInventory[index], qty: left }
         else resolvedOpeningInventory.splice(index, 1)
       }
-      for (const item of parsed.items ?? []) mergeOpeningItem(resolveItemByName(item.name), item.qty)
+      for (const item of parsed.items ?? []) {
+        const entry = resolveInventoryItemByName(item.name, resolvedOpeningInventory)
+          ?? resolveItemByName(item.name)
+          ?? (Number(item.qty) > 0 ? createCustomItemDescriptor(item.name, item) : null)
+        mergeOpeningItem(entry, item.qty)
+      }
       for (const [lootIndex, loot] of (parsed.loots ?? []).entries()) {
         const lootSourceId = `intro-${journeyTrainerId}:loot:${lootIndex}`
         for (const item of generateLootItems(loot, lootSourceId)) mergeOpeningItem(item, item.qty, lootSourceId)
@@ -795,6 +852,10 @@ export default function IntroScreen({ onOpenSettings }) {
         mode: storyTone, turn: 2, date: { day: d, month: m, year: y, part: 'sáng' },
       })
       setWorldProgress(openingWorldProgress)
+      if ((parsed.dynamicUpdates?.length ?? 0) > 0) {
+        const dynamicResult = applyDynamicStateUpdates({ version: 1, values: {} }, parsed.dynamicUpdates, { turn: 2, sourceMessageId: `intro-${journeyTrainerId}` })
+        setDynamicState(dynamicResult.state)
+      }
       for (const npc of parsed.npcs ?? []) upsertNpc(npc.name, npc.fields, 2)
       for (const fact of parsed.facts ?? []) addFact(fact.key, fact.text, 2)
       // Một số preset có regex loại khối lựa chọn khỏi prompt/đầu ra hoặc model
@@ -828,8 +889,20 @@ export default function IntroScreen({ onOpenSettings }) {
           const { buildMonSmart } = await import('../data/pokemonSpecies.js')
           // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
           const buildOwnedMon = normalizeGameMode(storyTone) === 'realistic' ? buildMonSmart : buildWildMon
+          let acquired = normalizeAcquiredMon({
+            ...buildOwnedMon(entry, pk.level, movesDb),
+            ...(pk.gender ? { gender: pk.gender, genderSource: pk.semantic ? 'semantic' : 'story' } : {}),
+            ...(pk.shiny !== undefined ? { shiny: Boolean(pk.shiny) } : {}),
+            ...(pk.nature ? { nature: pk.nature } : {}),
+            ...(pk.ability ? { ability: pk.ability } : {}),
+            ...(pk.teraType ? { teraType: String(pk.teraType).toLowerCase() } : {}),
+            ...(pk.nickname ? { nickname: pk.nickname } : {}),
+            ...(pk.form ? { forme: pk.form } : {}),
+            ...(Number.isFinite(Number(pk.friendship)) ? { friendship: Math.max(0, Math.min(255, Number(pk.friendship))) } : {}),
+          })
+          acquired = recomputeMonStats(acquired)
           const mon = ensurePokemonIdentity({
-            ...applyPerksToMon(normalizeAcquiredMon(buildOwnedMon(entry, pk.level, movesDb)), traits),
+            ...applyPerksToMon(acquired, traits),
             acquisitionSourceId: `intro-${journeyTrainerId}:pokemon:${pk.species.toLowerCase()}:${pokemonIndex}`,
           }, journeyTrainerId)
           if (resolvedOpeningParty.length < 6) resolvedOpeningParty.push(mon)

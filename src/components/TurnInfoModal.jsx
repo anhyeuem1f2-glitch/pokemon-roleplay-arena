@@ -164,7 +164,7 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                   <div style={{ maxWidth: 520 }}>
                     <div style={{ color: 'var(--text-hi)', fontSize: 13, fontWeight: 750 }}>Kết quả đồng bộ state</div>
                     <div style={{ color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65, marginTop: 4 }}>
-                      DNA chỉ ghi “đã áp” khi app tìm được đúng Pokémon/vật phẩm. Tag sai target sẽ hiện cảnh báo, không còn báo theo lời kể rồi để biến đứng yên.
+                      Đợt 105 dùng Semantic State Engine: app đọc sự kiện từ chính văn thay vì đòi [[TAG]]/exact quote. Mỗi event được commit độc lập; vật phẩm và entity tự tạo vẫn có thể trở thành state thật.
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -185,13 +185,27 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                 {stateAudit && (
                   <div style={{ marginBottom: 12, padding: 11, border: '1px solid var(--line)', borderRadius: 10, background: 'rgba(95,215,232,.035)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <div style={{ color: 'var(--mint)', fontWeight: 800, fontSize: 11.5 }}>🔎 State Audit v{stateAudit.version ?? 1}</div>
+                      <div style={{ color: 'var(--mint)', fontWeight: 800, fontSize: 11.5 }}>🔎 State Audit v{stateAudit.version ?? 1}{stateAudit.engine === 'semantic-events' ? ' · Semantic' : ''}</div>
                       <div style={{ color: 'var(--text-dim)', fontSize: 9.5 }}>Canon: {stateAudit.canon === 'displayText' ? 'chính văn hiển thị' : (stateAudit.canon ?? 'không rõ')}</div>
                     </div>
                     {stateAudit.main && (
                       <div style={{ marginTop: 7, color: 'var(--text-mid)', fontSize: 10.5 }}>
                         Model chính: <b style={{ color: 'var(--mint)' }}>{stateAudit.main.accepted ?? 0}</b> candidate hợp lệ
-                        {(stateAudit.main.rejected ?? 0) > 0 ? <> · <b style={{ color: '#e9a06b' }}>{stateAudit.main.rejected}</b> bị bác</> : ''}
+                        {(stateAudit.main.rejected ?? 0) > 0 ? <> · <b style={{ color: '#e9a06b' }}>{stateAudit.main.rejected}</b> chưa commit</> : ''}
+                        {(stateAudit.main.legacyRejected ?? 0) > 0 ? <span style={{ color: 'var(--text-dim)' }}> · {stateAudit.main.legacyRejected} tag cũ bị bỏ qua</span> : null}
+                      </div>
+                    )}
+                    {stateAudit.semantic && (
+                      <div style={{ marginTop: 7, color: 'var(--text-mid)', fontSize: 10.5 }}>
+                        Semantic primary: đề xuất <b>{stateAudit.semantic.proposed ?? 0}</b> · nhận <b style={{ color: 'var(--mint)' }}>{stateAudit.semantic.accepted ?? 0}</b>
+                        {(stateAudit.semantic.rejected ?? 0) > 0 ? <> · bỏ <b style={{ color: '#e9a06b' }}>{stateAudit.semantic.rejected}</b></> : ''}
+                        {stateAudit.semantic.repaired ? <span style={{ color: '#e9c46a' }}> · đã tự sửa format</span> : null}
+                        {stateAudit.semantic.error ? <span style={{ color: '#e9a06b' }}> · lỗi: {stateAudit.semantic.error}</span> : null}
+                        {(stateAudit.semantic.events ?? []).slice(0, 8).map((event, index) => (
+                          <div key={`semantic-${index}-${event.kind}`} style={{ marginTop: 4, paddingLeft: 9, borderLeft: '2px solid var(--line)', color: 'var(--text-dim)', lineHeight: 1.45 }}>
+                            <b style={{ color: 'var(--mint)' }}>{event.kind}</b>{event.target ? ` · ${event.target}` : ''}{event.amount !== null && event.amount !== undefined ? ` · ${event.amount}` : ''}{event.evidence ? ` · “${event.evidence}”` : ''}
+                          </div>
+                        ))}
                       </div>
                     )}
                     {stateAudit.deterministicMoney && (
@@ -214,9 +228,9 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                         {auditPasses.map((pass, index) => (
                           <div key={`${index}-${pass.pass}-${pass.role}`} style={{ padding: '7px 9px', borderRadius: 8, background: 'var(--bg-deep)', border: '1px solid var(--line)', fontSize: 10.5, lineHeight: 1.55 }}>
                             <span style={{ color: 'var(--text-hi)', fontWeight: 750 }}>AI {pass.pass} · {pass.role === 'auditor' ? 'Auditor' : 'Extractor'}{pass.focus ? ` · ${pass.focus}` : ''}{pass.reroll ? ' · quét lại' : ''}</span>
-                            <span style={{ color: 'var(--text-dim)' }}> · {pass.evidenceAnchored ? 'evidence nguyên văn' : pass.structured ? 'semantic fallback' : 'tương thích tag cũ'}</span>
+                            <span style={{ color: 'var(--text-dim)' }}> · {pass.engine === 'semantic-events' ? 'semantic event' : pass.evidenceAnchored ? 'evidence nguyên văn' : 'legacy'}</span>
                             {pass.salvaged ? <span style={{ color: '#e9c46a' }}> · đã cứu JSON lỗi</span> : null}
-                            {(pass.anchorFallback ?? 0) > 0 ? <span style={{ color: 'var(--text-dim)' }}> · {pass.anchorFallback} quote lệch nhưng còn validator</span> : null}
+                            {pass.repaired ? <span style={{ color: '#e9c46a' }}> · đã tự sửa format</span> : null}
                             {pass.error ? (
                               <span style={{ color: '#e9a06b' }}> · lỗi: {pass.error}</span>
                             ) : (

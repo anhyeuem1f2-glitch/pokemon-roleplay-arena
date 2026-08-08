@@ -175,13 +175,13 @@ export function buildCustomMechanicNote(source) {
   if (labels.length === 0) return null
   const rules = [
     `CƠ CHẾ TÙY CHỈNH APP ĐÃ NHẬN DIỆN VÀ TỰ ÁP: ${labels.join('; ')}.`,
-    'Không tự cộng hiệu ứng lần thứ hai bằng cách bịa thêm EXP/vật phẩm ngoài giao thức.',
+    'Không tự cộng hiệu ứng lần thứ hai bằng cách bịa thêm EXP/vật phẩm ngoài kết quả mà app đã tính.',
   ]
   if (effects.infiniteRareCandy) {
-    rules.push('Kẹo Hiếm là vô hạn trong túi. Khi nhân vật cho một Pokémon ăn trong CHÍNH VĂN, dùng [[LEVEL Tên Pokémon | +1]]; không cần trừ Kẹo Hiếm bằng [[ITEM ... | -1]].')
+    rules.push('Kẹo Hiếm là vô hạn trong túi. Khi nhân vật cho một Pokémon ăn, hãy viết rõ trong CHÍNH VĂN rằng Pokémon đó đã lên cấp; Semantic State Engine sẽ tự cập nhật level và không trừ Kẹo Hiếm vô hạn.')
   }
   if (effects.battleExpMultiplier > 1 || effects.allPartyBattleExp) {
-    rules.push('EXP sau trận được battle engine tính tự động; chỉ kể đúng kết quả hệ thống cung cấp, không dùng [[LEVEL]] để cộng thêm sau một trận thường.')
+    rules.push('EXP sau trận được battle engine tính tự động; chỉ kể đúng kết quả hệ thống cung cấp, không tự cộng thêm cấp sau một trận thường.')
   }
   return rules.join(' ')
 }

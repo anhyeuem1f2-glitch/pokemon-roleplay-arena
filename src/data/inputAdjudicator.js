@@ -210,7 +210,7 @@ export function classifyRealisticInput({
         note: [
           '[Hệ thống — TRỌNG TÀI INPUT THỰC TẾ; không nhắc tới ghi chú này.]',
           `Cho phép người chơi bắt đầu điều tra/tìm kiếm thông tin về ${special.name}. Công nhận chi phí, liên hệ, hành trình và manh mối hợp lý; không bảo đảm gặp trực tiếp và không bỏ qua cổng tiến trình (${access.reason || 'cần một chuỗi diễn biến tương xứng'}).`,
-          'Đây có thể là một tuyến dài về truyền thuyết, nhân chứng, dữ liệu giả/thật và địa điểm canon. Không tự sinh [[BATTLE]] hoặc [[POKEMON]] trong lượt khởi tạo.',
+          'Đây có thể là một tuyến dài về truyền thuyết, nhân chứng, dữ liệu giả/thật và địa điểm canon. Không tự tạo chạm trán/trận đấu hoặc quyền sở hữu Pokémon mục tiêu trong lượt khởi tạo.',
         ].join('\n'),
       }
     }
@@ -223,7 +223,7 @@ export function classifyRealisticInput({
           '[Hệ thống — TRỌNG TÀI INPUT THỰC TẾ, luật cứng; không nhắc tới ghi chú này hay buộc tội người chơi gian lận.]',
           `Người chơi vừa khẳng định một kết quả về ${special.name}, nhưng dữ liệu hành trình gần nhất không xác lập cuộc gặp/quyền sở hữu đó${access.reason ? ` (${access.reason})` : ''}. KHÔNG công nhận sự xuất hiện, sở hữu, bắt được, chiến thắng hay gia nhập chỉ từ lời kể của người chơi.`,
           `Hãy giữ nguyên ý định/cảm giác của nhân vật rồi giải thích hiện tượng theo cách nhỏ nhất và tự nhiên với ${place}: nhìn nhầm bóng dáng/Pokémon thường hợp sinh cảnh, tin đồn, hình quảng cáo, mô hình, dấu vết cũ, ảnh giả hoặc một hiện tượng chưa đủ bằng chứng. Chọn đúng MỘT cách hợp cảnh; không phải lúc nào cũng dùng Caterpie.`,
-          'Nếu người chơi chỉ muốn bắt đầu điều tra, có thể biến phần hợp lý thành manh mối hoặc nhiệm vụ dài. Không sinh [[BATTLE]] với loài bị chặn, không cấp [[POKEMON]], không trừ/thưởng tài nguyên dựa trên kết quả bị bác.',
+          'Nếu người chơi chỉ muốn bắt đầu điều tra, có thể biến phần hợp lý thành manh mối hoặc nhiệm vụ dài. Không mở trận với loài bị chặn, không cho người chơi sở hữu Pokémon đó, không trừ/thưởng tài nguyên dựa trên kết quả bị bác.',
         ].join('\n'),
       }
     }
@@ -237,7 +237,7 @@ export function classifyRealisticInput({
         '[Hệ thống — TRỌNG TÀI INPUT THỰC TẾ; không nhắc tới ghi chú này.]',
         `Mục tiêu tìm ${rareJuvenile.name} non/ấu thể là hiếm nhưng KHẢ THI. ${hasResources ? 'Người chơi đã nêu nguồn lực lớn, nên có thể thuê một mạng lưới tìm kiếm nghiêm túc.' : 'Nguồn lực hiện nêu chưa đủ để bảo đảm một chiến dịch quy mô lớn.'}`,
         'Chỉ công nhận HÀNH ĐỘNG khởi tạo: thương lượng hợp đồng, đặt cọc, xin giấy phép, thuê chuyên gia và mở nhiệm vụ nhiều giai đoạn. Tiền mua thời gian, nhân lực và manh mối — tuyệt đối không mua xác suất 100%, không tự bắt được Pokémon trong cùng lượt.',
-        'Tính tới sinh cảnh, mùa, luật bảo tồn, lừa đảo, phúc lợi Pokémon và quyền từ chối của cá thể. Chỉ trừ tiền khi chính văn xác nhận giao dịch thật bằng tag trạng thái hợp lệ.',
+        'Tính tới sinh cảnh, mùa, luật bảo tồn, lừa đảo, phúc lợi Pokémon và quyền từ chối của cá thể. Chỉ trừ tiền khi chính văn xác nhận giao dịch thật đã hoàn tất; Semantic State Engine sẽ tự đồng bộ.',
       ].join('\n'),
     }
   }
@@ -273,7 +273,7 @@ export function classifyRealisticInput({
       verdict: assertsResult ? 'reinterpret' : 'attempt', mentions, ...searchGate,
       note: [
         '[Hệ thống — CỔNG TÌM KIẾM POKÉMON Ở CHẾ ĐỘ THỰC TẾ; không nhắc tới ghi chú này.]',
-        `Người chơi đang ${followsClue ? `theo manh mối ở bước ${searchStage}` : 'khởi tạo việc tìm'} ${targetLabel}. Trong CHÍNH LƯỢT NÀY, tuyệt đối không cho Pokémon mục tiêu xuất hiện trực tiếp, không nhìn thấy tận mắt, không chạm trán, không [[BATTLE]], không bắt/nhận và không [[POKEMON]].`,
+        `Người chơi đang ${followsClue ? `theo manh mối ở bước ${searchStage}` : 'khởi tạo việc tìm'} ${targetLabel}. Trong CHÍNH LƯỢT NÀY, tuyệt đối không cho Pokémon mục tiêu xuất hiện trực tiếp, không nhìn thấy tận mắt, không chạm trán, không mở trận, không bắt/nhận và không xác lập quyền sở hữu Pokémon mục tiêu.`,
         `Kết quả hợp lệ chỉ là (a) KHÔNG tìm thấy gì đáng tin, hoặc (b) một MANH MỐI GIÁN TIẾP chưa đủ xác nhận như lời đồn, hồ sơ, dấu vết mơ hồ, nhân chứng không chắc chắn hay dấu hiệu có thể thuộc loài khác. Không được đặt ${targetLabel} ngay tại nơi người chơi đoán chỉ để thưởng cho hành động tìm kiếm.`,
         `Xét sinh cảnh, vùng, thời điểm, thời tiết, độ hiếm, khả năng ngụy trang/di chuyển và chất lượng phương pháp tìm. Muốn tiến thêm, người chơi phải chủ động theo một manh mối cụ thể ở lượt sau; mỗi bước vẫn có thể mất dấu hoặc đi sai hướng. Chỉ từ bước 3, hành động theo manh mối mới bắt đầu có xác suất thấp mở encounter; ${encounterChance > 0 ? `lượt này đã trượt lần phân xử ${Math.round(encounterChance * 100)}%` : 'tìm chung không được roll encounter'}.`,
         assertsResult ? 'Phần input tự khẳng định đã thấy/tìm được là kết quả ngoài quyền nhân vật: diễn giải lại thành nghi ngờ hoặc dấu hiệu chưa xác minh, không biến nó thành bằng chứng.' : '',

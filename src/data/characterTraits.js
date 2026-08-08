@@ -59,7 +59,7 @@ export function buildCharacterTraitsNote({ personality = [], superpower = 'none'
         ? 'SANDBOX: không tự hạ cấp, cân bằng lại hay thêm cái giá/giới hạn mà người chơi không viết. Năng lực này là thiết lập canon của nhân vật; diễn biến sau đó vẫn kể theo nhịp Anime. '
         : 'Thể hiện năng lực này CÓ CHỪNG MỰC, hợp mạch truyện — không biến nhân vật thành bất khả chiến bại. ')
       + 'QUAN TRỌNG: nếu năng lực này dẫn tới thay đổi có thể ĐO ĐƯỢC mà app chưa tự xử lý (nhận vật phẩm, đổi tiền, '
-      + 'nhận Pokémon, tăng cấp trực tiếp...), hãy dùng ĐÚNG TAG tương ứng ở phần giao thức để nó thành thật trong dữ liệu game, '
+      + 'nhận Pokémon, tăng cấp trực tiếp...), hãy viết kết quả đã xảy ra thật rõ trong CHÍNH VĂN; Semantic State Engine sẽ tự đồng bộ dữ liệu game, '
       + 'thay vì chỉ kể suông rồi để số liệu đứng yên.'
       + (customMechanicNote ? `\n${customMechanicNote}` : ''),
     )

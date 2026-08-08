@@ -191,3 +191,34 @@ export function resolveItemByName(rawName) {
     .sort((a, b) => normalizeName(b.name).length - normalizeName(a.name).length)
   return candidates[0] ?? null
 }
+
+// Đợt 105: inventory roleplay không được phụ thuộc hoàn toàn danh mục tĩnh.
+// Vé tàu VIP, huy hiệu fan-made, thiết bị tự chế... phải có thể tồn tại như
+// một item thật nếu chính văn đã canon hóa. ID ổn định theo tên để save và
+// ledger có thể nhận diện cùng món qua các lượt.
+export function createCustomItemDescriptor(rawName, meta = {}) {
+  const name = String(rawName ?? '').trim()
+  if (!name) return null
+  const slug = normalizeName(name).replace(/\s+/g, '-') || 'custom-item'
+  return {
+    id: `custom-${slug}`,
+    name,
+    price: Number.isFinite(Number(meta.price)) ? Number(meta.price) : 0,
+    category: String(meta.category ?? (meta.keyItem ? 'special' : 'custom')).trim() || 'custom',
+    desc: String(meta.description ?? meta.desc ?? 'Vật phẩm do cốt truyện tạo ra.').trim(),
+    noShop: true,
+    custom: true,
+    ...(meta.holdable ? { holdable: true } : {}),
+    ...(meta.keyItem ? { keyItem: true } : {}),
+  }
+}
+
+/** Tìm trong túi theo id/tên, kể cả item động không có trong SHOP_ITEMS. */
+export function resolveInventoryItemByName(rawName, inventory = []) {
+  const known = resolveItemByName(rawName)
+  if (known) return known
+  const q = normalizeName(rawName)
+  if (!q) return null
+  const found = (inventory ?? []).find((item) => normalizeName(item?.name) === q || normalizeName(item?.id) === q)
+  return found ? { ...found } : null
+}

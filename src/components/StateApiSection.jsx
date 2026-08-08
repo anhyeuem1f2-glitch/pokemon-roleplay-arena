@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { listModels } from '../services/aiClient.js'
-import { extractMissingStateTags } from '../services/stateExtractor.js'
+import { extractSemanticStateEvents } from '../services/semanticStateEngine.js'
 import PokemonToggle from './PokemonToggle.jsx'
 
 const EMPTY_CONFIG = { baseUrl: '', apiKey: '', model: '' }
@@ -46,16 +46,17 @@ function StateApiSlot({ number, config, setConfig }) {
     setTesting(true)
     setTest(null)
     try {
-      const tags = await extractMissingStateTags(cfg, {
-        storyText: 'Bạn trả 300 Pokédollar cho bà chủ quán rồi nhận 2 Poké Ball. Sau đó bạn ngồi ăn no và đưa phần thừa cho Growlithe.',
+      const result = await extractSemanticStateEvents(cfg, {
+        storyText: 'Bạn trả 300 Pokédollar cho bà chủ quán rồi nhận 2 Poké Ball và một Vé tàu VIP do chủ quán tự viết tay. Sau đó bạn ngồi ăn no và đưa phần thừa cho Growlithe.',
         userText: 'Tôi mua đồ rồi nghỉ chân.',
-        appliedTags: {},
-        hasPokemon: true,
+        appliedState: {},
+        stateSnapshot: { money: 1000, inventory: [], party: [{ name: 'Growlithe', level: 10, friendship: 70 }] },
+        mode: 'anime',
         scanMode: number === 1 ? 'extractor' : 'auditor',
       })
-      setTest(tags
-        ? { ok: true, msg: `OK — model tìm được: ${tags.replace(/\n/g, ' · ')}` }
-        : { ok: false, msg: 'Model trả lời nhưng không tìm thấy biến nào trong đoạn thử.' })
+      setTest(result.acceptedCount > 0
+        ? { ok: true, msg: `OK — Semantic Engine tìm ${result.acceptedCount}/${result.proposedCount} event (kể cả item tự tạo).` }
+        : { ok: false, msg: 'Model trả lời nhưng không tìm thấy event state nào trong đoạn thử.' })
     } catch (err) {
       setTest({ ok: false, msg: err.message })
     } finally {
@@ -70,7 +71,7 @@ function StateApiSlot({ number, config, setConfig }) {
         onChange={(next) => setConfig(next ? { ...EMPTY_CONFIG } : null)}
         label={`Bật AI soi biến ${number}`}
         hint={enabled
-          ? `AI soi biến ${number} sẽ đọc lại chính văn; candidate mới phải kèm evidence nguyên văn rồi vẫn qua validator.`
+          ? `Semantic Engine ${number} đọc chính văn tự nhiên; không cần tag/exact quote và chấp nhận entity tự tạo.`
           : number === 1 ? 'Tắt: hệ thống dùng tuyến API dự phòng/mặc định.' : 'Tắt: chỉ dùng một AI soi biến.'}
       />
       {enabled && (
@@ -106,9 +107,9 @@ export default function StateApiSection() {
   const { stateApiConfig, setStateApiConfig, stateApiConfig2, setStateApiConfig2 } = useGame()
   return (
     <div className="field">
-      <label>Hai AI chuyên soi và cập nhật biến</label>
+      <label>Semantic State Engine</label>
       <small>
-        Sau mỗi lượt, các AI đã bật lần lượt đọc toàn bộ chính văn để tìm biến bị bỏ sót. AI thứ hai kiểm tra tiếp trên ledger mới nhất nên không áp trùng kết quả của AI thứ nhất. Cả hai chỉ được đề xuất: app chỉ ghi biến khi sự kiện thật sự có bằng chứng trong chính văn, không tin lời bịa trong tag, input, suy nghĩ hay văn bản bị phủ định.
+        Đường cập nhật chính đọc trực tiếp chính văn hiển thị và trả event có nghĩa thay vì bắt model viết [[TAG]]. Engine hiểu nhiều câu, entity/vật phẩm tự tạo và commit từng event độc lập; slot thứ hai làm auditor trên ledger mới nhất để cứu phần bị bỏ sót.
       </small>
       <StateApiSlot number={1} config={stateApiConfig} setConfig={setStateApiConfig} />
       <StateApiSlot number={2} config={stateApiConfig2} setConfig={setStateApiConfig2} />

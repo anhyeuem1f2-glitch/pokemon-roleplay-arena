@@ -25,10 +25,9 @@ export function saveCharacterPreset(name, data) {
   const entry = { name: clean, savedAt: Date.now(), data }
   if (idx >= 0) list[idx] = entry
   else list.unshift(entry)
-  // Giữ tối đa 20 preset cho gọn.
-  const trimmed = list.slice(0, 20)
-  persist(trimmed)
-  return trimmed
+  // Hồ sơ chỉ chiếm ít JSON; không tự xoá hồ sơ thứ 21 của người chơi.
+  persist(list)
+  return list
 }
 
 export function deleteCharacterPreset(name) {

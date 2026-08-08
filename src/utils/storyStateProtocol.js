@@ -1,4 +1,5 @@
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
+import { normalizePokemonGender } from '../data/pokemonGender.js'
 
 // ============ GIAO THỨC TRẠNG THÁI TRONG CHÍNH VĂN (đợt 24) ============
 // Cùng triết lý với [[BATTLE]] và [[DMG]]: AI kể chuyện bằng lời, còn các
@@ -25,11 +26,11 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Nhân vật chính BỊ THƯƠNG hoặc HỒI PHỤC phần thân thể nào (thế giới này Pokémon tấn công con người là chuyện bình thường): [[BODY leftArm=+25]] (dương = thương thêm, âm = hồi phục; bộ phận: head, torso, leftArm, rightArm, leftLeg, rightLeg; 0 lành lặn, 100 là mất/hỏng hẳn — vết cào nhẹ +5~10, trúng đòn nặng +20~40, gãy/bỏng nặng +50+). Mô tả vết thương trong lời kể phải khớp với tag.
 - CHỈ khi nhân vật đã THỰC SỰ BƯỚC VÀO BÊN TRONG cửa hàng, đang đứng trước quầy/kệ và lượt kể dừng để người chơi chọn mua: [[SHOP Tên cửa hàng | loại=... | quy mô=nhỏ/vừa/lớn]] — loại ∈ {trainer (Poké Mart: bóng/thuốc như game), tạp hoá, quần áo, dã ngoại, leo núi, bách hoá}; hệ thống TỰ SINH danh sách hàng thật. Đi tới một thành phố, đi ngang/nhìn thấy cửa hàng, nhắc tên trung tâm mua sắm, hoặc chỉ nói “sẵn tiện mua sau” thì TUYỆT ĐỐI KHÔNG dùng SHOP. Chính văn phải nói rõ nhân vật đã vào trong; đừng tự liệt kê hàng, chỉ tả không khí rồi dừng.
 - Khi nhân vật đã THỰC SỰ lấy được một đống đồ không thể liệt kê chính xác từng món (vơ vét kho, trộm hàng, thu chiến lợi phẩm, nhặt đồ sau tai nạn): [[LOOT loại=đá quý | quy mô=nhỏ/vừa/lớn]]. App tự sinh vật phẩm theo loại ∈ {đá quý, y tế, trainer, thực phẩm, công nghệ, quần áo, tổng hợp}. Chỉ dùng sau khi việc lấy đồ đã thành công trong chính văn, không dùng cho ý định “sẽ vơ vét” và TUYỆT ĐỐI không dùng LOOT để gom hàng mua tại cửa hàng; hàng đã mua phải dùng từng ITEM đúng tên/số lượng. Ở Thực tế phải kể cả phản ứng pháp luật/truy nã hợp lý nếu đó là trộm cắp.
-- Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo, mua hợp lệ...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. Giao dịch qua PC/Box cũng phải dùng POKEMON khi hệ thống đã xác nhận chuyển giao và nhân vật thực sự lấy/cầm Poké Ball; không dùng nếu người bán mới hứa “sẽ gửi”, kiện còn chờ hoặc giao dịch thất bại. Nếu nhân vật lấy/nhặt/trộm một Poké Ball nhưng CHƯA biết nội dung/tình trạng, TUYỆT ĐỐI chưa bịa POKEMON và không cộng Poké Ball rỗng: dùng [[ITEM Poké Ball chưa xác định | 1]] cùng FACT ghi nguồn gốc. Khi một lượt sau mở/kiểm tra bóng và chính văn xác nhận loài bên trong, mới dùng [[POKEMON Loài | LvN]]; app tự tiêu thụ vật chứa chưa xác định, không cần ITEM -1. Nếu kiểm tra xác nhận bóng trống và còn dùng được, chuyển bằng [[ITEM Poké Ball chưa xác định | -1]] + [[ITEM Poké Ball | 1]]; nếu bóng hỏng/bị trả/bị tịch thu thì chỉ trừ bóng chưa xác định. KHÔNG dùng POKEMON cho tiến hoá. Ở chế độ THỰC TẾ: mở đầu "tay trắng" thì Pokémon đầu tiên phải đến từ diễn biến hợp lý; level theo hoàn cảnh, sinh thái, giai đoạn tiến hoá và kinh nghiệm trainer, app được nắn level lệch; không tự cấp dồn dập khi người chơi chưa chọn nhận. Câu “đi tìm/tìm kiếm Pokémon X” chỉ khởi tạo việc tìm: tìm chung chỉ được manh mối gián tiếp hoặc không có kết quả, tuyệt đối không dùng POKEMON/BATTLE và không cho X xuất hiện trực tiếp; áp cả với loài thường như Ditto. Phải theo manh mối cụ thể ít nhất ba bước; sau đó app mới có thể cho một lượt vượt phân xử xác suất thấp, nhưng sinh cảnh/thời điểm vẫn phải hợp và gặp không đồng nghĩa bắt/gia nhập. Ở ANIME/SẢNG VĂN: tôn trọng quyền tác giả của người chơi về cách nhận, loài và level; không viện sinh thái hay độ hiếm để bác hoặc bóp level đã tuyên bố.
+- Người chơi THẬT SỰ có được một Pokémon MỚI trong diễn biến (được tặng, nhận nuôi, thu phục ngoài trận, cứu và nó đi theo, mua hợp lệ...): [[POKEMON Tên loài | Lv7]] — hệ thống sẽ tự dựng chỉ số thật và đưa vào đội. Nếu chính văn xác lập giới tính thì BẮT BUỘC giữ đúng bằng [[POKEMON Tên loài | Lv7 | giới tính=đực/cái/vô giới tính]]; chỉ bỏ field khi văn thật sự không nói để app roll theo tỉ lệ loài. Giao dịch qua PC/Box cũng phải dùng POKEMON khi hệ thống đã xác nhận chuyển giao và nhân vật thực sự lấy/cầm Poké Ball; không dùng nếu người bán mới hứa “sẽ gửi”, kiện còn chờ hoặc giao dịch thất bại. Nếu nhân vật lấy/nhặt/trộm một Poké Ball nhưng CHƯA biết nội dung/tình trạng, TUYỆT ĐỐI chưa bịa POKEMON và không cộng Poké Ball rỗng: dùng [[ITEM Poké Ball chưa xác định | 1]] cùng FACT ghi nguồn gốc. Khi một lượt sau mở/kiểm tra bóng và chính văn xác nhận loài bên trong, mới dùng [[POKEMON Loài | LvN]]; app tự tiêu thụ vật chứa chưa xác định, không cần ITEM -1. Nếu kiểm tra xác nhận bóng trống và còn dùng được, chuyển bằng [[ITEM Poké Ball chưa xác định | -1]] + [[ITEM Poké Ball | 1]]; nếu bóng hỏng/bị trả/bị tịch thu thì chỉ trừ bóng chưa xác định. KHÔNG dùng POKEMON cho tiến hoá. Ở chế độ THỰC TẾ: mở đầu "tay trắng" thì Pokémon đầu tiên phải đến từ diễn biến hợp lý; level theo hoàn cảnh, sinh thái, giai đoạn tiến hoá và kinh nghiệm trainer, app được nắn level lệch; không tự cấp dồn dập khi người chơi chưa chọn nhận. Câu “đi tìm/tìm kiếm Pokémon X” chỉ khởi tạo việc tìm: tìm chung chỉ được manh mối gián tiếp hoặc không có kết quả, tuyệt đối không dùng POKEMON/BATTLE và không cho X xuất hiện trực tiếp; áp cả với loài thường như Ditto. Phải theo manh mối cụ thể ít nhất ba bước; sau đó app mới có thể cho một lượt vượt phân xử xác suất thấp, nhưng sinh cảnh/thời điểm vẫn phải hợp và gặp không đồng nghĩa bắt/gia nhập. Ở ANIME/SẢNG VĂN: tôn trọng quyền tác giả của người chơi về cách nhận, loài và level; không viện sinh thái hay độ hiếm để bác hoặc bóp level đã tuyên bố.
 - LUẬT LIÊN ĐOÀN ENDGAME MẶC ĐỊNH: mỗi Tứ Thiên Vương dùng đội 6 Pokémon Lv85, Lv85, Lv90, Lv90, Lv95, Lv95; Champion dùng Lv98, Lv98, Lv99, Lv99, Lv100, Lv100. Ở Thực tế không hạ level theo người chơi. Ở Anime/Sảng văn, đây chỉ là mốc mặc định và nhường cho thiết lập mà người chơi chủ động viết.
 - Pokémon đang sở hữu TIẾN HOÁ thành loài khác: [[EVOLVE Tên hiện tại | Tên sau tiến hoá]]. Đây là CÙNG MỘT CÁ THỂ: app giữ uid/IV/EV/nature/EXP và thay hình ảnh/chỉ số loài; tuyệt đối không dùng [[POKEMON loài mới]] vì sẽ tạo bản sao. Nếu tiến hoá xảy ra đúng lúc lên cấp, khai cả [[LEVEL tên cũ | +1]] rồi [[EVOLVE tên cũ | tên mới]].
 - Pokémon đang sở hữu THỰC SỰ ĐƯỢC CHO CẦM trang bị trong chính văn: [[EQUIP Tên Pokémon | Tên vật phẩm]]. Vật phẩm phải đang có trong túi, phải là held item hợp lệ; EQUIP tự chuyển đúng 1 món khỏi túi nên KHÔNG xuất thêm [[ITEM ... | -1]] cho cùng hành động; nếu thay món cũ, app tự cất món cũ lại túi. Khi nhân vật tháo/cất trang bị: [[UNEQUIP Tên Pokémon]]. Key Stone, Z-Ring, Dynamax Band và Tera Orb là thiết bị của HUẤN LUYỆN VIÊN, không dùng EQUIP cho Pokémon.
-- Độ THÂN MẬT của một Pokémon đang sở hữu thay đổi RÕ RÀNG vì hành động trong chính văn: [[FRIEND Tên Pokémon | +5 | lý do ngắn]] hoặc số âm khi niềm tin bị tổn thương. Chỉ dùng khi truyện thực sự thể hiện Pokémon được chăm sóc, được cứu, được khen/tặng món yêu thích, cùng vượt khó, bị bỏ rơi/ngược đãi hoặc mất niềm tin; KHÔNG cộng chỉ vì đi bộ, nói chuyện xã giao hay xuất hiện cùng nhau. Mỗi lượt thường trong ±1-10, sự kiện rất lớn tối đa ±30; app kẹp tổng 0-255.
+- Độ THÂN MẬT của một Pokémon đang sở hữu thay đổi vì hành động trong chính văn: [[FRIEND Tên Pokémon | +5 | lý do ngắn]] hoặc số âm khi niềm tin bị tổn thương. Chỉ dùng khi truyện thể hiện Pokémon được chăm sóc, được cứu, được khen/tặng món yêu thích, cùng vượt khó, bị bỏ rơi/ngược đãi hoặc mất niềm tin; KHÔNG cộng chỉ vì xuất hiện cùng nhau. Số điểm phải phản ánh đúng mức độ sự kiện; không có trần tuỳ tiện cho một lượt, app chỉ kẹp tổng canon 0-255.
 - Nhân vật NHẬN ĐƯỢC hoặc MẤT ĐI vật phẩm (được tặng, nhặt, trộm/cuỗm thành công, mua và đã thanh toán, dùng hết, bị lấy mất): [[ITEM Tên vật phẩm | số lượng]] — số lượng âm là mất đi, bỏ trống là 1. VD: [[ITEM Potion | 2]], [[ITEM Kẹo Hiếm]], [[ITEM Poké Ball | -1]]. Phải giữ ĐÚNG loại và số lượng chính văn xác nhận; một món không được biến thành x20. Poké Ball đang chứa một loài chưa rõ phải dùng đúng tên đặc biệt [[ITEM Poké Ball chưa xác định | 1]], không dùng ITEM Poké Ball thường. Khi chính văn liệt kê chính xác giỏ hàng rồi xác nhận thanh toán/đóng gói, khai từng ITEM đúng tên và số lượng, không thay bằng LOOT ngẫu nhiên. CHỈ dùng khi truyện THỰC SỰ trao/lấy đồ; đừng tự phát đồ cho người chơi vô cớ. Nếu NĂNG LỰC ĐẶC BIỆT của người chơi (mục SIÊU NĂNG LỰC ĐẶC BIỆT ở trên) nói rằng họ có sẵn hay tạo ra được một loại vật phẩm nào đó, thì hãy DÙNG TAG NÀY để biến điều đó thành thật trong túi đồ, thay vì chỉ kể suông rồi để số liệu đứng yên.
 - Pokémon TĂNG CẤP TRỰC TIẾP vì Kẹo Hiếm hoặc một năng lực đặc biệt (không phải EXP trận/luyện tập): [[LEVEL Tên Pokémon | +1]] hoặc [[LEVEL Tên Pokémon | Lv11]]. Dùng +N khi tăng N cấp, dùng LvN khi truyện chốt cấp đích. Nếu dùng Kẹo Hiếm hữu hạn thì khai thêm [[ITEM Kẹo Hiếm | -1]]; nếu năng lực ghi Kẹo Hiếm vô hạn thì KHÔNG trừ. TUYỆT ĐỐI không dùng [[POKEMON]] để báo một Pokémon cũ lên cấp, và không dùng [[LEVEL]] sau trận thường hay [[TRAIN]] vì app đã tự tính EXP.
 - Nhân vật BƯỚC VÀO TRUNG TÂM POKÉMON (Pokémon Center — nơi y tá Joy chữa trị): [[POKECENTER Tên trung tâm]] — hệ thống sẽ hiện 2 nút cho người chơi tự bấm: CHỮA TRỊ và MÁY PC. Vì vậy trong lời kể ĐỪNG tự ý viết rằng Pokémon đã được chữa xong hay đã đổi đội hình — chỉ tả cảnh bước vào, y tá chào hỏi, rồi DỪNG LẠI để người chơi chọn. Khi nhân vật rời đi thì kể rõ là đã rời khỏi trung tâm.\n- Nhân vật DI CHUYỂN tới một địa danh mới (thành phố/khu vực/route): [[MOVE Tên khu vực]]; nếu biết vị trí cụ thể trên bản đồ thì thêm toạ độ phần trăm [[MOVE Tên khu vực | x=42 | y=58]] (x: trái→phải 0-100, y: trên→dưới 0-100). VD [[MOVE Cerulean City | x=66 | y=24]]. Chỉ tag khi THỰC SỰ đổi chỗ; không bịa x/y khi văn bản không đủ rõ.
@@ -43,8 +44,8 @@ export const STORY_STATE_INSTRUCTION = `GIAO THỨC TRẠNG THÁI (bắt buộc 
 - Mức TRUY NÃ thay đổi vì hành vi phạm pháp/được minh oan/nộp phạt: [[WANTED +1 | region=Kanto | reason=phá kho hàng | bounty=500]]. Số âm dùng khi giảm truy nã; không tự xoá chỉ vì sang lượt khác.
 - Pokémon nhận Ribbon/Mark trong một sự kiện thật: [[RIBBON Tên Pokémon | Tên Ribbon]] hoặc [[MARK Tên Pokémon | Tên Mark]]. Shiny là thuộc tính cố định lúc sinh cá thể, tuyệt đối không đổi bằng tag hay lời kể.
 - Pokémon được LUYỆN TẬP có chủ đích trong lượt này (tập chiêu, chạy bền, đối luyện, huấn luyện cùng NPC...): [[TRAIN cường độ]] với cường độ 1-3 (1 = tập nhẹ/ngắn, 2 = tập nghiêm túc cả buổi, 3 = tập khổ luyện cật lực). VD: [[TRAIN 2]]. Chỉ khai khi thực sự có cảnh luyện tập, KHÔNG khai cho việc đi đường hay đánh trận thường.
-- Sự kiện/thoả thuận/mốc thời gian/địa danh QUAN TRỌNG cần nhớ lâu dài: [[FACT từ khoá 1, từ khoá 2 | nội dung CHI TIẾT]] — hoạt động như một entry World Info: phần trước dấu | là 1-3 TỪ KHOÁ KÍCH HOẠT (cách nhau bằng dấu phẩy: tên người, tên Pokémon, địa danh, tên vật phẩm...), phần sau là NỘI DUNG ĐẦY ĐỦ của sự kiện (ai, cái gì, ở đâu, điều kiện/hệ quả) để lần sau đọc lại là hiểu ngay ngữ cảnh — KHÔNG viết cụt kiểu vài chữ. VD: [[FACT Cubone, bà lão Lavender | Ngày 12/4 tại Lavender, người chơi hứa với bà lão Yui sẽ quay lại giúp tìm con Cubone bị mất trước mùa đông; bà hứa trả công bằng chiếc Moon Stone gia truyền]]. Chỉ ghi thông tin THẬT đã xảy ra, mỗi fact 1 dòng riêng.
-Không bịa thay đổi không có trong diễn biến. Có thể viết tự nhiên bằng đại từ và tách một sự kiện qua vài câu, nhưng phải làm rõ ba điểm: đối tượng nào, hành động đã hoàn tất hay mới dự định, và kết quả thuộc về ai. Không dùng tag nào khác ngoài danh sách trên (và [[BATTLE]]). Mọi tag ĐẶT Ở CUỐI TIN, mỗi tag 1 dòng riêng — KHÔNG nhét tag vào giữa câu văn hay vào phần suy nghĩ. QUY TẮC CHĂM GHI SỔ (quan trọng): lượt nào xuất hiện NHÂN VẬT CÓ TÊN mới → PHẢI có [[NPC]]; lượt nào có sự kiện/thoả thuận/lời hứa/vật phẩm/địa điểm đáng nhớ lại về sau → PHẢI có [[FACT]] với nội dung chi tiết. Thà ghi hơi nhiều còn hơn bỏ sót — sổ tay này là trí nhớ dài hạn duy nhất của truyện.`
+- Sự kiện/thoả thuận/mốc thời gian/địa danh QUAN TRỌNG cần nhớ lâu dài: [[FACT từ khoá 1, từ khoá 2 | nội dung CHI TIẾT]] — hoạt động như một entry World Info: phần trước dấu | là một hoặc nhiều TỪ KHOÁ KÍCH HOẠT (cách nhau bằng dấu phẩy: tên người, tên Pokémon, địa danh, tên vật phẩm...), phần sau là NỘI DUNG ĐẦY ĐỦ của sự kiện (ai, cái gì, ở đâu, điều kiện/hệ quả) để lần sau đọc lại là hiểu ngay ngữ cảnh — KHÔNG viết cụt kiểu vài chữ. VD: [[FACT Cubone, bà lão Lavender | Ngày 12/4 tại Lavender, người chơi hứa với bà lão Yui sẽ quay lại giúp tìm con Cubone bị mất trước mùa đông; bà hứa trả công bằng chiếc Moon Stone gia truyền]]. Chỉ ghi thông tin THẬT đã xảy ra, mỗi fact 1 dòng riêng.
+Không bịa thay đổi không có trong diễn biến. Có thể viết tự nhiên bằng đại từ và tách một sự kiện qua nhiều câu/đoạn; app sẽ liên kết theo toàn sự kiện. KHÔNG có trần số tag hay số mặt hàng trong một lượt: chính văn xác nhận bao nhiêu thay đổi thì khai đủ bấy nhiêu, kể cả đơn mua trên 5 món. Chỉ phân biệt điều đã xảy ra với ý định/lời hứa/phủ định. Không dùng tag nào khác ngoài danh sách trên (và [[BATTLE]]). Mọi tag ĐẶT Ở CUỐI TIN, mỗi tag 1 dòng riêng — KHÔNG nhét tag vào giữa câu văn hay vào phần suy nghĩ. QUY TẮC CHĂM GHI SỔ (quan trọng): lượt nào xuất hiện NHÂN VẬT CÓ TÊN mới → PHẢI có [[NPC]]; lượt nào có sự kiện/thoả thuận/lời hứa/vật phẩm/địa điểm đáng nhớ lại về sau → PHẢI có [[FACT]] với nội dung chi tiết. Thà ghi hơi nhiều còn hơn bỏ sót — sổ tay này là trí nhớ dài hạn duy nhất của truyện.`
 
 // Đợt 47: BỎ neo dòng (^…$) — thực chiến cho thấy model (nhất là khi CoT
 // leak) hay nhét tag NẰM GIỮA câu văn ("…, [[MONEY -1000]], [[SHOP …]] .")
@@ -52,7 +53,7 @@ Không bịa thay đổi không có trong diễn biến. Có thể viết tự n
 // tag lộ nguyên văn ra màn hình. Tag có cặp [[..]] bao nên match giữa dòng
 // vẫn an toàn, không đụng chính văn thường.
 const MONEY_RE = /\[\[\s*MONEY\s*([+-]?\d+)\s*\]\]/gi
-const POKEMON_RE = /\[\[\s*POKEMON\s+([^\]|]+?)\s*\|\s*Lv\.?\s*(\d+)\s*\]\]/gi
+const POKEMON_RE = /\[\[\s*POKEMON\s+([^\]|]+?)\s*\|\s*Lv\.?\s*(\d+)\s*(?:\|\s*(?:giới\s*tính|gioi\s*tinh|gender)\s*=\s*([^\]|]+?))?\s*\]\]/gi
 // Đợt 76: tiến hoá phải thay đúng cá thể, không được sinh thêm Pokémon cấp 2.
 const EVOLVE_RE = /\[\[\s*(?:EVOLVE|EVOLUTION|TIẾN\s*(?:H[ÓO]A|HO[ÁA])|TIEN\s*HOA)\s+([^\]|]+?)\s*\|\s*([^\]]+?)\s*\]\]/gi
 // Đợt 73: thay đổi cấp của Pokémon ĐANG SỞ HỮU. Trước đây model buộc phải
@@ -198,7 +199,13 @@ export function parseStoryStateTags(text) {
   }
   // [[POKEMON Loài | Lv7]] — người chơi nhận Pokémon mới trong truyện (đợt 32).
   for (const m of text.matchAll(POKEMON_RE)) {
-    pokemons.push({ species: m[1].trim(), level: Math.max(1, Math.min(100, parseInt(m[2], 10))) })
+    const pokemon = {
+      species: m[1].trim(),
+      level: Math.max(1, Math.min(100, parseInt(m[2], 10))),
+    }
+    const gender = normalizePokemonGender(m[3])
+    if (gender) pokemon.gender = gender
+    pokemons.push(pokemon)
   }
   for (const m of text.matchAll(EVOLVE_RE)) {
     const from = m[1].trim()
@@ -217,7 +224,7 @@ export function parseStoryStateTags(text) {
     }
   }
   for (const m of text.matchAll(FRIEND_RE)) {
-    const delta = Math.max(-30, Math.min(30, parseInt(m[2], 10)))
+    const delta = parseInt(m[2], 10)
     if (Number.isFinite(delta) && delta !== 0) friendships.push({
       target: m[1].trim(), delta, note: (m[3] ?? '').trim() || null,
     })
@@ -235,7 +242,7 @@ export function parseStoryStateTags(text) {
   for (const m of text.matchAll(DATE_ADV_RE)) dateAdvance += parseInt(m[1], 10)
   for (const m of text.matchAll(TRAIN_RE)) {
     const n = parseInt((m[1] ?? '').trim(), 10)
-    training += Number.isFinite(n) ? Math.max(1, Math.min(3, n)) : 1
+    training += Number.isFinite(n) ? Math.max(1, n) : 1
   }
   for (const m of text.matchAll(DATE_PART_RE)) datePart = m[1]
   for (const m of text.matchAll(ITEM_RE)) {
@@ -349,8 +356,7 @@ export function applyStoryState(parsed, { setPlayerProfile, setRelationships, se
     setRelationships((cur) => {
       const next = [...(cur ?? [])]
       for (const r of parsed.rel) {
-        // Kẹp delta 1 lần đổi trong ±30 để 1 tin nhắn không lật ngược cả mối quan hệ.
-        const delta = Math.max(-30, Math.min(30, r.delta))
+        const delta = Number(r.delta) || 0
         const idx = next.findIndex((x) => x.name.toLowerCase() === r.name.toLowerCase())
         if (idx >= 0) {
           next[idx] = {

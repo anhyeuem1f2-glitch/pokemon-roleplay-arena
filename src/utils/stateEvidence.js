@@ -1,3 +1,5 @@
+import { inferPokemonGenderFromStory, normalizePokemonGender } from '../data/pokemonGender.js'
+
 // ============ ĐỐI CHIẾU TAG VỚI CHÍNH VĂN (đợt 77) ============
 // Tag chỉ là dữ liệu máy đọc, KHÔNG phải bằng chứng. Mọi thay đổi save phải
 // được một câu người chơi thực sự nhìn thấy xác nhận là đã xảy ra.
@@ -55,6 +57,19 @@ function mentions(text, value) {
   const hay = fold(text)
   const tokens = words(value)
   return tokens.length > 0 && tokens.every((token) => phraseRegex(token)?.test(hay))
+}
+
+// Văn chương thường gọi rút gọn “Bảo vệ Cổng” thành “gã bảo vệ”, hoặc
+// “Viện Nghiên Cứu Oak” thành “khuôn viên Viện”. Với biến phi định danh,
+// khớp quá nửa các từ có nghĩa đã đủ; tên Pokémon vẫn dùng mentions() chặt.
+const LOOSE_STOP_WORDS = new Set(['cua', 'tai', 'thuoc', 'mot', 'cac', 'khu', 'noi', 'ten'])
+function mentionsLoose(text, value) {
+  if (mentions(text, value)) return true
+  const hay = fold(text)
+  const tokens = [...new Set(words(value).filter((token) => token.length >= 3 && !LOOSE_STOP_WORDS.has(token)))]
+  if (!tokens.length) return false
+  const matched = tokens.filter((token) => phraseRegex(token)?.test(hay)).length
+  return matched >= Math.max(1, Math.ceil(tokens.length / 2))
 }
 
 function legendaryContextIsValid(entry, prose, options) {
@@ -133,7 +148,7 @@ function completedActionClause(line, patterns, { allowNegativeCompletion = [] } 
 
 function linkedSentenceEvidence(text, targets, patterns, {
   allowGeneric = false,
-  maxDistance = 1,
+  maxDistance = 12,
   allowNegativeCompletion = [],
   quantity = null,
   matchAnyTarget = false,
@@ -143,7 +158,7 @@ function linkedSentenceEvidence(text, targets, patterns, {
   for (let index = 0; index < lines.length; index++) {
     const targetLine = lines[index]
     const hasAnchor = wanted.some((target) => (
-      allowGeneric && genericMonTarget(target) ? true : mentions(targetLine, target)
+      allowGeneric && genericMonTarget(target) ? true : mentionsLoose(targetLine, target)
     ))
     if (!hasAnchor) continue
     // Nếu câu neo có “không/sẽ” nhưng cũng chứa một mệnh đề hành động hoàn
@@ -155,7 +170,7 @@ function linkedSentenceEvidence(text, targets, patterns, {
     const end = Math.min(lines.length - 1, index + maxDistance)
     const evidenceWindow = lines.slice(start, end + 1).join(' ')
     const targetMatcher = (target) => (
-      allowGeneric && genericMonTarget(target) ? true : mentions(evidenceWindow, target)
+      allowGeneric && genericMonTarget(target) ? true : mentionsLoose(evidenceWindow, target)
     )
     const allTargetsLinked = matchAnyTarget ? wanted.some(targetMatcher) : wanted.every(targetMatcher)
     if (!allTargetsLinked) continue
@@ -315,12 +330,13 @@ const LOOT_ACTION = ['vơ vét', 'lấy sạch', 'cuỗm', 'trộm được', 't
 const MOVE = [
   'đi tới', 'đi đến', 'đã tới', 'đã đến', 'tới nơi', 'đến nơi', 'đặt chân',
   'rời khỏi', 'đi vào', 'bước vào', 'đi qua', 'tiến về', 'khởi hành tới',
-  'di chuyển tới', 'cập bến', 'hạ cánh tại', 'đến được',
+  'di chuyển tới', 'cập bến', 'hạ cánh tại', 'đến được', 'bước qua', 'đi xuyên qua',
+  'vào bên trong', 'ở bên trong', 'lọt vào', 'tiến sâu vào', 'qua cổng', 'mở cổng cho vào',
 ]
 const BOND_POSITIVE = ['tin tưởng', 'thân thiết', 'gắn bó', 'quý mến', 'yêu mến', 'cảm mến', 'bảo vệ', 'chăm sóc', 'cứu', 'ôm', 'khen', 'cảm ơn', 'tha thứ', 'cùng vượt qua', 'dựa vào', 'rúc đầu']
 const BOND_NEGATIVE = ['mất niềm tin', 'thất vọng', 'sợ hãi', 'dè chừng', 'giận dỗi', 'bị bỏ rơi', 'ngược đãi', 'phản bội', 'xa cách', 'không còn tin']
-const REL_POSITIVE = ['cảm ơn', 'quý mến', 'tin tưởng', 'thân thiết', 'giúp đỡ', 'cứu', 'đồng ý', 'hảo cảm', 'mỉm cười', 'thán phục']
-const REL_NEGATIVE = ['tức giận', 'thất vọng', 'ghét', 'mất lòng', 'cãi nhau', 'xung đột', 'đe dọa', 'phản bội', 'hảo cảm giảm']
+const REL_POSITIVE = ['cảm ơn', 'quý mến', 'tin tưởng', 'thân thiết', 'giúp đỡ', 'cứu', 'đồng ý', 'hảo cảm', 'mỉm cười', 'thán phục', 'xin lỗi', 'cúi đầu', 'kính nể', 'nể phục', 'nhượng bộ', 'mở cổng', 'dịu giọng', 'tôn trọng', 'thiện cảm']
+const REL_NEGATIVE = ['tức giận', 'thất vọng', 'ghét', 'mất lòng', 'cãi nhau', 'xung đột', 'đe dọa', 'phản bội', 'hảo cảm giảm', 'khó chịu', 'căm ghét', 'mất niềm tin', 'xua đuổi']
 const HURT = ['bị thương', 'vết thương', 'chảy máu', 'gãy', 'bỏng', 'bầm tím', 'đau nhức', 'rách', 'vỡ', 'trúng đòn', 'bị cắn', 'bị cào']
 const HEAL = ['hồi phục', 'lành lại', 'chữa trị', 'băng bó', 'hết đau', 'khỏi', 'được trị liệu']
 const EAT = ['ăn', 'uống', 'dùng bữa', 'no bụng', 'được cho ăn', 'cho pokemon ăn', 'nuốt', 'nhâm nhi']
@@ -329,10 +345,10 @@ const TIME_PASS = ['ngày trôi qua', 'đêm trôi qua', 'sáng hôm sau', 'qua 
 const TIME_TRANSITION = ['đã sang', 'chuyển sang', 'trời đã', 'khi trời', 'lúc này là', 'bây giờ là', 'sáng hôm sau']
 const TRAINING = ['luyện tập', 'huấn luyện', 'tập luyện', 'tập chiêu', 'đối luyện', 'chạy bền', 'khổ luyện', 'tập thể lực']
 const CENTER_INSIDE = ['bước vào trung tâm pokemon', 'đi vào trung tâm pokemon', 'bên trong trung tâm pokemon', 'đứng trước quầy y tá', 'y tá joy chào']
-const MONEY_CONTEXT = ['tiền', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng cộng', 'hóa đơn', 'thành tiền', 'số dư', 'thanh toán', 'trả', 'thưởng', 'mua', 'bán', 'bị cướp']
-const MONEY_GAIN = ['nhận', 'được thưởng', 'thưởng cho', 'kiếm được', 'được trả công', 'trao tiền', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về']
+const MONEY_CONTEXT = ['tiền', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng cộng', 'hóa đơn', 'thành tiền', 'số dư', 'thanh toán', 'trả', 'thưởng', 'mua', 'bán', 'bị cướp', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'gia tộc', 'gia đình']
+const MONEY_GAIN = ['nhận', 'được thưởng', 'thưởng cho', 'kiếm được', 'được trả công', 'trao tiền', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển', 'chuyển tiền', 'chuyển khoản', 'gia tộc gửi', 'gia đình gửi', 'ứng tiền', 'giải ngân', 'ghi có', 'số dư tăng']
 const MONEY_LOSS = ['trả', 'thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'khấu trừ', 'bị trừ', 'trừ đi', 'quẹt thẻ', 'quẹt', 'giải ngân']
-const SHOP_SELECT_ITEM = ['lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe']
+const SHOP_SELECT_ITEM = ['mua', 'lấy', 'lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'đơn hàng', 'giỏ hàng', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe']
 const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'nhận hóa đơn']
 const SHOP_PACK_COMPLETE = ['đóng gói toàn bộ', 'xách theo đống hàng', 'xách theo hàng', 'toàn bộ đống vật tư']
 const UNKNOWN_BALL_CONTEXT = [
@@ -398,10 +414,9 @@ function transactionEvidenceCount(text, amount) {
       count += 1
       continue
     }
-    // Văn dài thường báo tổng tiền, chen phản ứng nhân vật rồi mới quẹt thẻ.
-    // Chỉ tìm tối đa 5 câu sau và câu hoàn tất phải tự đứng vững, không ghép
-    // chữ “không” ở một câu miêu tả khác vào cả cửa sổ.
-    for (let j = i + 1; j <= Math.min(lines.length - 1, i + 5); j++) {
+    // Văn dài/danh sách mua nhiều món có thể đặt câu thanh toán tận cuối cảnh.
+    // Quét hết phần còn lại của lượt thay vì giới hạn cứng năm câu.
+    for (let j = i + 1; j < lines.length; j++) {
       const paymentLine = lines[j]
       if (completedActionClause(paymentLine, verbs)) {
         count += 1
@@ -430,20 +445,23 @@ function proseSupportsItemChange(text, entry) {
   if (qty <= 0 || !target) return false
 
   const lines = storySentences(text)
+  const wholeTransaction = hasAny(text, SHOP_SELECT_ITEM)
+    && storySentences(text).some((line) => hasAny(line, [...SHOP_PAYMENT_COMPLETE, ...SHOP_PACK_COMPLETE])
+      && !hasFutureOrConditional(line) && !hasNegation(line))
   return lines.some((line, index) => {
-    if (!mentions(line, target)) return false
+    if (!mentionsLoose(line, target)) return false
     // Danh sách mua hàng trong hội thoại thường chỉ có động từ ở câu đầu,
     // hoặc “Escape Rope đúng không? Đóng gói năm cuộn.” tách target và số
     // lượng sang hai câu kề nhau.
     const selection = lines.slice(Math.max(0, index - 2), index + 2).join(' ')
-    if (!hasAny(selection, SHOP_SELECT_ITEM)) return false
+    if (!hasAny(selection, SHOP_SELECT_ITEM) && !wholeTransaction) return false
     const declarativeLine = line.replace(/đúng\s+không\s*[?？]?/giu, '')
     if (hasFutureOrConditional(declarativeLine) || hasNegation(declarativeLine)) return false
-    if (Math.abs(qty) > 1 && !containsFormattedNumber(selection, qty)) return false
+    if (Math.abs(qty) > 1 && !containsFormattedNumber(selection, qty) && !containsFormattedNumber(line, qty)) return false
     const laterLines = lines.slice(index)
     const packedAll = laterLines.some((later) => hasAny(later, SHOP_PACK_COMPLETE)
       && !hasFutureOrConditional(later) && !hasNegation(later))
-    const paidSoon = laterLines.slice(0, 10).some((later) => hasAny(later, SHOP_PAYMENT_COMPLETE)
+    const paidSoon = laterLines.some((later) => hasAny(later, SHOP_PAYMENT_COMPLETE)
       && !hasFutureOrConditional(later) && !hasNegation(later))
     return packedAll || paidSoon
   })
@@ -577,7 +595,8 @@ function hungerEvidence(line, entry, playerName, partyNames) {
 }
 
 export function proseSupportsMove(text, place = '') {
-  return Boolean(place) && sentenceEvidence(text, place, MOVE)
+  if (!place || !mentionsLoose(text, place)) return false
+  return storySentences(text).some((line) => Boolean(completedActionClause(line, MOVE)))
 }
 
 /** Chỉ trả lại tag có bằng chứng trong CHÍNH VĂN người chơi nhìn thấy. */
@@ -597,14 +616,20 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
       || proseSupportsMysteryBallReveal(prose, entry.species, options)
     if (!ok) reject(rejected, 'pokemon', entry, `chính văn chưa xác nhận người chơi nhận ${entry.species}`)
     return ok
-  })
+  }).map((entry) => ({
+    ...entry,
+    // Chính văn là canon cao nhất; tag cũ không có gender vẫn được làm giàu,
+    // tag ghi sai cũng không thể lật “Espurr giống cái” thành giống đực.
+    gender: inferPokemonGenderFromStory(prose, entry.species)
+      ?? normalizePokemonGender(entry.gender),
+  }))
   next.levels = (parsed?.levels ?? []).filter((entry) => {
     const ok = sentenceEvidence(prose, entry.target, LEVEL_UP, { allowGeneric: true })
     if (!ok) reject(rejected, 'level', entry, `chính văn chưa xác nhận ${entry.target} tăng cấp trực tiếp`)
     return ok
   })
   next.evolutions = (parsed?.evolutions ?? []).filter((entry) => {
-    const ok = linkedSentenceEvidence(prose, [entry.from, entry.to], EVOLVE, { maxDistance: 1 })
+    const ok = linkedSentenceEvidence(prose, [entry.from, entry.to], EVOLVE)
     if (!ok) reject(rejected, 'evolve', entry, `chính văn chưa xác nhận ${entry.from} đã tiến hoá thành ${entry.to}`)
     return ok
   })
@@ -677,7 +702,10 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     next.dateAdvance = 0
   }
   if (parsed?.datePart) {
-    const ok = linkedSentenceEvidence(prose, parsed.datePart, [...TIME_TRANSITION, ...TIME_PASS], { maxDistance: 1 })
+    // “gần trưa”, metadata “Buổi trưa”, “nắng trưa” đều đã xác lập buổi hiện
+    // tại; không bắt văn phải có đúng cụm máy móc “chuyển sang buổi trưa”.
+    const ok = mentionsLoose(prose, parsed.datePart)
+      || linkedSentenceEvidence(prose, parsed.datePart, [...TIME_TRANSITION, ...TIME_PASS])
     if (!ok) {
       reject(rejected, 'date', { part: parsed.datePart }, `chính văn chưa xác nhận đã chuyển sang buổi ${parsed.datePart}`)
       next.datePart = null
@@ -691,7 +719,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     }
   }
   next.npcs = (parsed?.npcs ?? []).filter((entry) => {
-    const ok = mentions(prose, entry.name)
+    const ok = mentionsLoose(prose, entry.name)
     if (!ok) reject(rejected, 'npc', entry, `NPC ${entry.name} không xuất hiện trong chính văn`)
     return ok
   })
@@ -699,13 +727,12 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     const keys = String(entry.key ?? '').split(',').map((key) => key.trim()).filter(Boolean)
     const contentTokens = words(entry.text).filter((token) => token.length >= 4)
     const overlap = contentTokens.filter((token) => phraseRegex(token)?.test(fold(prose))).length
-    const requiredOverlap = contentTokens.length <= 2 ? contentTokens.length : Math.min(3, Math.max(1, Math.ceil(contentTokens.length * 0.25)))
-    const ok = keys.some((key) => mentions(prose, key)) && overlap >= requiredOverlap
+    const ok = keys.some((key) => mentionsLoose(prose, key)) || overlap >= 1
     if (!ok) reject(rejected, 'fact', entry, 'nội dung FACT chưa được chính văn xác nhận đủ rõ')
     return ok
   })
   next.badges = (parsed?.badges ?? []).filter((entry) => {
-    const ok = linkedSentenceEvidence(prose, entry.name, ['huy hiệu', 'badge', 'trao', 'nhận được', 'được tặng'], { maxDistance: 1 })
+    const ok = linkedSentenceEvidence(prose, entry.name, ['huy hiệu', 'badge', 'trao', 'nhận được', 'được tặng'])
     if (!ok) reject(rejected, 'badge', entry, `chính văn chưa xác nhận đã được trao huy hiệu ${entry.name}`)
     return ok
   })
@@ -714,7 +741,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     const actions = entry.status === 'completed' ? ['hoàn thành', 'đã xong', 'thành công', 'bàn giao']
       : entry.status === 'failed' ? ['thất bại', 'không kịp', 'nhiệm vụ hỏng']
         : ['nhiệm vụ', 'giao việc', 'nhờ', 'nhận lời', 'chấp nhận', 'mục tiêu']
-    const ok = linkedSentenceEvidence(prose, target, actions, { maxDistance: 1 })
+    const ok = linkedSentenceEvidence(prose, target, actions)
     if (!ok) reject(rejected, 'quest', entry, `chính văn chưa xác nhận cập nhật nhiệm vụ ${entry.title}`)
     return ok
   })
@@ -733,7 +760,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
   next.legendaryAccess = (parsed?.legendaryAccess ?? []).filter((entry) => {
     const eventOk = linkedSentenceEvidence(prose, entry.species,
       ['triệu hồi', 'đáp lại', 'thức tỉnh', 'hiện thân', 'xuất hiện', 'cánh cổng', 'nghi thức', 'di vật'],
-      { maxDistance: 1 })
+       { maxDistance: 12 })
     const reasonOk = !entry.reason || words(entry.reason).filter((token) => token.length >= 4)
       .some((token) => phraseRegex(token)?.test(fold(prose)))
     const ok = Boolean(eventOk && reasonOk && legendaryContextIsValid(entry, prose, options))

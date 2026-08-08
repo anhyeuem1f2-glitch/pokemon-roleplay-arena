@@ -2782,3 +2782,43 @@ Bản full được đóng tên **`pokemon-new.zip`** để có thể giải né
 ### File bàn giao đợt 101
 
 Bản full tiếp tục đóng đúng tên **`pokemon-new.zip`** để giải nén và ghi đè trực tiếp dự án hiện tại. Không đưa `.git` hoặc `node_modules` vào ZIP.
+
+## Cập nhật (đợt 102) — cập nhật biến mật độ cao, scan phân mảnh và State Audit v4
+
+**KHÔNG CÓ TRẦN 4–5 BIẾN TRONG MỘT LƯỢT.** Parser `storyStateProtocol` tiếp tục nhận toàn bộ operation tìm thấy; regression mới ép một lượt chứa 30 tag ITEM và giữ đủ 30. Lỗi beta khi 1–2 biến thường chạy nhưng từ 4–5 biến trở lên dễ rớt được xác định chủ yếu ở tầng State API: quá nhiều proposal từng phải nằm trong một JSON duy nhất, evidence quote phải khớp tuyệt đối, và mỗi slot API chỉ có một lượt quét rộng. Càng nhiều sự kiện, xác suất model bỏ sót, quote lệch hoặc response JSON bị cắt/hỏng càng tăng dù parser phía app không hề có giới hạn năm biến.
+
+**THÊM KẾ HOẠCH QUÉT THÍCH ỨNG.** Lượt nhẹ vẫn giữ 1–2 pass rộng để không tốn API vô ích. Khi app ước lượng có từ bốn thay đổi trở lên từ tag hoặc dấu hiệu ngữ nghĩa trong chính văn, pipeline tự mở thêm bốn shard độc lập: `Kinh tế & vật phẩm`, `Pokémon & sinh hoạt`, `Xã hội & thế giới`, `Tiến trình & ký ức`. Mỗi shard vẫn được phép trả không giới hạn proposal trong nhóm của nó; đây là chia tải chú ý/context, không phải chia quota biến. Sau mỗi shard, chỉ operation thực sự commit mới được nhập vào ledger rồi truyền sang shard sau, nên pass sau chỉ bổ sung phần thiếu và không cộng trùng.
+
+**JSON STATE_PATCH HỎNG KHÔNG CÒN KÉO CHẾT CẢ BATCH.** Nếu provider trả JSON có dấu phẩy thừa, bị cắt ở cuối hoặc thiếu closing tag, parser cứu từng object `{tag,evidence}` đã hoàn chỉnh trước điểm lỗi. Tag cứu được vẫn bắt buộc đi qua `validateStateAgainstProse(displayText)` như bình thường; không có đường bypass validator. Với batch nhỏ, evidence hallucination vẫn fail-closed như đợt 99. Với batch lớn hoặc response malformed, quote bị lệch nhẹ không còn làm mất candidate ngay tại cổng string-match mà được chuyển xuống semantic validator của app để quyết định bằng chính canon.
+
+**FOCUSED PASS DÙNG SNAPSHOT THEO DOMAIN.** Pass kinh tế chỉ cần tiền/túi đồ, pass Pokémon chỉ cần party/PC, pass thế giới chỉ cần vị trí; pass tiến trình không phải kéo theo toàn bộ inventory/PC. Điều này giảm độ dài prompt khi save đã lớn mà không cắt bất kỳ state operation nào trong lượt. Max output cho State API cũng được nâng lên để giảm nguy cơ response nhiều proposal bị truncate.
+
+**MỘT LỖI PREVIEW THẾ GIỚI KHÔNG ĐƯỢC PHÉP GIẾT CÁC BIẾN KHÁC.** Bản xem trước `worldProgress` trong `applyParsedState` nay có fail-safe riêng. Nếu một directive tiến trình bất thường ném exception, app giữ snapshot world cũ và vẫn tiếp tục xử lý LEVEL/ITEM/POKEMON/HUNGER/NPC/... độc lập thay vì làm cả batch biến dừng giữa chừng.
+
+**QUÉT LẠI BIẾN THẬT DÙNG CÙNG CƠ CHẾ.** Nút reroll state không còn là pipeline yếu hơn quét nền: nó dùng cùng adaptive plan, cùng shard, cùng ledger, cùng evidence/semantic validator và cùng Money Reconciler. Vì vậy một lượt cũ có nhiều thay đổi có thể được quét phục hồi theo từng nhóm thay vì lại ép tất cả vào một response.
+
+**STATE AUDIT v4 CHO BIẾT LỖI NẰM Ở PASS NÀO.** Viewer 🧬 hiển thị focus của từng pass, số proposal, số được commit, parser reject, quote-anchor fallback, response có bị malformed hay đã salvage hay không. Danh sách giao dịch MONEY trong audit không còn chỉ hiện năm dòng đầu. Tester có thể phân biệt rõ “AI không đề xuất”, “JSON bị cắt”, “quote lệch nhưng semantic validator nhận”, và “validator/apply bác” thay vì chỉ báo chung là cập nhật biến lỗi.
+
+**Kiểm tra đợt 102:** regression đợt 73, 74, 99, 100 và 101 tiếp tục được giữ. `test-dot102.mjs` bổ sung 15 ca cho batch mật độ cao: 30 tag không bị cắt, 12 proposal structured, batch ≥4 có quote lệch vẫn xuống semantic validator, batch nhỏ vẫn fail-closed, JSON trailing-comma/truncated được salvage, lượt ≥4 tự mở bốn shard, detection từ chính văn không cần tag, danh sách sáu item được validate độc lập, cả quét nền/reroll dùng adaptive plan, State Audit v4, fail-safe world preview và snapshot theo domain.
+
+### File bàn giao đợt 102
+
+Bản full đóng tên **`pokemon-new.zip`** và bên trong có đúng một thư mục gốc **`pokemon-new/`**. Giải nén ZIP trực tiếp vào `D:\` sẽ tạo/ghi đè `D:\pokemon-new\`. Không đưa `.git` hoặc `node_modules` vào ZIP.
+
+## Cập nhật (đợt 103) — nối sprite/model Shiny thật vào toàn bộ UI
+
+**POKÉMON SHINY KHÔNG CÒN DÙNG SPRITE MÀU THƯỜNG.** `MonAvatar` nay đọc trực tiếp `mon.shiny` và ưu tiên kho sprite Shiny thật của Pokémon Showdown: `ani-shiny` cho góc nhìn trước, `ani-back-shiny` cho Pokémon phe người chơi trong battle, sau đó `home-shiny` và `dex-shiny`. Chỉ khi toàn bộ asset Shiny ứng với đúng form/giới tính không tải được mới fallback sang chuỗi sprite thường. Đây là fallback hình ảnh, không thay đổi cờ `shiny` của cá thể.
+
+**FORM VÀ GIỚI TÍNH ĐƯỢC GIỮ KHI TÌM SHINY.** Pokémon có sprite cái riêng thử hậu tố `-f` ở toàn bộ kho Shiny trước, rồi mới thử Shiny chung của loài; app không được rơi sang sprite female thường trước khi thử hết Shiny. Các form như regional/Mega/Gmax tiếp tục dùng `spriteId` hiện tại nên đường dẫn Shiny giữ nguyên form thay vì tự trở về base species.
+
+**MỌI NƠI DÙNG CÙNG SPRITE RESOLVER.** Pokémon Summary, party HUD, battle đơn, battle đôi, Combat Anime, Safari, Move Learn, Pokédex preview và màn Dev vốn dùng `MonAvatar` nên tự nhận Shiny. Màn PC/PokéCenter trước đây tự ghép URL `home/` màu thường đã được chuyển sang `MonAvatar`, chấm dứt nhánh UI riêng làm mất màu Shiny. Battle/Safari/party/Summary cũng có ký hiệu `✨` để người test nhận ra state Shiny ngay cả khi sprite ngoài mạng đang fallback.
+
+**ĐỔI SHINY TẠI RUNTIME RESET FALLBACK.** `mon.shiny` được thêm vào dependency của sprite component. Khi Admin/test/migration đổi một cá thể từ thường sang Shiny mà species không đổi, component bắt đầu lại từ candidate Shiny số 0 thay vì giữ index fallback cũ.
+
+**PERSISTENCE KHÔNG ĐỔI NGUỒN SỰ THẬT.** Cờ `shiny` vẫn nằm trên chính cá thể và tiếp tục được giữ bởi identity/migration/evolution hiện có; đợt 103 chỉ thống nhất cách render, không reroll Shiny và không cho lời kể đổi một cá thể thường thành Shiny giữa chừng.
+
+**Kiểm tra đợt 103:** `test-dot103.mjs` có 8 ca cho normal/shiny, front/back shiny, female shiny, form regional, tránh `-f-f`, sanitize slug và mon rỗng. Regression cũ tiếp tục được chạy cùng syntax/JSX parse trước khi đóng gói.
+
+### File bàn giao đợt 103
+
+Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đúng một thư mục gốc **`pokemon-new/`**, để giải nén trực tiếp vào `D:\\` và ghi đè `D:\\pokemon-new\\`.

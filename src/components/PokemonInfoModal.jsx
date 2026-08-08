@@ -34,7 +34,7 @@ function PartyEntry({ mon, selected, onClick }) {
     <button className={`summary-party__entry ${selected ? 'is-selected' : ''}`} onClick={onClick} type="button">
       <span className="summary-party__sprite"><MonAvatar mon={mon} side="enemy" /></span>
       <span className="summary-party__copy">
-        <strong>{mon.name} <span aria-label={genderLabel(mon.gender)}>{genderSymbol(mon.gender)}</span></strong>
+        <strong>{mon.name} {mon.shiny && <span title="Shiny" aria-label="Shiny">✨</span>} <span aria-label={genderLabel(mon.gender)}>{genderSymbol(mon.gender)}</span></strong>
         <span>Lv.{mon.level}{mon.status ? ` · ${mon.status}` : ''}</span>
         <span className="summary-party__hp"><i style={{ width: `${pct(mon.hp, mon.maxHp)}%` }} /></span>
         <small>{mon.hp}/{mon.maxHp}</small>
@@ -107,7 +107,7 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
           <header className="pokemon-summary__header">
             <div>
               <div className="pokemon-summary__eyebrow">POKÉMON SUMMARY</div>
-              <h2 id="pokemon-summary-title">{current.name} <b title={genderLabel(current.gender)}>{genderSymbol(current.gender)}</b> <span>Lv.{current.level}</span></h2>
+              <h2 id="pokemon-summary-title">{current.name} {current.shiny && <em className="summary-shiny-badge" title="Pokémon Shiny">✨ SHINY</em>} <b title={genderLabel(current.gender)}>{genderSymbol(current.gender)}</b> <span>Lv.{current.level}</span></h2>
               <div className="pokemon-summary__types">{(current.types ?? []).map((type) => <TypeBadge key={type} type={type} />)}</div>
             </div>
             <button className="pokemon-summary__close" onClick={onClose} type="button">Đóng</button>

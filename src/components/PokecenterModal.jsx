@@ -3,6 +3,7 @@ import { useGame } from '../context/GameContext.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { POKECENTER_TRACK_KEYS } from '../data/musicTracks.js'
 import { isSameMon } from '../data/pokemonSpecies.js'
+import MonAvatar from './MonAvatar.jsx'
 
 // ============ TRUNG TÂM POKÉMON (đợt 71) ============
 // Từ đợt này máu KHÔNG còn tự hồi sau trận, nên phải có chỗ chữa trị thật.
@@ -12,10 +13,6 @@ import { isSameMon } from '../data/pokemonSpecies.js'
 // Nhạc pokecenter được push khi mở và pop khi đóng.
 
 const BALL_SPIN_MS = 2600
-
-function spriteUrl(mon) {
-  return `https://play.pokemonshowdown.com/sprites/home/${String(mon.spriteId ?? mon.species).replace(/[^a-z0-9-]/g, '')}.png`
-}
 
 /** Quả Poké Ball vẽ bằng SVG — dùng cho animation máy hồi phục. */
 function Ball({ size = 34, delay = 0, spinning }) {
@@ -78,17 +75,15 @@ function MonSlot({ mon, from, index, onDragStart, onDrop, selected, onClick, emp
         opacity: fainted ? 0.55 : 1,
       }}
     >
-      <img
-        src={spriteUrl(mon)}
-        alt={mon.name}
-        draggable={false}
-        style={{ width: '72%', height: '56%', objectFit: 'contain', filter: fainted ? 'grayscale(1)' : 'none' }}
-        onError={(e) => {
-          e.currentTarget.outerHTML = `<span style="font-size:15px;color:var(--text-mid)">${mon.name[0]}</span>`
-        }}
+      <MonAvatar
+        mon={mon}
+        side="enemy"
+        size={54}
+        title={`${mon.name}${mon.shiny ? ' · Shiny' : ''}`}
+        style={{ maxWidth: '72%', maxHeight: '56%', filter: fainted ? 'grayscale(1)' : 'none' }}
       />
       <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)', lineHeight: 1.3 }}>
-        Lv{mon.level}
+        {mon.shiny ? '✨ ' : ''}Lv{mon.level}
       </span>
       <div style={{ width: '80%', height: 3, borderRadius: 999, background: 'var(--bg-panel)', overflow: 'hidden', marginTop: 1 }}>
         <div

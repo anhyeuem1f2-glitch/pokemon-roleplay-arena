@@ -238,7 +238,7 @@ export default function PlayerHUD({ mobile = false }) {
                 <>
                   <MonAvatar mon={mon} side="enemy" size={44} />
                   <span style={{ fontSize: 8.5, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
-                    {genderSymbol(mon.gender)} · Lv{mon.level}
+                    {mon.shiny ? '✨ · ' : ''}{genderSymbol(mon.gender)} · Lv{mon.level}
                   </span>
                   {/* Đợt 71: máu KHÔNG còn tự hồi sau trận nữa, nên đội hình
                       phải nhìn thấy được con nào đang thương tích — không thì

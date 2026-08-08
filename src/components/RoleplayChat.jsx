@@ -28,6 +28,7 @@ import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
 import { validateStateAgainstProse, describeRejectedState, proseSupportsMove, proseSupportsMysteryBallReveal, reconcileMoneyDirectives } from '../utils/stateEvidence.js'
+import { buildStateScanPlan } from '../utils/stateScanPlan.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
@@ -637,8 +638,9 @@ export default function RoleplayChat() {
   // API phụ chạy trễ phải kiểm tra tin gốc vẫn còn và chưa bị sửa/reroll.
   // Nếu không, nó có thể áp biến từ một nhánh truyện người chơi đã xoá.
   const latestMessagesRef = useRef(messages)
-  // Đợt 77: khi không có slot API cập nhật biến riêng, luân phiên API phụ 1/2
-  // đang rảnh thay vì dồn mọi lượt vào API chính. Mỗi lượt chỉ gọi MỘT API.
+  // Đợt 77/102: khi không có slot API cập nhật biến riêng, luân phiên API
+  // phụ đang rảnh. Lượt mật độ cao có thể chạy nhiều pass độc lập trên cùng
+  // provider; ledger giữa các pass ngăn áp trùng.
   const stateApiRoundRobinRef = useRef(0)
   const actionChoiceApiRoundRobinRef = useRef(0)
   const stateScanLocksRef = useRef(new Set())
@@ -648,6 +650,32 @@ export default function RoleplayChat() {
   useEffect(() => { latestInventoryRef.current = inventory }, [inventory])
   useEffect(() => { latestPlayerLocationRef.current = playerLocation }, [playerLocation])
   useEffect(() => { latestMessagesRef.current = messages }, [messages])
+
+  // Đợt 102: pass chuyên môn không cần kéo theo toàn bộ snapshot không liên
+  // quan. Tách snapshot theo focus giúp prompt ngắn và ổn định hơn khi save
+  // đã có PC/túi đồ lớn; đây là tối ưu CONTEXT, tuyệt đối không cắt số biến
+  // được phép cập nhật trong chính văn.
+  function buildStateScanSnapshot(focus, moneyValue) {
+    const focusId = focus?.id ?? null
+    const snapshot = {}
+    if (!focusId || focusId === 'economy') {
+      snapshot.money = Number(moneyValue) || 0
+      snapshot.inventory = (latestInventoryRef.current ?? []).map((item) => ({
+        id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite),
+      }))
+    }
+    if (!focusId || focusId === 'pokemon') {
+      snapshot.party = (latestPartyRef.current ?? []).map((mon) => ({
+        uid: mon.uid, name: mon.name, species: mon.species, level: mon.level,
+        friendship: mon.friendship, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+      }))
+      snapshot.pc = (latestPcBoxRef.current ?? []).map((mon) => ({
+        uid: mon.uid, name: mon.name, species: mon.species, level: mon.level,
+      }))
+    }
+    if (!focusId || focusId === 'world') snapshot.location = latestPlayerLocationRef.current
+    return Object.keys(snapshot).length ? snapshot : null
+  }
   // Save từ các bản trước chưa có IndexedDB exact: chép nền một lần ngay khi
   // vào màn chơi. Không chờ embedding và không chặn giao diện.
   useEffect(() => {
@@ -829,7 +857,17 @@ export default function RoleplayChat() {
     // Cho phép một lượt hợp lệ vừa hoàn tất nghi thức, vừa gặp/thuyết phục
     // huyền thoại. Dùng bản tiến trình dự kiến đã qua evidence thay vì closure
     // worldProgress cũ chưa kịp rerender.
-    const prospectiveWorldProgress = applyWorldDirectives(worldProgress, parsed, { mode: storyTone, turn: turnNow, date: storyDate })
+    let prospectiveWorldProgress = worldProgress
+    try {
+      prospectiveWorldProgress = applyWorldDirectives(worldProgress, parsed, { mode: storyTone, turn: turnNow, date: storyDate })
+    } catch (worldPreviewError) {
+      // Đợt 102: preview chỉ phục vụ cổng encounter/legendary trong CÙNG lượt.
+      // Một directive world lỗi tuyệt đối không được làm chết LEVEL/ITEM/POKEMON
+      // và các biến độc lập khác của cả batch. Commit world thật vẫn có validator
+      // riêng ở phía dưới; ở đây giữ snapshot trước lượt và cho pipeline tiếp tục.
+      console.warn('[state] preview world-progress lỗi, giữ snapshot hiện tại:', worldPreviewError.message)
+      report.lines.push(`⚠ Preview tiến trình thế giới lỗi; các biến độc lập vẫn tiếp tục: ${worldPreviewError.message}`)
+    }
 
     function replacePreviewMon(identity, transform) {
       if (previewActive && monIdentityMatches(previewActive, identity)) previewActive = transform(previewActive)
@@ -1785,7 +1823,7 @@ export default function RoleplayChat() {
         presetUiVariables: extractPresetUiVariables(reply),
         blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
         stateAudit: {
-          version: 3,
+          version: 4,
           canon: 'displayText',
           deterministicMoney: {
             detected: moneyReconcile.transactions.length,
@@ -1909,38 +1947,53 @@ export default function RoleplayChat() {
         stateApiRoundRobinRef.current += 1
       }
       if (stateCfgs.some((cfg) => cfg?.baseUrl && cfg?.model)) {
+        // Đợt 102: lượt ít biến giữ 1-2 pass rộng như cũ. Lượt có mật độ
+        // state cao tự mở thêm các shard chuyên môn. Mỗi shard KHÔNG có giới
+        // hạn số proposal; mục đích chỉ là giảm tải chú ý/JSON cho model.
+        const scanPlan = buildStateScanPlan({
+          storyText: displayText,
+          explicitOperationCount: countParsedStateOperations(stateParsed) + finalEvidenceCheck.rejected.length,
+          broadPasses: stateCfgs.length > 1 ? 2 : 1,
+        })
         stateScanLocksRef.current.add(turnMessageId)
         scheduleIdleStateTask(async () => {
           let scanLedger = turnAppliedManifest
           try {
-            for (let scanIndex = 0; scanIndex < stateCfgs.length; scanIndex += 1) {
-              const stateCfg = stateCfgs[scanIndex]
+            for (let scanIndex = 0; scanIndex < scanPlan.length; scanIndex += 1) {
+              const passSpec = scanPlan[scanIndex]
+              const stateCfg = stateCfgs[scanIndex % stateCfgs.length]
               if (!stateCfg?.baseUrl || !stateCfg?.model) continue
               let extraTagsText = ''
+              let scanResult = null
+              let passAuditBase = null
               try {
-                const scanResult = await extractMissingStateTags(stateCfg, {
+                scanResult = await extractMissingStateTags(stateCfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   appliedTags: scanLedger,
                   hasPokemon: Boolean(latestPlayerMonRef.current) || (stateParsed.pokemons ?? []).length > 0,
                   contextNote: identityContext,
-                  stateSnapshot: {
-                    money: (Number(playerProfile?.money) || 0) + (Number(scanLedger?.money) || 0),
-                    party: (latestPartyRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null })),
-                    pc: (latestPcBoxRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level })),
-                    inventory: (latestInventoryRef.current ?? []).map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
-                    location: latestPlayerLocationRef.current,
-                  },
-                  scanMode: scanIndex === 0 ? 'extractor' : 'auditor',
+                  stateSnapshot: buildStateScanSnapshot(
+                    passSpec.focus,
+                    (Number(playerProfile?.money) || 0) + (Number(scanLedger?.money) || 0),
+                  ),
+                  scanMode: passSpec.role,
+                  focus: passSpec.focus,
                   returnDetails: true,
                 })
                 extraTagsText = scanResult?.tagsText ?? ''
-                const passAuditBase = {
+                passAuditBase = {
                   pass: scanIndex + 1,
-                  role: scanIndex === 0 ? 'extractor' : 'auditor',
-                  evidenceAnchored: Boolean(scanResult?.structured),
+                  role: passSpec.role,
+                  focus: passSpec.focus?.label ?? null,
+                  evidenceAnchored: Boolean(scanResult?.structured && !(scanResult?.evidenceFallbackCount ?? 0)),
+                  structured: Boolean(scanResult?.structured),
+                  malformed: Boolean(scanResult?.malformed),
+                  salvaged: Boolean(scanResult?.salvaged),
                   proposed: scanResult?.proposedCount ?? (extraTagsText ? countParsedStateOperations(parseStoryStateTags(extraTagsText)) : 0),
+                  anchorFallback: scanResult?.evidenceFallbackCount ?? 0,
                   evidenceRejected: scanResult?.evidenceRejected ?? 0,
+                  parserRejected: scanResult?.hardRejected ?? 0,
                 }
                 if (!extraTagsText) {
                   setMessages((msgs) => msgs.map((message) => message.id === turnMessageId ? {
@@ -1949,7 +2002,11 @@ export default function RoleplayChat() {
                       ...(message.meta ?? {}),
                       stateAudit: {
                         ...(message.meta?.stateAudit ?? turnMeta.stateAudit),
-                        passes: [...(message.meta?.stateAudit?.passes ?? []), { ...passAuditBase, accepted: 0, rejected: passAuditBase.evidenceRejected ?? 0 }],
+                        passes: [...(message.meta?.stateAudit?.passes ?? []), {
+                          ...passAuditBase,
+                          accepted: 0,
+                          rejected: passAuditBase.parserRejected ?? 0,
+                        }],
                       },
                     },
                   } : message))
@@ -1957,6 +2014,25 @@ export default function RoleplayChat() {
                 }
               } catch (scanError) {
                 console.warn(`[state-api-${scanIndex + 1}] bỏ qua:`, scanError.message)
+                setMessages((msgs) => msgs.map((message) => message.id === turnMessageId ? {
+                  ...message,
+                  meta: {
+                    ...(message.meta ?? {}),
+                    stateAudit: {
+                      ...(message.meta?.stateAudit ?? turnMeta.stateAudit),
+                      passes: [...(message.meta?.stateAudit?.passes ?? []), {
+                        pass: scanIndex + 1,
+                        role: passSpec.role,
+                        focus: passSpec.focus?.label ?? null,
+                        evidenceAnchored: false,
+                        proposed: 0,
+                        accepted: 0,
+                        rejected: 0,
+                        error: scanError.message,
+                      }],
+                    },
+                  },
+                } : message))
                 continue
               }
               const sourceMessage = latestMessagesRef.current.find((message) => message.id === turnMessageId)
@@ -1998,7 +2074,7 @@ export default function RoleplayChat() {
                 latestPlayerLocationRef.current = extraMovedTo
                 setPlayerLocation(extraMovedTo)
               }
-              const extraLines = describeParsedChanges(extra, extraMovedTo, `(AI soi biến ${scanIndex + 1})`, extraApplyReport)
+              const extraLines = describeParsedChanges(extra, extraMovedTo, `(AI soi biến ${scanIndex + 1}${passSpec.focus ? ` · ${passSpec.focus.label}` : ''})`, extraApplyReport)
               scanLedger = mergeStateManifests(scanLedger, extraLedger)
               if (extraLines.length || extra.shops?.length || extra.pokecenter || extraTagsText.trim()) {
                 setMessages((msgs) => {
@@ -2019,7 +2095,9 @@ export default function RoleplayChat() {
                         passes: [...(current.meta?.stateAudit?.passes ?? []), {
                           ...passAuditBase,
                           accepted: countParsedStateOperations(extraLedger),
-                          rejected: (passAuditBase.evidenceRejected ?? 0) + extraEvidence.rejected.length,
+                          rejected: (passAuditBase?.parserRejected ?? 0)
+                            + extraEvidence.rejected.length
+                            + Math.max(0, countParsedStateOperations(extra) - countParsedStateOperations(extraLedger)),
                         }],
                       },
                     },
@@ -2097,8 +2175,14 @@ export default function RoleplayChat() {
 
       const rerollAuditPasses = []
       let messagePatch = {}
-      for (let scanIndex = 0; scanIndex < cfgs.length; scanIndex += 1) {
-        const cfg = cfgs[scanIndex]
+      const rerollPlan = buildStateScanPlan({
+        storyText,
+        explicitOperationCount: countParsedStateOperations(applied),
+        broadPasses: cfgs.length > 1 ? 2 : 1,
+      })
+      for (let scanIndex = 0; scanIndex < rerollPlan.length; scanIndex += 1) {
+        const passSpec = rerollPlan[scanIndex]
+        const cfg = cfgs[scanIndex % cfgs.length]
         if (!cfg?.baseUrl || !cfg?.model) continue
         let tagsText = ''
         let scanResult = null
@@ -2109,22 +2193,18 @@ export default function RoleplayChat() {
             appliedTags: applied,
             hasPokemon: Boolean(latestPlayerMonRef.current) || (applied.pokemons ?? []).length > 0,
             contextNote: identityContext,
-            stateSnapshot: {
-              money: Number(playerProfile?.money) || 0,
-              party: (latestPartyRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null })),
-              pc: (latestPcBoxRef.current ?? []).map((mon) => ({ uid: mon.uid, name: mon.name, level: mon.level })),
-              inventory: (latestInventoryRef.current ?? []).map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
-              location: latestPlayerLocationRef.current,
-            },
-            scanMode: scanIndex === 0 ? 'extractor' : 'auditor',
+            stateSnapshot: buildStateScanSnapshot(passSpec.focus, Number(playerProfile?.money) || 0),
+            scanMode: passSpec.role,
+            focus: passSpec.focus,
             returnDetails: true,
           })
           tagsText = scanResult?.tagsText ?? ''
         } catch (scanError) {
-          lines.push(`⚠ AI soi biến ${scanIndex + 1} lỗi: ${scanError.message}`)
+          lines.push(`⚠ AI soi biến ${scanIndex + 1}${passSpec.focus ? ` (${passSpec.focus.label})` : ''} lỗi: ${scanError.message}`)
           rerollAuditPasses.push({
             pass: scanIndex + 1,
-            role: scanIndex === 0 ? 'extractor' : 'auditor',
+            role: passSpec.role,
+            focus: passSpec.focus?.label ?? null,
             evidenceAnchored: false,
             proposed: 0,
             accepted: 0,
@@ -2136,14 +2216,20 @@ export default function RoleplayChat() {
         }
         const auditBase = {
           pass: scanIndex + 1,
-          role: scanIndex === 0 ? 'extractor' : 'auditor',
-          evidenceAnchored: Boolean(scanResult?.structured),
+          role: passSpec.role,
+          focus: passSpec.focus?.label ?? null,
+          evidenceAnchored: Boolean(scanResult?.structured && !(scanResult?.evidenceFallbackCount ?? 0)),
+          structured: Boolean(scanResult?.structured),
+          malformed: Boolean(scanResult?.malformed),
+          salvaged: Boolean(scanResult?.salvaged),
           proposed: scanResult?.proposedCount ?? (tagsText ? countParsedStateOperations(parseStoryStateTags(tagsText)) : 0),
+          anchorFallback: scanResult?.evidenceFallbackCount ?? 0,
           evidenceRejected: scanResult?.evidenceRejected ?? 0,
+          parserRejected: scanResult?.hardRejected ?? 0,
           reroll: true,
         }
         if (!tagsText?.trim()) {
-          rerollAuditPasses.push({ ...auditBase, accepted: 0, rejected: auditBase.evidenceRejected ?? 0 })
+          rerollAuditPasses.push({ ...auditBase, accepted: 0, rejected: auditBase.parserRejected ?? 0 })
           continue
         }
 
@@ -2175,11 +2261,13 @@ export default function RoleplayChat() {
           latestPlayerLocationRef.current = movedTo
           setPlayerLocation(movedTo)
         }
-        lines.push(...describeParsedChanges(extra, movedTo, `(quét lại ${scanIndex + 1})`, report))
+        lines.push(...describeParsedChanges(extra, movedTo, `(quét lại ${scanIndex + 1}${passSpec.focus ? ` · ${passSpec.focus.label}` : ''})`, report))
         rerollAuditPasses.push({
           ...auditBase,
           accepted: countParsedStateOperations(extraLedger),
-          rejected: (auditBase.evidenceRejected ?? 0) + evidence.rejected.length + Math.max(0, countParsedStateOperations(extra) - countParsedStateOperations(extraLedger)),
+          rejected: (auditBase.parserRejected ?? 0)
+            + evidence.rejected.length
+            + Math.max(0, countParsedStateOperations(extra) - countParsedStateOperations(extraLedger)),
         })
         if (extra.shops?.[0]) messagePatch = { ...messagePatch, shop: extra.shops[0], shopName: extra.shops[0].name, shopValidated: true }
         if (extra.pokecenter) messagePatch = { ...messagePatch, pokecenter: extra.pokecenter.name }
@@ -2195,7 +2283,7 @@ export default function RoleplayChat() {
           changes: [...(message.meta?.changes ?? []), ...lines],
           stateAudit: {
             ...(message.meta?.stateAudit ?? {}),
-            version: 3,
+            version: 4,
             canon: 'displayText',
             deterministicMoney: {
               detected: rerollMoney.transactions.length,

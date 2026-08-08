@@ -55,64 +55,165 @@ const STRUCTURED_OUTPUT = `
 </STATE_PATCH>
 - Mỗi proposal phải có đúng 1 tag và 1 evidence. evidence phải là đoạn TRÍCH NGUYÊN VĂN LIÊN TỤC từ CHÍNH VĂN lượt này, đủ để chứng minh sự kiện đã xảy ra; không được chép từ INPUT người chơi hay tự diễn giải. Có thể trích nhiều câu liên tiếp nếu sự kiện trải qua nhiều câu.
 - Nếu cùng một tag/delta xảy ra hai lần thật, xuất hai proposal với hai evidence khác nhau.
-- App sẽ loại proposal nếu evidence không tìm thấy trong chính văn.
+- evidence nên là đoạn ngắn nhất đủ chứng minh, ưu tiên 1-2 câu liên tục và không dài quá khoảng 260 ký tự để lượt nhiều biến không phình JSON.
+- App kiểm tra anchor nguyên văn trước, rồi vẫn bắt buộc chạy semantic validator theo chính văn; đừng dựa vào việc quote sai để lách validator.
 - Không markdown, không giải thích ngoài KHONG_CO hoặc khối <STATE_PATCH>.`
 
-function buildSystem(scanMode = 'extractor') {
+function buildSystem(scanMode = 'extractor', focus = null) {
   const role = scanMode === 'auditor'
     ? `VAI TRÒ LƯỢT NÀY — AUDITOR: coi TAG ĐÃ ÁP là ledger đã commit. Rà lại TỪ ĐẦU ĐẾN CUỐI chính văn theo checklist MONEY, REL, BODY, POKEMON, EVOLVE, LEVEL, FRIEND, ITEM, EQUIP/UNEQUIP, SHOP, LOOT, POKECENTER, HUNGER, DATE, TRAIN, MOVE, NPC, FACT, BADGE, QUEST, REP, WANTED, LEGENDARY_ACCESS, RIBBON/MARK. Chỉ đề xuất phần CÒN THIẾU; đặc biệt tìm các sự kiện diễn đạt gián tiếp/nhiều câu mà extractor trước có thể bỏ sót.`
     : `VAI TRÒ LƯỢT NÀY — EXTRACTOR: rà toàn bộ chính văn một lượt theo mọi loại state, ưu tiên độ bao phủ nhưng tuyệt đối không suy diễn ngoài điều đã hoàn tất trong văn.`
-  return `${BASE_SYSTEM}\n\n${role}\n${STRUCTURED_OUTPUT}`
+  const focusNote = focus?.types?.length
+    ? `\n\nTRỌNG TÂM PASS NÀY — ${focus.label ?? focus.id ?? 'nhóm biến'}: chỉ rà kỹ các loại ${focus.types.join(', ')}. Bỏ qua loại ngoài nhóm, vì pass khác chịu trách nhiệm. Trong nhóm này phải xuất ĐỦ mọi thay đổi còn thiếu, không dừng ở 1-2 proposal.`
+    : ''
+  return `${BASE_SYSTEM}\n\n${role}${focusNote}\n${STRUCTURED_OUTPUT}`
+}
+
+function normalizeEvidenceAnchor(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .toLocaleLowerCase('vi-VN')
+    .replace(/[“”„‟«»‹›"'`*_~>#|()[\]{}]/g, ' ')
+    .replace(/[—–−-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isValidStateTag(tag) {
+  return /^\[\[[\s\S]+\]\]$/.test(String(tag ?? '').trim())
+}
+
+// JSON do model sinh có thể hỏng ở dấu phẩy/ngoặc cuối khi response dài.
+// Cứu từng object proposal HOÀN CHỈNH thay vì vứt cả batch. Prompt cố định
+// thứ tự tag -> evidence, nên regex string-literal này đủ an toàn và vẫn giữ
+// escape JSON; candidate cứu được còn phải qua semantic validator của app.
+function salvageProposalObjects(raw) {
+  const source = String(raw ?? '')
+  const out = []
+  const re = /\{\s*"tag"\s*:\s*("(?:\\.|[^"\\])*")\s*,\s*"evidence"\s*:\s*("(?:\\.|[^"\\])*")\s*\}/g
+  let match
+  while ((match = re.exec(source)) !== null) {
+    try {
+      const tag = JSON.parse(match[1])
+      const evidence = JSON.parse(match[2])
+      out.push({ tag, evidence })
+    } catch {
+      // Một object lỗi không được kéo chết các object còn lại.
+    }
+  }
+  return out
+}
+
+function extractLooseTags(raw) {
+  return [...String(raw ?? '').matchAll(/\[\[[\s\S]*?\]\]/g)]
+    .map((match) => match[0].replace(/\s+/g, ' ').trim())
+    .filter(isValidStateTag)
+}
+
+function validatePatchProposals(proposals, storyText, { structured = true, malformed = false, salvaged = false } = {}) {
+  const haystack = normalizeEvidenceAnchor(storyText)
+  const accepted = []
+  let evidenceRejected = 0
+  let hardRejected = 0
+  let anchoredCount = 0
+
+  const allowSemanticFallback = malformed || (proposals ?? []).length >= 4
+  for (const proposal of proposals ?? []) {
+    const tag = String(proposal?.tag ?? '').replace(/\s+/g, ' ').trim()
+    const evidence = String(proposal?.evidence ?? '').trim()
+    if (!isValidStateTag(tag)) {
+      hardRejected += 1
+      continue
+    }
+    const needle = normalizeEvidenceAnchor(evidence)
+    const tokenCount = needle.split(/\s+/).filter(Boolean).length
+    const anchored = needle.length >= 8 && tokenCount >= 2 && haystack.includes(needle)
+    if (anchored) {
+      anchoredCount += 1
+      accepted.push({ tag, evidence, evidenceAnchored: true })
+      continue
+    }
+
+    evidenceRejected += 1
+    // Với batch nhỏ, giữ chốt fail-closed đợt 99: một proposal hallucination
+    // đơn lẻ không có quote thật bị loại ngay. Với batch >=4 hoặc JSON đã
+    // hỏng/truncated, quote lệch rất thường do model quá tải; lúc đó chỉ cứu
+    // TAG hoàn chỉnh và bắt buộc giao cho semantic validator kiểm tra tiếp.
+    if (allowSemanticFallback) accepted.push({ tag, evidence, evidenceAnchored: false })
+  }
+
+  return {
+    tagsText: accepted.length ? accepted.map((proposal) => proposal.tag).join('\n') : null,
+    proposals: accepted,
+    structured,
+    malformed,
+    salvaged,
+    proposedCount: (proposals ?? []).length,
+    evidenceRejected,
+    evidenceAnchoredCount: anchoredCount,
+    evidenceFallbackCount: Math.max(0, accepted.length - anchoredCount),
+    hardRejected,
+  }
 }
 
 export function parseStatePatchResponse(reply, storyText = '') {
   const text = (reply ?? '').trim()
-  if (!text || text === 'KHONG_CO') return { tagsText: null, proposals: [], structured: false, proposedCount: 0, evidenceRejected: 0 }
-
-  const block = text.match(/<STATE_PATCH>\s*([\s\S]*?)\s*<\/STATE_PATCH>/i)
-  if (block) {
-    try {
-      const payload = JSON.parse(block[1].trim())
-      const proposals = Array.isArray(payload?.proposals) ? payload.proposals : []
-      // Evidence anchor chịu được khác biệt trình bày vô hại (markdown, dấu
-      // ngoặc kép cong/thẳng, dash, xuống dòng), nhưng không chấp nhận diễn
-      // giải mới. Sau cổng này candidate vẫn phải qua semantic validator app.
-      const normalize = (value) => String(value ?? '')
-        .normalize('NFKC')
-        .toLocaleLowerCase('vi-VN')
-        .replace(/[“”„‟«»‹›"'`*_~>#|()[\]{}]/g, ' ')
-        .replace(/[—–−-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-      const haystack = normalize(storyText)
-      const accepted = []
-      for (const proposal of proposals) {
-        const tag = String(proposal?.tag ?? '').replace(/\s+/g, ' ').trim()
-        const evidence = String(proposal?.evidence ?? '').trim()
-        if (!/^\[\[[\s\S]+\]\]$/.test(tag)) continue
-        const needle = normalize(evidence)
-        const tokenCount = needle.split(/\s+/).filter(Boolean).length
-        if (needle.length < 8 || tokenCount < 2 || !haystack.includes(needle)) continue
-        accepted.push({ tag, evidence })
-      }
-      return {
-        tagsText: accepted.length ? accepted.map((proposal) => proposal.tag).join('\n') : null,
-        proposals: accepted,
-        structured: true,
-        proposedCount: proposals.length,
-        evidenceRejected: Math.max(0, proposals.length - accepted.length),
-      }
-    } catch (error) {
-      console.warn('[state-api] STATE_PATCH JSON lỗi, bỏ lượt scan này:', error.message)
-      return { tagsText: null, proposals: [], structured: true, malformed: true, proposedCount: 0, evidenceRejected: 0 }
+  if (!text || text === 'KHONG_CO') {
+    return {
+      tagsText: null, proposals: [], structured: false, proposedCount: 0,
+      evidenceRejected: 0, evidenceAnchoredCount: 0, evidenceFallbackCount: 0, hardRejected: 0,
     }
   }
 
-  // Tương thích provider/model cũ chưa theo format mới: chỉ nhận tag trần khi
-  // KHÔNG có marker STATE_PATCH. Candidate vẫn phải qua stateEvidence phía app.
-  const tagLines = [...text.matchAll(/\[\[[\s\S]*?\]\]/g)]
-    .map((match) => match[0].replace(/\s+/g, ' ').trim())
-  return { tagsText: tagLines.length ? tagLines.join('\n') : null, proposals: [], structured: false, proposedCount: tagLines.length, evidenceRejected: 0 }
+  const open = text.match(/<STATE_PATCH>\s*/i)
+  if (open) {
+    const bodyStart = (open.index ?? 0) + open[0].length
+    const tail = text.slice(bodyStart)
+    const closeAt = tail.search(/\s*<\/STATE_PATCH>/i)
+    const body = (closeAt >= 0 ? tail.slice(0, closeAt) : tail).trim()
+    try {
+      const payload = JSON.parse(body)
+      const proposals = Array.isArray(payload?.proposals) ? payload.proposals : []
+      return validatePatchProposals(proposals, storyText, { structured: true })
+    } catch (error) {
+      const salvaged = salvageProposalObjects(body)
+      if (salvaged.length) {
+        console.warn(`[state-api] STATE_PATCH JSON lỗi, đã cứu ${salvaged.length} proposal hoàn chỉnh:`, error.message)
+        return validatePatchProposals(salvaged, storyText, { structured: true, malformed: true, salvaged: true })
+      }
+
+      // Cuối cùng vẫn giữ các tag hoàn chỉnh đã sinh trước điểm JSON gãy.
+      // Không có evidence anchor nên semantic validator trở thành cổng bắt buộc.
+      const tags = extractLooseTags(body)
+      console.warn(`[state-api] STATE_PATCH JSON lỗi, fallback ${tags.length} tag hoàn chỉnh:`, error.message)
+      return {
+        tagsText: tags.length ? tags.join('\n') : null,
+        proposals: tags.map((tag) => ({ tag, evidence: '', evidenceAnchored: false })),
+        structured: true,
+        malformed: true,
+        salvaged: tags.length > 0,
+        proposedCount: tags.length,
+        evidenceRejected: tags.length,
+        evidenceAnchoredCount: 0,
+        evidenceFallbackCount: tags.length,
+        hardRejected: 0,
+      }
+    }
+  }
+
+  // Tương thích provider/model cũ chưa theo format mới: nhận mọi tag hoàn
+  // chỉnh rồi để semantic validator app quyết định. Không có giới hạn số tag.
+  const tagLines = extractLooseTags(text)
+  return {
+    tagsText: tagLines.length ? tagLines.join('\n') : null,
+    proposals: tagLines.map((tag) => ({ tag, evidence: '', evidenceAnchored: false })),
+    structured: false,
+    proposedCount: tagLines.length,
+    evidenceRejected: 0,
+    evidenceAnchoredCount: 0,
+    evidenceFallbackCount: tagLines.length,
+    hardRejected: 0,
+  }
 }
 
 /**
@@ -121,7 +222,7 @@ export function parseStatePatchResponse(reply, storyText = '') {
  * @param {{baseUrl,apiKey,model}} cfg
  * @param {{storyText: string, appliedTags: object, hasPokemon: boolean}} params
  */
-export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon, userText = '', contextNote = '', stateSnapshot = null, scanMode = 'extractor', returnDetails = false }) {
+export async function extractMissingStateTags(cfg, { storyText, appliedTags, hasPokemon, userText = '', contextNote = '', stateSnapshot = null, scanMode = 'extractor', focus = null, returnDetails = false }) {
   if (!storyText?.trim()) return null
   const applied = JSON.stringify(appliedTags)
   const user = [
@@ -140,9 +241,9 @@ export async function extractMissingStateTags(cfg, { storyText, appliedTags, has
   ].join('\n')
 
   const reply = await chatCompletion(cfg, [
-    { role: 'system', content: buildSystem(scanMode) },
+    { role: 'system', content: buildSystem(scanMode, focus) },
     { role: 'user', content: user },
-  ], { temperature: 0, maxTokens: 4096 })
+  ], { temperature: 0, maxTokens: 8192 })
 
   const result = parseStatePatchResponse(reply, storyText)
   return returnDetails ? result : result.tagsText

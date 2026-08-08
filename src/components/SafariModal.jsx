@@ -155,7 +155,7 @@ export default function SafariModal({ onClose, onSafariEnd }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--line)', borderRadius: 8, padding: 10, marginBottom: 8 }}>
           <MonAvatar mon={enemyMon} side="enemy" />
           <div>
-            <div style={{ fontWeight: 700 }}>{enemyMon.name} <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Lv{enemyMon.level}</span></div>
+            <div style={{ fontWeight: 700 }}>{enemyMon.shiny ? '✨ ' : ''}{enemyMon.name} <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Lv{enemyMon.level}</span></div>
             <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
               {enemyMon.types.map((t) => <TypeBadge key={t} type={t} />)}
             </div>

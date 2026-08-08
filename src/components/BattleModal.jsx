@@ -168,7 +168,7 @@ function StatusCard({ mon, align, stages }) {
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-        <strong style={{ fontSize: 13 }}>{mon.name}</strong>
+        <strong style={{ fontSize: 13 }}>{mon.shiny ? '✨ ' : ''}{mon.name}</strong>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-mid)' }}>
           Lv.{mon.level}
         </span>

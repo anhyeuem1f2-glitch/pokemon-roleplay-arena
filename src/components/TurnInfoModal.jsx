@@ -200,7 +200,7 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                           💰 Money reconciler: đọc được <b style={{ color: 'var(--mint)' }}>{stateAudit.deterministicMoney.detected ?? 0}</b> giao dịch canon
                           {(stateAudit.deterministicMoney.added ?? 0) > 0 ? <> · app tự bổ sung <b style={{ color: 'var(--mint)' }}>{stateAudit.deterministicMoney.added}</b> delta ({(stateAudit.deterministicMoney.deltas ?? []).map((value) => `${value > 0 ? '+' : ''}${value}`).join(', ')})</> : ' · không cần bổ sung'}
                         </div>
-                        {(stateAudit.deterministicMoney.transactions ?? []).slice(0, 5).map((tx, index) => (
+                        {(stateAudit.deterministicMoney.transactions ?? []).map((tx, index) => (
                           <div key={`money-${index}-${tx.delta}`} style={{ marginTop: 4, paddingLeft: 9, borderLeft: '2px solid var(--line)', color: 'var(--text-dim)', lineHeight: 1.45 }}>
                             <b style={{ color: tx.delta >= 0 ? 'var(--mint)' : '#e9a06b' }}>{tx.delta > 0 ? '+' : ''}{tx.delta}</b>
                             {' · '}{tx.kind === 'balance' ? 'đối chiếu số dư' : tx.kind === 'linked' ? 'tổng + thanh toán' : tx.kind === 'incoming' ? 'tiền vào' : 'giao dịch trực tiếp'}
@@ -213,8 +213,10 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                         {auditPasses.map((pass, index) => (
                           <div key={`${index}-${pass.pass}-${pass.role}`} style={{ padding: '7px 9px', borderRadius: 8, background: 'var(--bg-deep)', border: '1px solid var(--line)', fontSize: 10.5, lineHeight: 1.55 }}>
-                            <span style={{ color: 'var(--text-hi)', fontWeight: 750 }}>AI {pass.pass} · {pass.role === 'auditor' ? 'Auditor' : 'Extractor'}{pass.reroll ? ' · quét lại' : ''}</span>
-                            <span style={{ color: 'var(--text-dim)' }}> · {pass.evidenceAnchored ? 'evidence nguyên văn' : 'tương thích tag cũ'}</span>
+                            <span style={{ color: 'var(--text-hi)', fontWeight: 750 }}>AI {pass.pass} · {pass.role === 'auditor' ? 'Auditor' : 'Extractor'}{pass.focus ? ` · ${pass.focus}` : ''}{pass.reroll ? ' · quét lại' : ''}</span>
+                            <span style={{ color: 'var(--text-dim)' }}> · {pass.evidenceAnchored ? 'evidence nguyên văn' : pass.structured ? 'semantic fallback' : 'tương thích tag cũ'}</span>
+                            {pass.salvaged ? <span style={{ color: '#e9c46a' }}> · đã cứu JSON lỗi</span> : null}
+                            {(pass.anchorFallback ?? 0) > 0 ? <span style={{ color: 'var(--text-dim)' }}> · {pass.anchorFallback} quote lệch nhưng còn validator</span> : null}
                             {pass.error ? (
                               <span style={{ color: '#e9a06b' }}> · lỗi: {pass.error}</span>
                             ) : (

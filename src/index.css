@@ -2229,3 +2229,21 @@ input[type='checkbox']:disabled { cursor:not-allowed; filter:grayscale(1); opaci
   .pokemon-summary__tabs button { padding: 10px 5px; font-size: 10px; }
   .summary-stat { grid-template-columns: 88px 42px 1fr; }
 }
+
+/* Đợt 103: Shiny là thuộc tính cá thể thật — Summary phải nhận biết ngay bằng mắt,
+   ngoài việc MonAvatar tự chọn sprite shiny. */
+.summary-shiny-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  margin: 0 3px;
+  border: 1px solid rgba(229,169,26,.7);
+  border-radius: 999px;
+  background: rgba(229,169,26,.12);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: .08em;
+  color: #b87800;
+  vertical-align: middle;
+}

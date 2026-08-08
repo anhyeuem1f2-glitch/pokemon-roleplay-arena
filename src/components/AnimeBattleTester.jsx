@@ -159,7 +159,7 @@ function SideCard({ mon, side }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexDirection: side === 'enemy' ? 'row-reverse' : 'row' }}>
       <div style={{ minWidth: 160 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', justifyContent: side === 'enemy' ? 'flex-end' : 'flex-start' }}>
-          <strong style={{ fontSize: 13 }}>{mon.name}</strong>
+          <strong style={{ fontSize: 13 }}>{mon.shiny ? '✨ ' : ''}{mon.name}</strong>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-mid)' }}>Lv.{mon.level}</span>
         </div>
         <div style={{ display: 'flex', gap: 4, margin: '4px 0 6px', justifyContent: side === 'enemy' ? 'flex-end' : 'flex-start' }}>

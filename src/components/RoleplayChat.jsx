@@ -55,6 +55,7 @@ import { restoreTurnCheckpoint, saveTurnCheckpoint } from '../utils/saveManager.
 import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
 import { addCollectionAward } from '../data/pokemonLife.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
+import { applyNarrativeGenderEvidence } from '../data/pokemonGender.js'
 import { buildIdentityContext } from '../data/identities.js'
 import {
   buildSearchGateCorrection, buildSearchGateFallback, classifyRealisticInput,
@@ -1055,6 +1056,32 @@ export default function RoleplayChat() {
         report.lines.push(`✅ Thân mật ${targetMon.name}: ${before} → ${after}${directive.note ? ` (${directive.note})` : ''}`)
       }
 
+      // Đợt 100 — đồng bộ giới tính trực tiếp từ CHÍNH VĂN CANON ở MỌI
+      // lượt, không chỉ lúc nhận Pokémon. Đây là chốt cho ca: cá thể đã roll
+      // male, sau đó tiến hoá/form và văn xác nhận female nhưng Summary vẫn
+      // giữ male. Cả active/party/PC dùng cùng transform nên không còn ba bản
+      // cùng uid mang ba giới tính khác nhau.
+      const applyStoryGender = (mon) => {
+        if (!mon) return mon
+        const entry = findSpeciesEntry(mon.species ?? mon.name)
+        return applyNarrativeGenderEvidence(
+          mon,
+          storyText,
+          entry,
+          [mon.evolvedFrom],
+          sourceMessageId,
+        )
+      }
+      const beforePreviewGender = previewActive?.gender
+      previewActive = applyStoryGender(previewActive)
+      previewParty = previewParty.map(applyStoryGender)
+      setPlayerMon((cur) => applyStoryGender(cur))
+      setParty((cur) => (cur ?? []).map(applyStoryGender))
+      setPcBox((cur) => (cur ?? []).map(applyStoryGender))
+      if (previewActive && beforePreviewGender && previewActive.gender !== beforePreviewGender) {
+        report.lines.push(`✅ Giới tính ${previewActive.name}: ${previewActive.gender === 'female' ? '♀ Cái' : previewActive.gender === 'male' ? '♂ Đực' : '◇ Vô giới tính'} (theo chính văn)`)
+      }
+
       // Cập nhật ref lạc quan để API phụ chạy ngay sau đó nhìn thấy đúng bản
       // vừa áp, không dùng lại snapshot cũ rồi báo DNA lệch lần nữa.
       latestPlayerMonRef.current = previewActive
@@ -1777,13 +1804,7 @@ export default function RoleplayChat() {
       // cùng mới dùng API chính. Kết quả gắn bằng id tin và bị bỏ nếu người
       // chơi đã sửa/xoá/reroll, cùng nguyên tắc chống closure cũ của state API.
       if (actionChoicesPending) {
-        const actionPool = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose, stateApiConfig]
-          .filter((cfg) => cfg?.baseUrl && cfg?.model)
-          .map((cfg) => ({ ...apiConfig, ...cfg }))
-        const actionCfg = actionPool.length
-          ? actionPool[actionChoiceApiRoundRobinRef.current % actionPool.length]
-          : apiConfig
-        actionChoiceApiRoundRobinRef.current += 1
+        const actionCfg = nextActionChoiceConfig()
         const recentContext = nextMessages
           .filter((message) => !message.hidden)
           .slice(-6)
@@ -2229,6 +2250,49 @@ export default function RoleplayChat() {
       }
       return m2
     }))
+  }
+
+  function nextActionChoiceConfig() {
+    const actionPool = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose, stateApiConfig, stateApiConfig2]
+      .filter((cfg) => cfg?.baseUrl && cfg?.model)
+      .map((cfg) => ({ ...apiConfig, ...cfg }))
+    if (!actionPool.length) return apiConfig
+    const cfg = actionPool[actionChoiceApiRoundRobinRef.current % actionPool.length]
+    actionChoiceApiRoundRobinRef.current += 1
+    return cfg
+  }
+
+  async function handleRefreshActionChoices(messageId) {
+    const at = messages.findIndex((message) => message.id === messageId)
+    const target = at >= 0 ? messages[at] : null
+    if (!target || target.role !== 'assistant' || loading) return
+    const storyText = target.content || ''
+    setMessages((current) => current.map((message) => message.id === messageId
+      ? { ...message, actionChoicesPending: true }
+      : message))
+    try {
+      const previous = messages.slice(0, at).filter((message) => !message.hidden)
+      const recentContext = previous.slice(-6)
+        .map((message) => `${message.role === 'user' ? 'Người chơi' : 'AI'}: ${message.content}`)
+        .join('\n\n')
+      const userText = [...previous].reverse().find((message) => message.role === 'user')?.content ?? ''
+      const generated = await generateActionChoices(nextActionChoiceConfig(), {
+        recentContext,
+        storyText,
+        userText,
+        playerName: playerName || playerProfile?.name || '',
+      })
+      setMessages((current) => current.map((message) => (
+        message.id === messageId && message.content === storyText
+          ? { ...message, actionChoices: generated, actionChoicesPending: false }
+          : message
+      )))
+    } catch (error) {
+      console.warn('[action-choices] sinh lại thất bại:', error.message)
+      setMessages((current) => current.map((message) => message.id === messageId
+        ? { ...message, actionChoicesPending: false }
+        : message))
+    }
   }
 
   function handleChooseAction(choice) {
@@ -2730,6 +2794,7 @@ ${m.content}`
                   pending={Boolean(m.actionChoicesPending)}
                   disabled={loading}
                   onChoose={handleChooseAction}
+                  onRefresh={() => handleRefreshActionChoices(m.id)}
                 />
               )}
               {m.shopName && (m.shopValidated || detectInteractiveShop(

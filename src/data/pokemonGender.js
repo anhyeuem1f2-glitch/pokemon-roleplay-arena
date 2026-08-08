@@ -60,24 +60,52 @@ function foldStory(value) {
 }
 
 /**
- * Đọc giới tính đã được chính văn xác lập. Chỉ xét câu chứa đúng tên cá thể/
- * loài và câu kề bên để “cô bé” của NPC khác không làm đổi Pokémon.
+ * Tìm evidence giới tính trong CHÍNH VĂN. Quét từ cuối về đầu để nếu cùng
+ * một lượt có thông tin cũ rồi được sửa/khẳng định lại, câu mới nhất thắng.
+ * Chỉ xét câu chứa đúng target và câu liền sau để đại từ của NPC khác không
+ * vô tình đổi giới tính Pokémon của người chơi.
  */
-export function inferPokemonGenderFromStory(storyText, target) {
+function findPokemonGenderEvidence(storyText, target) {
   if (!storyText || !target) return null
   const targetKey = foldStory(target)
   if (!targetKey) return null
   const lines = String(storyText).split(/(?<=[.!?…])\s+|\n+/).map((line) => line.trim()).filter(Boolean)
-  const female = /(?:gioi\s*tinh|giong|ca\s*the|con)\s*(?:la\s*)?(?:cai|female)\b|\b(?:female)\b|♀|\bco\s*be\b/
-  const male = /(?:gioi\s*tinh|giong|ca\s*the|con)\s*(?:la\s*)?(?:duc|male)\b|\b(?:male)\b|♂|\bcau\s*be\b/
-  for (let index = 0; index < lines.length; index++) {
+  const female = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:cai|female)\b|\bfemale(?:\s+form)?\b|♀|\bco\s*be\b/
+  const male = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:duc|male)\b|\bmale(?:\s+form)?\b|♂|\bcau\s*be\b/
+  for (let index = lines.length - 1; index >= 0; index--) {
     if (!foldStory(lines[index]).includes(targetKey)) continue
-    const local = foldStory(lines.slice(index, index + 2).join(' '))
+    const local = foldStory(lines.slice(index, Math.min(lines.length, index + 2)).join(' '))
     const isFemale = female.test(local)
     const isMale = male.test(local)
-    if (isFemale !== isMale) return isFemale ? 'female' : 'male'
+    if (isFemale !== isMale) {
+      return { gender: isFemale ? 'female' : 'male', index, evidence: lines.slice(index, Math.min(lines.length, index + 2)).join(' ') }
+    }
   }
   return null
+}
+
+export function inferPokemonGenderFromStory(storyText, target) {
+  return findPokemonGenderEvidence(storyText, target)?.gender ?? null
+}
+
+/**
+ * Quét nhiều bí danh của cùng cá thể (tên hiện tại, species, dạng trước tiến
+ * hoá...). Evidence xuất hiện muộn nhất trong chính văn thắng.
+ */
+export function inferPokemonGenderForMonFromStory(storyText, mon, aliases = []) {
+  if (!mon) return null
+  const targets = [...new Set([
+    mon.name,
+    mon.species,
+    mon.evolvedFrom,
+    ...aliases,
+  ].filter(Boolean).map((value) => String(value).trim()).filter(Boolean))]
+  let best = null
+  for (const target of targets) {
+    const found = findPokemonGenderEvidence(storyText, target)
+    if (found && (!best || found.index > best.index)) best = found
+  }
+  return best?.gender ?? null
 }
 
 function stableUnit(value) {
@@ -143,6 +171,30 @@ export function ensurePokemonGender(mon, speciesEntry) {
   if (gender === mon.gender && ratioEqual(mon.genderRatio, nextRatio)
     && mon.genderDataVersion === GENDER_DATA_VERSION) return mon
   return { ...mon, gender, genderRatio: nextRatio, genderDataVersion: GENDER_DATA_VERSION }
+}
+
+/**
+ * Áp evidence giới tính của chính văn lên một cá thể rồi chạy lại canon ratio.
+ * Với loài chỉ đực/chỉ cái/vô giới tính, canon species vẫn có quyền cao hơn
+ * một câu văn bất khả thi. Với loài có cả hai giới, evidence story thắng roll.
+ */
+export function applyNarrativeGenderEvidence(mon, storyText, speciesEntry, aliases = [], sourceMessageId = '') {
+  if (!mon) return mon
+  const inferred = inferPokemonGenderForMonFromStory(storyText, mon, [
+    speciesEntry?.name,
+    speciesEntry?.species,
+    ...aliases,
+  ])
+  const seeded = inferred ? { ...mon, gender: inferred } : mon
+  const ensured = ensurePokemonGender(seeded, speciesEntry)
+  if (!inferred || normalizePokemonGender(ensured?.gender) !== inferred) return ensured
+  const evidenceId = sourceMessageId || mon.genderEvidenceMessageId || null
+  if (ensured.genderSource === 'story' && ensured.genderEvidenceMessageId === evidenceId) return ensured
+  return {
+    ...ensured,
+    genderSource: 'story',
+    ...(evidenceId ? { genderEvidenceMessageId: evidenceId } : {}),
+  }
 }
 
 export function genderRatioLabel(monOrEntry) {

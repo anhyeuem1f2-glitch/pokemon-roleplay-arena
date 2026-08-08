@@ -1,6 +1,6 @@
 import React from 'react'
 
-export default function ActionChoices({ choices = [], pending = false, disabled = false, onChoose }) {
+export default function ActionChoices({ choices = [], pending = false, disabled = false, onChoose, onRefresh }) {
   if (!pending && !choices.length) return null
   return (
     <section className="action-choices" aria-label="Lựa chọn hành động gợi ý">
@@ -9,7 +9,20 @@ export default function ActionChoices({ choices = [], pending = false, disabled 
           <div className="action-choices__eyebrow">BƯỚC TIẾP THEO</div>
           <div className="action-choices__title">✦ Lựa chọn hành động</div>
         </div>
-        <span className="action-choices__hint">Bấm để điền · vẫn sửa được trước khi gửi</span>
+        <div className="action-choices__controls">
+          <span className="action-choices__hint">Bấm để điền · vẫn sửa được trước khi gửi</span>
+          {onRefresh && (
+            <button
+              type="button"
+              className="action-choices__refresh"
+              disabled={disabled || pending}
+              onClick={onRefresh}
+              title="Bỏ các gợi ý hiện tại và sinh lại từ đúng chính văn của lượt này"
+            >
+              {pending ? '↻ Đang tạo…' : '↻ Gợi ý lại'}
+            </button>
+          )}
+        </div>
       </div>
       {pending && !choices.length ? (
         <div className="action-choices__loading"><span /> Đang đọc tình huống để chuẩn bị gợi ý…</div>

@@ -18,7 +18,7 @@ import { DEFAULT_POKEMON_LIFE, normalizePokemonLife } from '../data/pokemonLife.
 import { DEFAULT_TRADE_STATE, normalizeTradeState } from '../data/trading.js'
 import { verifyAdminCode } from '../data/adminMode.js'
 import { normalizeStoryTone } from '../data/storyTones.js'
-import { ensurePokemonGender, inferPokemonGenderFromStory } from '../data/pokemonGender.js'
+import { ensurePokemonGender, inferPokemonGenderForMonFromStory } from '../data/pokemonGender.js'
 import { startingMoneyForIdentity } from '../data/identities.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
@@ -839,32 +839,33 @@ export function GameProvider({ children }) {
   // giữ nguyên uid nên F5 không làm đổi Ability hoặc vật phẩm.
   useEffect(() => {
     if (pokedexStatus !== 'ready') return
-    const genderFromAcquisitionStory = (mon, entry) => {
-      const sourceMessageId = String(mon?.acquisitionSourceId ?? '').split(':pokemon:')[0]
-      const exact = sourceMessageId ? (messages ?? []).find((message) => message.id === sourceMessageId) : null
-      const candidates = [
-        exact,
-        ...(messages ?? []).filter((message) => (message.meta?.appliedState?.pokemons ?? []).some((pokemon) =>
-          abilityId(pokemon.species) === abilityId(entry?.species ?? entry?.name ?? mon?.species ?? mon?.name),
-        )).reverse(),
-      ].filter(Boolean)
+    // Đợt 100: không chỉ đọc tin NHẬN Pokémon. Nếu các lượt sau (đặc biệt
+    // tiến hoá/form) chính văn xác nhận lại giới tính thì evidence mới nhất
+    // phải thắng roll/save cũ. Chỉ quét assistant canon, từ mới → cũ.
+    const genderFromNarrativeHistory = (mon, entry) => {
+      const candidates = (messages ?? []).filter((message) => message?.role === 'assistant').slice().reverse()
+      const aliases = [entry?.name, entry?.species, mon?.evolvedFrom]
       for (const message of candidates) {
         const story = message.meta?.evidenceText || message.content || ''
-        const inferred = inferPokemonGenderFromStory(story, entry?.name ?? mon?.species ?? mon?.name)
-          ?? inferPokemonGenderFromStory(story, mon?.species ?? mon?.name)
-        if (inferred) return inferred
+        const inferred = inferPokemonGenderForMonFromStory(story, mon, aliases)
+        if (inferred) return { gender: inferred, messageId: message.id ?? null }
       }
       return null
     }
-    const upgrade = (mon) => {
+    const upgrade = (mon, useNarrativeHistory = true) => {
       if (!mon) return mon
       const key = abilityId(mon.species ?? mon.name)
       const entry = (pokedexSpecies ?? []).find((item) =>
         abilityId(item.species) === key || abilityId(item.name) === key,
       )
-      const narrativeGender = genderFromAcquisitionStory(mon, entry)
+      const narrativeGender = useNarrativeHistory ? genderFromNarrativeHistory(mon, entry) : null
       const withGender = ensurePokemonGender(narrativeGender
-        ? { ...mon, gender: narrativeGender, genderSource: 'story' }
+        ? {
+          ...mon,
+          gender: narrativeGender.gender,
+          genderSource: 'story',
+          ...(narrativeGender.messageId ? { genderEvidenceMessageId: narrativeGender.messageId } : {}),
+        }
         : mon, entry)
       const normalized = ensureMonAbility(normalizeFriendship(withGender, entry?.baseFriendship), pokedexSpecies)
       return {
@@ -878,14 +879,14 @@ export function GameProvider({ children }) {
     setPlayerMon((cur) => upgrade(cur))
     setParty((cur) => (cur ?? []).map(upgrade))
     setPcBox((cur) => (cur ?? []).map(upgrade))
-    setEnemyMon((cur) => upgrade(cur))
+    setEnemyMon((cur) => upgrade(cur, false))
     // Snapshot đối thủ trong lịch sử cũng được vá để mở lại trận/lượt cũ vẫn
     // có đúng giới tính và sprite, không chỉ Pokémon đang đứng trên HUD.
     setMessages((cur) => (cur ?? []).map((message) => {
       let changed = false
       const next = { ...message }
       const upgradeOne = (mon) => {
-        const upgraded = upgrade(mon)
+        const upgraded = upgrade(mon, false)
         if (upgraded !== mon) changed = true
         return upgraded
       }

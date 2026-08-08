@@ -2758,3 +2758,27 @@ Chỉ upload/ghi đè:
 ### File bàn giao đợt 100
 
 Bản full được đóng tên **`pokemon-new.zip`** để có thể giải nén trực tiếp và ghi đè vào thư mục dự án `pokemon-new` hiện tại. Không đưa `.git` hay `node_modules` vào ZIP.
+
+## Cập nhật (đợt 101) — Money Transaction Reconciler + ledger chỉ ghi operation đã commit
+
+**MONEY KHÔNG CÒN PHỤ THUỘC HOÀN TOÀN VÀO TAG AI.** Sau khi văn phong đã được chau chuốt và `displayText` cuối cùng được chốt làm canon, app chạy một `Money Transaction Reconciler` deterministic trước validator. Reconciler tự nhận các giao dịch có bằng chứng đủ mạnh như tổng/thành tiền/hóa đơn + thanh toán hoàn tất, chuyển khoản/ghi có, hoặc số dư trước → sau. Nếu AI quên MONEY nhưng canon chứng minh được delta, app tự bổ sung directive rồi vẫn cho qua cùng validator và ledger như mọi state khác.
+
+**SỐ TIỀN ĐƯỢC NEO VÀO NGỮ NGHĨA GIAO DỊCH, KHÔNG CHỌN BỪA CON SỐ TRONG CÂU.** Parser phân biệt `tổng thanh toán 15.000₽` với `số dư còn 285.000₽`, ưu tiên số nằm cạnh `tổng/thành tiền/hóa đơn` hoặc chính mệnh đề `đã trả/quẹt thẻ/ghi có`. Level, Route, số lượng Pokémon/vật phẩm và các con số khác không được cạnh tranh làm MONEY khi câu đã có token tiền tệ rõ. Cụm `tổng thanh toán`/`cần thanh toán` một mình chỉ là số phải trả, chưa được coi là giao dịch; `chưa bị trừ`, giá niêm yết và ý định tương lai tiếp tục fail closed.
+
+**NHIỀU GIAO DỊCH CÙNG SỐ VẪN ĐƯỢC ĐẾM RIÊNG.** Mỗi event tiền giữ khoảng câu evidence riêng. Hai lần trả 500 thật được giữ thành hai transaction; hóa đơn cũ bị sửa trước khi thanh toán không còn được ghép nhầm với lần quẹt thẻ của hóa đơn mới. Nếu AI xuất aggregate sai nhưng canon có các delta con rõ ràng, candidate sai bị bác và app dựng lại đúng các transaction canon thay vì làm tiền đứng yên.
+
+**SHOP/UI VÀ ROLEPLAY KHÔNG CÒN DÙNG LUẬT “CÙNG DẤU = ĐÃ TRỪ”.** Giao dịch đã commit trước ở Shop vẫn được ghi `preAppliedState` để chống trừ đôi, nhưng một khoản chi khác cùng lượt không bị nuốt chỉ vì cũng là số âm. Exact transaction/evidence mới là cơ sở idempotency. Reroll `Quét lại biến thật` cũng chạy Money Reconciler ngay cả khi không cấu hình State API, nên ca AI bỏ sót MONEY có thể được phục hồi từ chính văn đã lưu.
+
+**BỎ VALIDATE PHÁ HỦY TRÊN BẢN NHÁP.** Trước đây candidate có thể bị loại ở lần kiểm tra trước polish rồi biến mất vĩnh viễn dù `displayText` cuối cùng đủ bằng chứng. Đợt 101 chỉ quyết định commit thật sau khi canon cuối đã hình thành; tag/draft trước polish không còn có quyền loại vĩnh viễn state của bản hiển thị.
+
+**LEDGER CHỈ GHI NHỮNG OPERATION THỰC SỰ COMMIT HOẶC ĐÃ Ở TRẠNG THÁI ĐÍCH.** LEVEL/EVOLVE/FRIEND/POKEMON/ITEM/LOOT/EQUIP/RIBBON/MARK bị chặn vì target không tồn tại, thiếu item, không đủ điều kiện tiến hóa... không còn bị ghi nhầm là `appliedState`. Nhờ vậy Auditor có thể tiếp tục nhìn thấy phần chưa giải quyết thay vì tin vào một ledger “đã áp” giả.
+
+**CHỐNG HAI AI CHẤM CHỒNG CÙNG MỘT BIẾN CHỦ QUAN.** Với FRIEND, REL, BODY, HUNGER, LEVEL và REP, khi một target đã commit trong lượt canon thì pass sau không được chấm lại cùng target với một delta khác. MONEY/ITEM vẫn hỗ trợ nhiều event thật vì chúng có transaction/evidence độc lập. Prompt Extractor/Auditor cũng được cập nhật luật này.
+
+**STATE AUDIT v3 HIỂN THỊ BẰNG CHỨNG MONEY.** Nút 🧬 cho biết Money Reconciler phát hiện bao nhiêu giao dịch, app tự bổ sung delta nào, loại transaction (`balance`, `tổng + thanh toán`, tiền vào, trực tiếp) và đoạn canon ngắn dùng làm bằng chứng. Khi tester báo “tiền không nhảy”, có thể nhìn ngay app đã đọc số nào thay vì chỉ thấy một dòng `KHÔNG ÁP MONEY` chung chung.
+
+**Kiểm tra đợt 101:** regression đợt 73, 74, 99 và 100 tiếp tục PASS. `test-dot101.mjs` bổ sung 26 ca chuyên MONEY/ledger, gồm total + POS, giá chưa trả, số dư trước/sau, số dư viết đảo thứ tự, tiền chuyển vào, hai giao dịch cùng số, preApplied Shop, aggregate AI sai, total + số dư cùng câu, tag nhầm số dư, invoice sửa lại, quantity/level/Route gây nhiễu, phủ định thanh toán, `trả lời 3 câu`/`thưởng 3 điểm` không bị hiểu thành tiền và chống FRIEND chấm hai lần cùng target. Toàn bộ 64 `.js` và 52 `.jsx` tiếp tục qua kiểm tra cú pháp.
+
+### File bàn giao đợt 101
+
+Bản full tiếp tục đóng đúng tên **`pokemon-new.zip`** để giải nén và ghi đè trực tiếp dự án hiện tại. Không đưa `.git` hoặc `node_modules` vào ZIP.

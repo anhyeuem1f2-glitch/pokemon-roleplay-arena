@@ -194,6 +194,21 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                         {(stateAudit.main.rejected ?? 0) > 0 ? <> · <b style={{ color: '#e9a06b' }}>{stateAudit.main.rejected}</b> bị bác</> : ''}
                       </div>
                     )}
+                    {stateAudit.deterministicMoney && (
+                      <div style={{ marginTop: 6, color: 'var(--text-mid)', fontSize: 10.5 }}>
+                        <div>
+                          💰 Money reconciler: đọc được <b style={{ color: 'var(--mint)' }}>{stateAudit.deterministicMoney.detected ?? 0}</b> giao dịch canon
+                          {(stateAudit.deterministicMoney.added ?? 0) > 0 ? <> · app tự bổ sung <b style={{ color: 'var(--mint)' }}>{stateAudit.deterministicMoney.added}</b> delta ({(stateAudit.deterministicMoney.deltas ?? []).map((value) => `${value > 0 ? '+' : ''}${value}`).join(', ')})</> : ' · không cần bổ sung'}
+                        </div>
+                        {(stateAudit.deterministicMoney.transactions ?? []).slice(0, 5).map((tx, index) => (
+                          <div key={`money-${index}-${tx.delta}`} style={{ marginTop: 4, paddingLeft: 9, borderLeft: '2px solid var(--line)', color: 'var(--text-dim)', lineHeight: 1.45 }}>
+                            <b style={{ color: tx.delta >= 0 ? 'var(--mint)' : '#e9a06b' }}>{tx.delta > 0 ? '+' : ''}{tx.delta}</b>
+                            {' · '}{tx.kind === 'balance' ? 'đối chiếu số dư' : tx.kind === 'linked' ? 'tổng + thanh toán' : tx.kind === 'incoming' ? 'tiền vào' : 'giao dịch trực tiếp'}
+                            {tx.evidence ? <> · “{tx.evidence}”</> : ''}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {auditPasses.length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
                         {auditPasses.map((pass, index) => (

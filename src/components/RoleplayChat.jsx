@@ -27,7 +27,7 @@ import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../dat
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
-import { validateStateAgainstProse, describeRejectedState, proseSupportsMove, proseSupportsMysteryBallReveal } from '../utils/stateEvidence.js'
+import { validateStateAgainstProse, describeRejectedState, proseSupportsMove, proseSupportsMysteryBallReveal, reconcileMoneyDirectives } from '../utils/stateEvidence.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
@@ -302,6 +302,15 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
   const monKey = (value) => normalizeMonTarget(value)
   const itemKey = (value) => resolveItemByName(value)?.id ?? monKey(value)
   const appliedLevels = new Set((applied?.levels ?? []).map((entry) => `${monKey(entry.target)}|${entry.mode}|${entry.value}`))
+  // Các biến tích luỹ chủ quan/đơn-trạng-thái chỉ nên có MỘT quyết định cho
+  // cùng target trong một lượt canon. Nếu Extractor đã commit FRIEND +5 cho
+  // Floragato, Auditor không được cộng thêm +10 chỉ vì chấm cùng cảnh khác số.
+  const appliedLevelTargets = new Set((applied?.levels ?? []).map((entry) => monKey(entry.target)))
+  const appliedFriendTargets = new Set((applied?.friendships ?? []).map((entry) => monKey(entry.target)))
+  const appliedRelTargets = new Set((applied?.rel ?? []).map((entry) => monKey(entry.name)))
+  const appliedBodyParts = new Set((applied?.body ?? []).map((entry) => entry.part))
+  const appliedHungerWho = new Set((applied?.hunger ?? []).map((entry) => entry.who))
+  const appliedRepTargets = new Set((applied?.reputations ?? []).map((entry) => monKey(entry.name)))
   const appliedEvolutions = new Set((applied?.evolutions ?? []).map((entry) => `${monKey(entry.from)}|${monKey(entry.to)}`))
   const appliedItems = new Set((applied?.items ?? []).map((entry) => `${itemKey(entry.name)}|${Number(entry.qty)}`))
   const appliedFriends = new Set((applied?.friendships ?? []).map((entry) => `${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`))
@@ -343,16 +352,16 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     ...extra,
     moneyEntries: filteredMoneyEntries,
     money: filteredMoneyEntries.reduce((sum, value) => sum + value, 0),
-    levels: (extra?.levels ?? []).filter((entry) => !appliedLevels.has(`${monKey(entry.target)}|${entry.mode}|${entry.value}`)),
+    levels: (extra?.levels ?? []).filter((entry) => !appliedLevelTargets.has(monKey(entry.target)) && !appliedLevels.has(`${monKey(entry.target)}|${entry.mode}|${entry.value}`)),
     evolutions: (extra?.evolutions ?? []).filter((entry) => !appliedEvolutions.has(`${monKey(entry.from)}|${monKey(entry.to)}`)),
     items: (extra?.items ?? []).filter((entry) => !appliedItems.has(`${itemKey(entry.name)}|${Number(entry.qty)}`)),
     loots: (extra?.loots ?? []).filter((entry) => !appliedLoots.has(`${monKey(entry.type)}|${monKey(entry.size)}`)),
-    friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriends.has(`${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
+    friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriendTargets.has(monKey(entry.target)) && !appliedFriends.has(`${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     equipment: (extra?.equipment ?? []).filter((entry) => !appliedEquipment.has(`${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`)),
     pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(`${monKey(entry.species)}|${Number(entry.level)}`)),
-    rel: (extra?.rel ?? []).filter((entry) => !appliedRel.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
-    body: (extra?.body ?? []).filter((entry) => !appliedBody.has(`${entry.part}|${Number(entry.delta)}`)),
-    hunger: (extra?.hunger ?? []).filter((entry) => !appliedHunger.has(`${entry.who}|${Number(entry.delta)}`)),
+    rel: (extra?.rel ?? []).filter((entry) => !appliedRelTargets.has(monKey(entry.name)) && !appliedRel.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
+    body: (extra?.body ?? []).filter((entry) => !appliedBodyParts.has(entry.part) && !appliedBody.has(`${entry.part}|${Number(entry.delta)}`)),
+    hunger: (extra?.hunger ?? []).filter((entry) => !appliedHungerWho.has(entry.who) && !appliedHunger.has(`${entry.who}|${Number(entry.delta)}`)),
     moveDirectives: (extra?.moveDirectives ?? []).filter((entry) => !appliedMoves.has(`${monKey(entry.place)}|${entry.x ?? ''}|${entry.y ?? ''}`)),
     moves: (extra?.moveDirectives ?? []).filter((entry) => !appliedMoves.has(`${monKey(entry.place)}|${entry.x ?? ''}|${entry.y ?? ''}`)).map((entry) => entry.place),
     dateAdvance: applied?.dateAdvance ? 0 : (extra?.dateAdvance ?? 0),
@@ -362,7 +371,7 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     facts: (extra?.facts ?? []).filter((entry) => !appliedFact.has(`${monKey(entry.key)}|${monKey(entry.text)}`)),
     badges: (extra?.badges ?? []).filter((entry) => !appliedBadges.has(JSON.stringify(entry))),
     quests: (extra?.quests ?? []).filter((entry) => !appliedQuests.has(JSON.stringify(entry))),
-    reputations: (extra?.reputations ?? []).filter((entry) => !appliedReps.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
+    reputations: (extra?.reputations ?? []).filter((entry) => !appliedRepTargets.has(monKey(entry.name)) && !appliedReps.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     wanted: (extra?.wanted ?? []).filter((entry) => !appliedWanted.has(JSON.stringify(entry))),
     legendaryAccess: (extra?.legendaryAccess ?? []).filter((entry) => !appliedLegendaryAccess.has(`${monKey(entry.species)}|${monKey(entry.reason)}`)),
     collectionAwards: (extra?.collectionAwards ?? []).filter((entry) => !appliedAwards.has(`${entry.kind}|${monKey(entry.target)}|${monKey(entry.name)}`)),
@@ -379,9 +388,11 @@ function filterUiPreAppliedState(extra, preApplied) {
   const blockedItemNames = new Set((preApplied.items ?? []).map((entry) =>
     resolveItemByName(entry.name)?.id ?? normalizeMonTarget(entry.name),
   ))
-  const blockedMoneySign = Math.sign(Number(preApplied.money) || 0)
-  const moneyEntries = (extra.moneyEntries?.length ? extra.moneyEntries : (extra.money ? [extra.money] : []))
-    .filter((value) => !blockedMoneySign || Math.sign(Number(value)) !== blockedMoneySign)
+  // Không chặn MONEY theo "cùng dấu" nữa. Một lượt kể sau Shop có thể
+  // chứa thêm một khoản chi khác hoàn toàn hợp lệ. Exact duplicate của giao
+  // dịch UI được consume ở filterSupplementalDuplicates/validator bằng số
+  // lượng evidence canon, nên vẫn không thể trừ Shop lần hai.
+  const moneyEntries = extra.moneyEntries?.length ? extra.moneyEntries : (extra.money ? [extra.money] : [])
   return {
     ...extra,
     moneyEntries,
@@ -423,6 +434,19 @@ function mergeStateManifests(base, extra) {
   merged.pokecenter = next.pokecenter ?? merged.pokecenter
   for (const field of STATE_ARRAY_FIELDS) merged[field].push(...next[field])
   return merged
+}
+
+// Một số directive đã qua evidence nhưng vẫn có thể không commit vì target
+// không tồn tại, thiếu vật phẩm, cổng tiến hoá, v.v. Ledger chỉ được đánh dấu
+// cho operation đã áp hoặc đã ở trạng thái đích; nếu không Auditor sẽ tưởng
+// biến đã cập nhật và bỏ qua lỗi thật.
+const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemons', 'items', 'loots', 'equipment', 'collectionAwards']
+function ledgerManifestFromApplyReport(parsed, report) {
+  const manifest = compactStateManifest(parsed)
+  for (const field of APPLY_GATED_FIELDS) {
+    if (report?.ledgerState?.[field]) manifest[field] = [...report.ledgerState[field]]
+  }
+  return manifest
 }
 
 function countParsedStateOperations(parsed) {
@@ -474,7 +498,7 @@ const META_CLIP = 14000
 function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport = null) {
   const out = []
   const tag = suffix ? ` ${suffix}` : ''
-  if (parsed.money) out.push(`💰 Tiền ${parsed.money > 0 ? '+' : ''}${parsed.money}${tag}`)
+  if (parsed.money) out.push(`✅ 💰 Tiền ${parsed.money > 0 ? '+' : ''}${parsed.money}${tag}`)
   for (const r of parsed.rel ?? []) out.push(`💞 Hảo cảm ${r.name} ${r.delta > 0 ? '+' : ''}${r.delta}${r.note ? ` (${r.note})` : ''}${tag}`)
   for (const b of parsed.body ?? []) out.push(`🩹 Thương tích ${b.part} ${b.delta > 0 ? '+' : ''}${b.delta}${tag}`)
   // FIX đợt 69: parser trả về {who, delta} nhưng chỗ này đọc h.target →
@@ -790,7 +814,13 @@ export default function RoleplayChat() {
   // HUNGER / NPC / FACT. LEVEL là đường chính thức cho Kẹo Hiếm/năng lực;
   // POKEMON trùng loài chỉ còn là nhánh tương thích model cũ.
   function applyParsedState(parsed, turnNow, storyText = '', sourceMessageId = '') {
-    const report = { lines: [] }
+    const report = {
+      lines: [],
+      ledgerState: Object.fromEntries(APPLY_GATED_FIELDS.map((field) => [field, []])),
+    }
+    const markLedger = (field, entry) => {
+      if (report.ledgerState[field]) report.ledgerState[field].push(entry)
+    }
     let previewActive = latestPlayerMonRef.current
     let previewParty = [...(latestPartyRef.current ?? [])]
     const evolutionDebits = new Map()
@@ -872,6 +902,7 @@ export default function RoleplayChat() {
         const after = previewAfter?.level ?? before
         if (after <= before) {
           report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn này không làm thay đổi biến`)
+          markLedger('levels', directive)
           continue
         }
         const identity = { uid: targetMon.uid, name: targetMon.name }
@@ -880,6 +911,7 @@ export default function RoleplayChat() {
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
+        markLedger('levels', directive)
       }
 
       // FRIEND phải có hiệu lực trước EVOLVE trong cùng lượt. Nếu không, một
@@ -895,6 +927,7 @@ export default function RoleplayChat() {
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         appliedFriendshipDirectives.add(index)
+        markLedger('friendships', directive)
         report.lines.push(`✅ Thân mật ${targetMon.name}: ${before} → ${after}${directive.note ? ` (${directive.note})` : ''}`)
       }
 
@@ -920,6 +953,7 @@ export default function RoleplayChat() {
         }
         if (normalizeMonTarget(targetMon.species ?? targetMon.name) === normalizeMonTarget(targetEntry.species ?? targetEntry.name)) {
           report.lines.push(`ℹ ${targetMon.name} đã ở đúng dạng ${targetEntry.name} — không đổi biến`)
+          markLedger('evolutions', evolution)
           continue
         }
         const itemReservation = reserveEvolutionItem(targetEntry)
@@ -928,6 +962,7 @@ export default function RoleplayChat() {
           continue
         }
         evolveOne(targetMon, targetEntry, evolution.inferred ? 'inferred' : 'tag')
+        markLedger('evolutions', evolution)
       }
 
       for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
@@ -953,6 +988,7 @@ export default function RoleplayChat() {
           .some((mon) => mon?.acquisitionSourceId === acquisitionSourceId)
         if (alreadyApplied) {
           report.lines.push(`ℹ Bỏ qua ${entry.name}: thay đổi từ tin này đã được áp trước đó`)
+          markLedger('pokemons', pk)
           continue
         }
 
@@ -1001,6 +1037,7 @@ export default function RoleplayChat() {
             continue
           }
           evolveOne(current, entry, 'inferred')
+          markLedger('pokemons', pk)
           continue
         }
 
@@ -1034,6 +1071,7 @@ export default function RoleplayChat() {
           setPcBox((cur) => [...(cur ?? []), newMon])
           report.lines.push(`✅ Nhận Pokémon: ${newMon.name} Lv.${newMon.level} · đội đầy, đã gửi vào PC`)
         }
+        markLedger('pokemons', pk)
         if (proseSupportsMysteryBallReveal(storyText, pk.species, { inventory: latestInventoryRef.current })) {
           mysteryBallRevealsApplied += 1
         }
@@ -1053,6 +1091,7 @@ export default function RoleplayChat() {
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
+        markLedger('friendships', directive)
         report.lines.push(`✅ Thân mật ${targetMon.name}: ${before} → ${after}${directive.note ? ` (${directive.note})` : ''}`)
       }
 
@@ -1142,6 +1181,7 @@ export default function RoleplayChat() {
           : `turn-${turnNow}:loot:${normalizeMonTarget(loot.type)}:${lootIndex}`
         if (previewInventory.some((item) => (item.lootSourceIds ?? []).includes(lootSourceId))) {
           report.lines.push(`ℹ Bỏ qua chiến lợi phẩm ${loot.type}: sự kiện này đã được áp trước đó`)
+          markLedger('loots', loot)
           continue
         }
         const generatedLoot = generateLootItems(loot, lootSourceId)
@@ -1161,6 +1201,7 @@ export default function RoleplayChat() {
         }
         lootChanged = generatedLoot.length > 0 || lootChanged
         report.lines.push(`✅ Chiến lợi phẩm (${loot.type}, ${loot.size}): ${generatedLoot.map((item) => `${item.name} x${item.qty}`).join(', ')}`)
+        markLedger('loots', loot)
       }
 
       // Tiến hoá bằng đá/vật phẩm luôn tiêu đúng một món, kể cả model quên
@@ -1189,16 +1230,21 @@ export default function RoleplayChat() {
         if (absorbedByEvolution > 0) {
           report.lines.push(`ℹ ${entry.name} x${absorbedByEvolution} đã được trừ bởi tiến hoá, không trừ lặp bằng ITEM`)
         }
-        if (qty === 0) continue
+        if (qty === 0) {
+          markLedger('items', raw)
+          continue
+        }
         const at = previewInventory.findIndex((it) => it.id === entry.id)
         if (qty > 0) {
           if (at === -1) previewInventory.push({ id: entry.id, name: entry.name, qty })
           else previewInventory[at] = { ...previewInventory[at], qty: (previewInventory[at].qty ?? 0) + qty }
           report.lines.push(`✅ Nhận vật phẩm: ${entry.name} x${qty}`)
+          markLedger('items', raw)
         } else if (at === -1) {
           report.lines.push(`⚠ Không thể trừ ${entry.name}: trong túi không có vật phẩm này`)
         } else if (previewInventory[at].infinite) {
           report.lines.push(`ℹ ${entry.name} là vật phẩm vô hạn — không bị trừ`)
+          markLedger('items', raw)
         } else {
           const have = Math.max(0, Number(previewInventory[at].qty) || 0)
           const removed = Math.min(have, Math.abs(qty))
@@ -1206,6 +1252,7 @@ export default function RoleplayChat() {
           if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
           else previewInventory.splice(at, 1)
           report.lines.push(`✅ Mất vật phẩm: ${entry.name} x${removed}`)
+          if (removed > 0) markLedger('items', raw)
         }
       }
 
@@ -1233,6 +1280,7 @@ export default function RoleplayChat() {
         if (directive.mode === 'unequip') {
           if (!oldItem) {
             report.lines.push(`ℹ ${targetMon.name} hiện không cầm trang bị nào`)
+            markLedger('equipment', directive)
             continue
           }
           if (!targetMon.heldItem?.fromInfinite) addPreviewItem(oldItem)
@@ -1241,6 +1289,7 @@ export default function RoleplayChat() {
           report.lines.push(targetMon.heldItem?.fromInfinite
             ? `✅ Tháo trang bị: ${targetMon.name} bỏ ${oldItem.name}; bản vô hạn vẫn ở trong túi`
             : `✅ Tháo trang bị: ${targetMon.name} → ${oldItem.name} được cất lại vào túi`)
+          markLedger('equipment', directive)
           continue
         }
 
@@ -1251,6 +1300,7 @@ export default function RoleplayChat() {
         }
         if (oldItem?.id === entry.id) {
           report.lines.push(`ℹ ${targetMon.name} đã cầm ${entry.name}`)
+          markLedger('equipment', directive)
           continue
         }
         const at = previewInventory.findIndex((it) => it.id === entry.id)
@@ -1269,6 +1319,7 @@ export default function RoleplayChat() {
         replacePreviewMon(identity, (mon) => ({ ...mon, heldItem }))
         equipmentChanged = true
         report.lines.push(`✅ Trang bị: ${targetMon.name} cầm ${entry.name}${oldItem && !targetMon.heldItem?.fromInfinite ? ` · ${oldItem.name} được cất lại` : ''}`)
+        markLedger('equipment', directive)
       }
 
       if (validItemChanges.length > 0 || equipmentChanged || evolutionDebits.size > 0 || lootChanged) {
@@ -1349,6 +1400,7 @@ export default function RoleplayChat() {
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         report.lines.push(`${award.kind === 'mark' ? '✦ Mark' : '🎗 Ribbon'}: ${targetMon.name} nhận ${award.name}`)
+        markLedger('collectionAwards', award)
       }
     } catch (e2) {
       console.warn('[state] WORLD/COLLECTION lỗi:', e2.message)
@@ -1624,32 +1676,15 @@ export default function RoleplayChat() {
         { ...stateParsed, moveDirectives: evidencedMoveDirectives },
         latestPlayerLocationRef.current,
       ) ?? latestPlayerLocationRef.current
-      const evidenceCheck = validateStateAgainstProse(stateParsed, stateEvidenceText, {
-        playerName: playerName || playerProfile?.name,
-        party: latestPartyRef.current,
-        mode: normalizeGameMode(storyTone), adminMode,
-        inventory: latestInventoryRef.current,
-        location: prospectiveLocation,
-        blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
-        alreadyApplied: preAppliedState,
-      })
-      stateParsed = evidenceCheck.parsed
-      // SHOP là nút tương tác, nên tag sai không được phép tạo UI. Chỉ giữ
-      // cửa hàng mà chính văn chứng minh nhân vật đã bước vào bên trong.
+      // Đợt 101: KHÔNG lọc state ở bản nháp trước khi polish. Trước đây một
+      // false-negative ở validator vòng 1 (đặc biệt MONEY) làm candidate bị
+      // xóa vĩnh viễn, nên dù displayText cuối cùng chứng minh giao dịch rất
+      // rõ thì vòng canon sau cũng không còn gì để cứu. Mọi commit chỉ được
+      // quyết định đúng MỘT LẦN bằng displayText ở finalEvidenceCheck.
+      // Không lọc SHOP bằng bản nháp trước polish. Cùng nguyên tắc với MONEY:
+      // chỉ displayText cuối cùng mới có quyền quyết định UI/state thật.
       const rejectedShops = []
-      let validShops = (stateParsed.shops ?? []).filter((shop) => {
-        const check = detectInteractiveShop(stateEvidenceText, shop.name, stateUserText)
-        if (!check.inside) rejectedShops.push(shop)
-        return check.inside
-      })
-      // Model/API phụ có thể quên SHOP dù người chơi đã gõ “đi vào siêu thị”
-      // và chính văn đang mô tả quầy/kệ bên trong. App tự suy cửa hàng trong
-      // đúng cảnh đã xác nhận; không bắt người chơi thử sang địa điểm khác.
-      if (!validShops.length) {
-        const inferredShop = inferInteractiveShop(stateEvidenceText, stateUserText)
-        if (inferredShop) validShops = [inferredShop]
-      }
-      stateParsed = { ...stateParsed, shops: validShops }
+      let validShops = stateParsed.shops ?? []
 
       // CHAU CHUỐT VĂN PHONG (đợt 50): nếu cấu hình API phụ (slot Combat
       // Anime cũ), model phụ đánh bóng câu chữ theo tông truyện — chạy SAU
@@ -1682,6 +1717,13 @@ export default function RoleplayChat() {
         { ...stateParsed, moveDirectives: finalMoveDirectives },
         latestPlayerLocationRef.current,
       ) ?? latestPlayerLocationRef.current
+      // MONEY có thêm một đường deterministic giống computed update của MVU:
+      // nếu AI quên tag nhưng displayText tự nó có tổng tiền + thanh toán hoặc
+      // số dư trước/sau, app tự dựng directive. Candidate AI vẫn phải qua cùng
+      // validator; preAppliedState (Shop UI) được tiêu thụ trước để không trừ đôi.
+      const moneyReconcile = reconcileMoneyDirectives(stateParsed, displayText, { alreadyApplied: preAppliedState })
+      stateParsed = moneyReconcile.parsed
+
       const finalEvidenceCheck = validateStateAgainstProse(stateParsed, displayText, {
         playerName: playerName || playerProfile?.name,
         party: latestPartyRef.current,
@@ -1702,10 +1744,6 @@ export default function RoleplayChat() {
         if (inferredShop) validShops = [inferredShop]
       }
       stateParsed = { ...stateParsed, shops: validShops }
-      const turnAppliedManifest = preAppliedState
-        ? mergeStateManifests(preAppliedState, stateParsed)
-        : compactStateManifest(stateParsed)
-
       applyStoryState(stateParsed, {
         playerProfile, setPlayerProfile,
         relationships, setRelationships,
@@ -1713,13 +1751,14 @@ export default function RoleplayChat() {
       })
       const turnNow = nextMessages.length
       const mainApplyReport = applyParsedState(stateParsed, turnNow, displayText, turnMessageId)
+      const committedMainManifest = ledgerManifestFromApplyReport(stateParsed, mainApplyReport)
+      const turnAppliedManifest = preAppliedState
+        ? mergeStateManifests(preAppliedState, committedMainManifest)
+        : committedMainManifest
       for (const shop of rejectedShops) {
         mainApplyReport.lines.push(`⚠ Bỏ qua cửa hàng “${shop.name}”: chính văn hiển thị chưa cho nhân vật bước vào bên trong`)
       }
-      mainApplyReport.lines.push(...describeRejectedState([
-        ...evidenceCheck.rejected,
-        ...finalEvidenceCheck.rejected,
-      ]))
+      mainApplyReport.lines.push(...describeRejectedState(finalEvidenceCheck.rejected))
       let movedTo = resolveMoveLocation(stateParsed, latestPlayerLocationRef.current)
       // Lựa chọn chỉ hiện ở nhịp truyện bình thường. Khi app đang chờ
       // Battle/Shop/Pokécenter thì các nút tương tác thật phải là nguồn hành
@@ -1746,11 +1785,21 @@ export default function RoleplayChat() {
         presetUiVariables: extractPresetUiVariables(reply),
         blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
         stateAudit: {
-          version: 2,
+          version: 3,
           canon: 'displayText',
+          deterministicMoney: {
+            detected: moneyReconcile.transactions.length,
+            added: moneyReconcile.inferredAdded.length,
+            deltas: moneyReconcile.inferredAdded,
+            transactions: moneyReconcile.transactions.map((entry) => ({
+              delta: entry.delta,
+              kind: entry.kind,
+              evidence: String(entry.evidence ?? '').slice(0, 260),
+            })),
+          },
           main: {
-            accepted: countParsedStateOperations(stateParsed),
-            rejected: finalEvidenceCheck.rejected.length + rejectedShops.length,
+            accepted: countParsedStateOperations(committedMainManifest),
+            rejected: finalEvidenceCheck.rejected.length + rejectedShops.length + Math.max(0, countParsedStateOperations(stateParsed) - countParsedStateOperations(committedMainManifest)),
           },
           passes: [],
         },
@@ -1939,6 +1988,7 @@ export default function RoleplayChat() {
               })
               const extra = extraEvidence.parsed
               const extraApplyReport = applyParsedState(extra, turnNow, displayText, turnMessageId)
+              const extraLedger = ledgerManifestFromApplyReport(extra, extraApplyReport)
               extraApplyReport.lines.push(...describeRejectedState(extraEvidence.rejected))
               if (extra.money || extra.rel.length || extra.body.length) {
                 applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
@@ -1949,7 +1999,7 @@ export default function RoleplayChat() {
                 setPlayerLocation(extraMovedTo)
               }
               const extraLines = describeParsedChanges(extra, extraMovedTo, `(AI soi biến ${scanIndex + 1})`, extraApplyReport)
-              scanLedger = mergeStateManifests(scanLedger, extra)
+              scanLedger = mergeStateManifests(scanLedger, extraLedger)
               if (extraLines.length || extra.shops?.length || extra.pokecenter || extraTagsText.trim()) {
                 setMessages((msgs) => {
                   const at = msgs.findIndex((m2) => m2.id === turnMessageId)
@@ -1963,12 +2013,12 @@ export default function RoleplayChat() {
                     meta: {
                       ...(current.meta ?? {}),
                       changes: [...(current.meta?.changes ?? []), ...extraLines],
-                      appliedState: mergeStateManifests(current.meta?.appliedState ?? turnAppliedManifest, extra),
+                      appliedState: mergeStateManifests(current.meta?.appliedState ?? turnAppliedManifest, extraLedger),
                       stateAudit: {
                         ...(current.meta?.stateAudit ?? turnMeta.stateAudit),
                         passes: [...(current.meta?.stateAudit?.passes ?? []), {
                           ...passAuditBase,
-                          accepted: countParsedStateOperations(extra),
+                          accepted: countParsedStateOperations(extraLedger),
                           rejected: (passAuditBase.evidenceRejected ?? 0) + extraEvidence.rejected.length,
                         }],
                       },
@@ -2023,17 +2073,28 @@ export default function RoleplayChat() {
     // Tin mới có ledger chính xác. Tin cũ lấy tag từ văn gốc làm mốc bảo thủ.
     const rawBaseline = compactStateManifest(parseStoryStateTags(source.meta?.raw ?? ''))
     let applied = source.meta?.appliedState ?? rawBaseline
+
     const dedicated = [stateApiConfig, stateApiConfig2]
       .filter((config) => config?.baseUrl && config?.model)
       .map((config) => ({ ...apiConfig, ...config }))
     const spare = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
       .find((cfg) => cfg?.baseUrl && cfg?.model)
     const cfgs = dedicated.length ? dedicated : [spare ? { ...apiConfig, ...spare } : apiConfig]
-    if (!cfgs.some((cfg) => cfg?.baseUrl && cfg?.model)) throw new Error('Chưa cấu hình API để quét lại biến.')
-
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
+      // Đợt 101: MONEY deterministic chạy ngay cả khi không có State API.
+      // Nếu nó sửa được tiền, ledger được ghi cùng message trước khi mở khóa.
+      const rerollMoney = reconcileMoneyDirectives(parseStoryStateTags(''), storyText, { alreadyApplied: applied })
+      if (rerollMoney.inferredAdded.length) {
+        const moneyEvidence = validateStateAgainstProse(rerollMoney.parsed, storyText, { alreadyApplied: applied })
+        if (moneyEvidence.parsed.money) {
+          applyStoryState(moneyEvidence.parsed, { setPlayerProfile, setRelationships, setBodyStatus })
+          applied = mergeStateManifests(applied, moneyEvidence.parsed)
+          lines.push(`✅ 💰 Tiền ${moneyEvidence.parsed.money > 0 ? '+' : ''}${moneyEvidence.parsed.money} (app tự đối chiếu từ canon)`)
+        }
+      }
+
       const rerollAuditPasses = []
       let messagePatch = {}
       for (let scanIndex = 0; scanIndex < cfgs.length; scanIndex += 1) {
@@ -2107,6 +2168,7 @@ export default function RoleplayChat() {
           applyStoryState(extra, { setPlayerProfile, setRelationships, setBodyStatus })
         }
         const report = applyParsedState(extra, messageIndex, storyText, sourceKey)
+        const extraLedger = ledgerManifestFromApplyReport(extra, report)
         report.lines.push(...describeRejectedState(evidence.rejected))
         const movedTo = resolveMoveLocation(extra, latestPlayerLocationRef.current)
         if (movedTo && proseSupportsMove(storyText, extra.moveDirectives?.at(-1)?.place)) {
@@ -2116,12 +2178,12 @@ export default function RoleplayChat() {
         lines.push(...describeParsedChanges(extra, movedTo, `(quét lại ${scanIndex + 1})`, report))
         rerollAuditPasses.push({
           ...auditBase,
-          accepted: countParsedStateOperations(extra),
-          rejected: (auditBase.evidenceRejected ?? 0) + evidence.rejected.length,
+          accepted: countParsedStateOperations(extraLedger),
+          rejected: (auditBase.evidenceRejected ?? 0) + evidence.rejected.length + Math.max(0, countParsedStateOperations(extra) - countParsedStateOperations(extraLedger)),
         })
         if (extra.shops?.[0]) messagePatch = { ...messagePatch, shop: extra.shops[0], shopName: extra.shops[0].name, shopValidated: true }
         if (extra.pokecenter) messagePatch = { ...messagePatch, pokecenter: extra.pokecenter.name }
-        applied = mergeStateManifests(applied, extra)
+        applied = mergeStateManifests(applied, extraLedger)
       }
       setMessages((currentMessages) => currentMessages.map((message, index) => index === messageIndex ? {
         ...message,
@@ -2132,9 +2194,19 @@ export default function RoleplayChat() {
           appliedState: applied,
           changes: [...(message.meta?.changes ?? []), ...lines],
           stateAudit: {
-            version: 2,
-            canon: 'displayText',
             ...(message.meta?.stateAudit ?? {}),
+            version: 3,
+            canon: 'displayText',
+            deterministicMoney: {
+              detected: rerollMoney.transactions.length,
+              added: rerollMoney.inferredAdded.length,
+              deltas: rerollMoney.inferredAdded,
+              transactions: rerollMoney.transactions.map((entry) => ({
+                delta: entry.delta,
+                kind: entry.kind,
+                evidence: String(entry.evidence ?? '').slice(0, 260),
+              })),
+            },
             passes: [...(message.meta?.stateAudit?.passes ?? []), ...rerollAuditPasses],
           },
         },

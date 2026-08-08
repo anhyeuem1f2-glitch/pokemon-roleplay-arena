@@ -40,7 +40,9 @@ Các tag hợp lệ (mỗi tag 1 dòng, đúng cú pháp, không thêm gì khác
 QUY TẮC:
 - Xuất tag cho MỌI thay đổi đã xuất hiện/hoàn tất trong chính văn, kể cả được diễn đạt gián tiếp, dùng đại từ, tên gọi rút gọn, nằm cách nhau nhiều câu hoặc nhiều đoạn. Không đòi một câu máy móc chứa đồng thời tên + động từ + kết quả. Chỉ không áp ý định/lời hứa chưa xảy ra, phủ định, suy nghĩ, hoặc chi tiết chỉ nằm trong input người chơi mà chính văn chưa tiếp nhận.
 - KHÔNG có trần số tag hay số mặt hàng: mua/nhận 5, 10 hoặc nhiều món thì xuất đủ một ITEM cho từng món; nhiều sự kiện khác cũng phải xuất đủ, không dừng giữa danh sách.
-- KHÔNG lặp lại thay đổi đã nằm trong danh sách tag đã áp.
+- KHÔNG lặp lại thay đổi đã nằm trong danh sách tag đã áp. Với các biến chấm điểm/đơn trạng thái FRIEND, REL, BODY, HUNGER, LEVEL và REP: nếu ledger đã có cùng TARGET trong lượt này thì coi sự kiện đó ĐÃ XỬ LÝ, không đề xuất lại chỉ vì bạn muốn chọn một delta khác. Với MONEY/ITEM có thể có nhiều giao dịch vật lý độc lập, chỉ bổ sung khi evidence chứng minh đó là sự kiện khác thật.
+- MONEY phải phân biệt GIÁ/Ý ĐỊNH với GIAO DỊCH ĐÃ XONG. Chỉ xuất MONEY khi canon cho thấy tiền thực sự vào/ra: đã trả/thanh toán/quẹt thẻ/chuyển khoản/nhận thưởng/ghi có/bị trừ, hoặc có số dư trước→sau đủ để tính delta. Một câu chỉ báo giá/niêm yết/“sẽ mua” không được đổi tiền. Nếu chính văn có “tổng cộng/thành tiền/hóa đơn” ở câu trước và “thanh toán thành công” ở câu sau, phải nối chúng thành cùng một giao dịch. Nếu có số dư trước và sau, delta = số dư sau - số dư trước. KHÔNG lấy nhầm số dư còn lại, level, số lượng món hay số Route làm số tiền.
+- Với MONEY, ưu tiên đúng TỔNG giao dịch thay vì đơn giá. Không nhân số lượng bằng phỏng đoán nếu chính văn không xác nhận tổng hoặc số dư; app có validator riêng và sẽ bác số không chứng minh được.
 - Nếu chính văn nói một Pokémon CŨ lên cấp, bắt buộc dùng [[LEVEL]], tuyệt đối không đổi thành [[POKEMON]].
 - Nếu chính văn nói Pokémon tiến hoá, bắt buộc dùng [[EVOLVE tên cũ | tên mới]]. Nếu đồng thời lên cấp, xuất LEVEL tên cũ trước rồi EVOLVE; tuyệt đối không dùng POKEMON tên mới vì sẽ làm phân thân.
 - Không có gì để bổ sung → trả về đúng chuỗi: KHONG_CO.`
@@ -72,9 +74,14 @@ export function parseStatePatchResponse(reply, storyText = '') {
     try {
       const payload = JSON.parse(block[1].trim())
       const proposals = Array.isArray(payload?.proposals) ? payload.proposals : []
+      // Evidence anchor chịu được khác biệt trình bày vô hại (markdown, dấu
+      // ngoặc kép cong/thẳng, dash, xuống dòng), nhưng không chấp nhận diễn
+      // giải mới. Sau cổng này candidate vẫn phải qua semantic validator app.
       const normalize = (value) => String(value ?? '')
         .normalize('NFKC')
         .toLocaleLowerCase('vi-VN')
+        .replace(/[“”„‟«»‹›"'`*_~>#|()[\]{}]/g, ' ')
+        .replace(/[—–−-]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim()
       const haystack = normalize(storyText)
@@ -84,7 +91,8 @@ export function parseStatePatchResponse(reply, storyText = '') {
         const evidence = String(proposal?.evidence ?? '').trim()
         if (!/^\[\[[\s\S]+\]\]$/.test(tag)) continue
         const needle = normalize(evidence)
-        if (needle.length < 8 || !haystack.includes(needle)) continue
+        const tokenCount = needle.split(/\s+/).filter(Boolean).length
+        if (needle.length < 8 || tokenCount < 2 || !haystack.includes(needle)) continue
         accepted.push({ tag, evidence })
       }
       return {

@@ -6,7 +6,7 @@ import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
-import { buildWildMon, normalizeAcquiredMon } from '../data/pokemonSpecies.js'
+import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES } from '../data/pokemonSpecies.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
 import { validateStateAgainstProse } from '../utils/stateEvidence.js'
 import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
@@ -15,6 +15,7 @@ import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../da
 import { applyPerksToMon, describeCustomMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from '../utils/characterPresets.js'
 import AvatarPicker from './AvatarPicker.jsx'
+import MonAvatar from './MonAvatar.jsx'
 import { cleanAiOutput, extractStateTags } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea } from '../data/regions.js'
@@ -28,6 +29,9 @@ import { IDENTITIES_V2, buildIdentityContext, getIdentityV2, startingMoneyForIde
 import { OPENINGS } from '../data/openings.js'
 import { getSeason } from '../data/weather.js'
 import { SHOP_ITEMS, resolveItemByName } from '../data/shopItems.js'
+import { HELD_ITEMS, normalizeHeldItem } from '../data/pokemonHeldItems.js'
+import { normalizeAbilityOptions } from '../data/pokemonAbilities.js'
+import { ALL_TYPES } from '../data/pokemonTypes.js'
 import { generateLootItems } from '../data/shopGenerator.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
@@ -43,6 +47,65 @@ import { musicManager } from '../utils/musicManager.js'
 
 const GENDERS = ['Nam', 'Nữ', 'Khác / không tiết lộ']
 const TITLE_INTRO_SESSION_KEY = 'trainer-arena-title-seen-v1'
+const SANDBOX_STAT_KEYS = ['hp', 'atk', 'def', 'spa', 'spd', 'spe']
+const SANDBOX_STAT_LABELS = { hp: 'HP', atk: 'Atk', def: 'Def', spa: 'SpA', spd: 'SpD', spe: 'Spe' }
+const SANDBOX_DEFAULT_IVS = { hp: '31', atk: '31', def: '31', spa: '31', spd: '31', spe: '31' }
+const SANDBOX_DEFAULT_EVS = { hp: '0', atk: '0', def: '0', spa: '0', spd: '0', spe: '0' }
+
+function pokemonId(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function sandboxFormFamily(entry, pokedex = []) {
+  if (!entry) return []
+  const bySameDex = Number.isFinite(entry.num)
+    ? pokedex.filter((candidate) => Number(candidate.num) === Number(entry.num))
+    : []
+  const rootId = pokemonId(entry.baseSpeciesId ?? entry.species ?? entry.name)
+  const byRoot = pokedex.filter((candidate) => {
+    const candidateRoot = pokemonId(candidate.baseSpeciesId ?? candidate.species ?? candidate.name)
+    return candidateRoot === rootId || pokemonId(candidate.species) === rootId
+  })
+  const source = bySameDex.length ? bySameDex : byRoot
+  const seen = new Set()
+  return source
+    .filter((candidate) => {
+      const key = candidate.species ?? candidate.name
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .sort((a, b) => Number(Boolean(a.forme)) - Number(Boolean(b.forme)) || String(a.name).localeCompare(String(b.name)))
+}
+
+function sandboxGenderOptions(entry) {
+  if (!entry) return [{ value: 'auto', label: 'Tự động theo canon' }]
+  const fixed = String(entry.gender ?? '').toUpperCase()
+  if (fixed === 'N') return [{ value: 'unknown', label: '◇ Vô giới tính' }]
+  if (fixed === 'M') return [{ value: 'male', label: '♂ Đực' }]
+  if (fixed === 'F') return [{ value: 'female', label: '♀ Cái' }]
+  const male = Number(entry.genderRatio?.M)
+  const female = Number(entry.genderRatio?.F)
+  const options = [{ value: 'auto', label: '🎲 Tự động theo tỉ lệ canon' }]
+  if (!Number.isFinite(male) || male > 0) options.push({ value: 'male', label: '♂ Đực' })
+  if (!Number.isFinite(female) || female > 0) options.push({ value: 'female', label: '♀ Cái' })
+  return options
+}
+
+function clampSandboxStats(raw, maxValue, fallback = 0) {
+  return Object.fromEntries(SANDBOX_STAT_KEYS.map((key) => {
+    const value = Math.floor(Number(raw?.[key]))
+    return [key, Math.max(0, Math.min(maxValue, Number.isFinite(value) ? value : fallback))]
+  }))
+}
+
+function starterGenderLabel(value) {
+  if (value === 'male') return '♂ Đực'
+  if (value === 'female') return '♀ Cái'
+  if (value === 'unknown') return '◇ Vô giới tính'
+  return '🎲 Tự động'
+}
+
 
 const STEPS = [
   { key: 'mode', label: 'Chế độ' },
@@ -220,6 +283,22 @@ export default function IntroScreen({ onOpenSettings }) {
   const [sandboxStarters, setSandboxStarters] = useState([])
   const [sandboxStarterSpecies, setSandboxStarterSpecies] = useState('')
   const [sandboxStarterLevel, setSandboxStarterLevel] = useState('5')
+  const [sandboxStarterFormSpecies, setSandboxStarterFormSpecies] = useState('')
+  const [sandboxStarterGender, setSandboxStarterGender] = useState('auto')
+  const [sandboxStarterShiny, setSandboxStarterShiny] = useState(false)
+  const [sandboxStarterNature, setSandboxStarterNature] = useState('auto')
+  const [sandboxStarterAbilitySlot, setSandboxStarterAbilitySlot] = useState('auto')
+  const [sandboxStarterTeraType, setSandboxStarterTeraType] = useState('auto')
+  const [sandboxStarterSize, setSandboxStarterSize] = useState('auto')
+  const [sandboxStarterFriendship, setSandboxStarterFriendship] = useState('')
+  const [sandboxStarterHeldItem, setSandboxStarterHeldItem] = useState('')
+  const [sandboxStarterNickname, setSandboxStarterNickname] = useState('')
+  const [sandboxStarterGmaxFactor, setSandboxStarterGmaxFactor] = useState(false)
+  const [sandboxStarterIvMode, setSandboxStarterIvMode] = useState('max')
+  const [sandboxStarterIvs, setSandboxStarterIvs] = useState({ ...SANDBOX_DEFAULT_IVS })
+  const [sandboxStarterEvMode, setSandboxStarterEvMode] = useState('zero')
+  const [sandboxStarterEvs, setSandboxStarterEvs] = useState({ ...SANDBOX_DEFAULT_EVS })
+  const [editingSandboxStarterIndex, setEditingSandboxStarterIndex] = useState(null)
   const [sandboxItems, setSandboxItems] = useState([])
   const [sandboxItemId, setSandboxItemId] = useState('pokeball')
   const [sandboxItemQty, setSandboxItemQty] = useState('1')
@@ -281,18 +360,135 @@ export default function IntroScreen({ onOpenSettings }) {
     : getIdentityV2(playerIdentity)
   const sandboxMode = normalizeGameMode(storyTone) === 'sandbox'
   const activeSteps = STEPS.filter((entry) => entry.key !== 'sandbox' || sandboxMode)
+  const sandboxBaseStarterEntry = pokedexSpecies.find((entry) =>
+    entry.name.toLowerCase() === sandboxStarterSpecies.trim().toLowerCase()
+    || pokemonId(entry.species) === pokemonId(sandboxStarterSpecies),
+  ) ?? null
+  const sandboxStarterForms = sandboxFormFamily(sandboxBaseStarterEntry, pokedexSpecies)
+  const sandboxEffectiveStarterEntry = (
+    sandboxStarterFormSpecies
+      ? pokedexSpecies.find((entry) => String(entry.species) === String(sandboxStarterFormSpecies))
+      : null
+  ) ?? sandboxBaseStarterEntry
+  const sandboxStarterAbilityOptions = (() => {
+    const own = normalizeAbilityOptions(sandboxEffectiveStarterEntry?.abilities)
+    if (own.length) return own
+    const base = sandboxEffectiveStarterEntry?.baseSpeciesId
+      ? pokedexSpecies.find((entry) => pokemonId(entry.species) === pokemonId(sandboxEffectiveStarterEntry.baseSpeciesId))
+      : null
+    return normalizeAbilityOptions(base?.abilities)
+  })()
+  const sandboxStarterGenderOptions = sandboxGenderOptions(sandboxEffectiveStarterEntry)
+  const sandboxPreviewMon = sandboxEffectiveStarterEntry ? {
+    name: sandboxEffectiveStarterEntry.name,
+    species: sandboxEffectiveStarterEntry.species,
+    spriteId: sandboxEffectiveStarterEntry.spriteId ?? sandboxEffectiveStarterEntry.species,
+    shiny: sandboxStarterShiny,
+    gender: sandboxStarterGender === 'auto' ? null : sandboxStarterGender,
+  } : null
+
+  function resetSandboxStarterDraft({ keepLevel = true } = {}) {
+    setSandboxStarterSpecies('')
+    setSandboxStarterFormSpecies('')
+    setSandboxStarterGender('auto')
+    setSandboxStarterShiny(false)
+    setSandboxStarterNature('auto')
+    setSandboxStarterAbilitySlot('auto')
+    setSandboxStarterTeraType('auto')
+    setSandboxStarterSize('auto')
+    setSandboxStarterFriendship('')
+    setSandboxStarterHeldItem('')
+    setSandboxStarterNickname('')
+    setSandboxStarterGmaxFactor(false)
+    setSandboxStarterIvMode('max')
+    setSandboxStarterIvs({ ...SANDBOX_DEFAULT_IVS })
+    setSandboxStarterEvMode('zero')
+    setSandboxStarterEvs({ ...SANDBOX_DEFAULT_EVS })
+    setEditingSandboxStarterIndex(null)
+    if (!keepLevel) setSandboxStarterLevel('5')
+  }
 
   function addSandboxStarter() {
-    const wanted = sandboxStarterSpecies.trim().toLowerCase()
-    const species = pokedexSpecies.find((entry) => entry.name.toLowerCase() === wanted)
+    const species = sandboxEffectiveStarterEntry
     if (!species) {
-      setError('Không tìm thấy Pokémon này trong Pokédex đã tải. Hãy chọn đúng tên trong danh sách gợi ý.')
+      setError('Không tìm thấy Pokémon/form này trong Pokédex đã tải. Hãy chọn đúng tên trong danh sách gợi ý.')
       return
     }
     const level = Math.max(1, Math.min(100, Math.floor(Number(sandboxStarterLevel) || 1)))
-    setSandboxStarters((current) => [...current, { species: species.name, level }])
-    setSandboxStarterSpecies('')
+    const allowedGenders = new Set(sandboxStarterGenderOptions.map((option) => option.value))
+    const gender = sandboxStarterGender === 'auto' || allowedGenders.has(sandboxStarterGender) ? sandboxStarterGender : 'auto'
+    const ivs = sandboxStarterIvMode === 'random'
+      ? null
+      : sandboxStarterIvMode === 'max'
+        ? { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }
+        : clampSandboxStats(sandboxStarterIvs, 31, 31)
+    const evs = sandboxStarterEvMode === 'max'
+      ? { hp: 252, atk: 252, def: 252, spa: 252, spd: 252, spe: 252 }
+      : sandboxStarterEvMode === 'zero'
+        ? { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 }
+        : clampSandboxStats(sandboxStarterEvs, 252, 0)
+    const friendshipNumber = sandboxStarterFriendship === ''
+      ? null
+      : Math.max(0, Math.min(255, Math.floor(Number(sandboxStarterFriendship) || 0)))
+    const starter = {
+      species: species.name,
+      speciesKey: species.species,
+      level,
+      gender,
+      shiny: Boolean(sandboxStarterShiny),
+      nature: sandboxStarterNature,
+      abilitySlot: sandboxStarterAbilitySlot,
+      abilityName: sandboxStarterAbilitySlot === 'auto'
+        ? null
+        : (sandboxStarterAbilityOptions.find((ability) => String(ability.slot) === String(sandboxStarterAbilitySlot))?.name ?? null),
+      teraType: sandboxStarterTeraType,
+      sizeClass: sandboxStarterSize,
+      friendship: friendshipNumber,
+      heldItemId: sandboxStarterHeldItem || null,
+      nickname: sandboxStarterNickname.trim(),
+      gmaxFactor: Boolean(sandboxStarterGmaxFactor),
+      ivMode: sandboxStarterIvMode,
+      ivs,
+      evMode: sandboxStarterEvMode,
+      evs,
+    }
+    setSandboxStarters((current) => {
+      if (Number.isInteger(editingSandboxStarterIndex) && editingSandboxStarterIndex >= 0 && editingSandboxStarterIndex < current.length) {
+        return current.map((entry, index) => index === editingSandboxStarterIndex ? starter : entry)
+      }
+      return [...current, starter]
+    })
+    resetSandboxStarterDraft({ keepLevel: true })
     setSandboxStarterLevel(String(level))
+    setError(null)
+  }
+
+  function editSandboxStarter(index) {
+    const starter = sandboxStarters[index]
+    if (!starter) return
+    const entry = pokedexSpecies.find((candidate) => candidate.species === starter.speciesKey)
+      ?? pokedexSpecies.find((candidate) => candidate.name.toLowerCase() === String(starter.species).toLowerCase())
+    const base = entry?.baseSpeciesId
+      ? pokedexSpecies.find((candidate) => pokemonId(candidate.species) === pokemonId(entry.baseSpeciesId))
+      : entry
+    setSandboxStarterSpecies(base?.name ?? entry?.name ?? starter.species ?? '')
+    setSandboxStarterFormSpecies(entry?.species ?? starter.speciesKey ?? '')
+    setSandboxStarterLevel(String(starter.level ?? 5))
+    setSandboxStarterGender(starter.gender ?? 'auto')
+    setSandboxStarterShiny(Boolean(starter.shiny))
+    setSandboxStarterNature(starter.nature ?? 'auto')
+    setSandboxStarterAbilitySlot(starter.abilitySlot ?? 'auto')
+    setSandboxStarterTeraType(starter.teraType ?? 'auto')
+    setSandboxStarterSize(starter.sizeClass ?? 'auto')
+    setSandboxStarterFriendship(starter.friendship === null || starter.friendship === undefined ? '' : String(starter.friendship))
+    setSandboxStarterHeldItem(starter.heldItemId ?? '')
+    setSandboxStarterNickname(starter.nickname ?? '')
+    setSandboxStarterGmaxFactor(Boolean(starter.gmaxFactor))
+    setSandboxStarterIvMode(starter.ivMode ?? (starter.ivs ? 'custom' : 'random'))
+    setSandboxStarterIvs(Object.fromEntries(SANDBOX_STAT_KEYS.map((key) => [key, String(starter.ivs?.[key] ?? 31)])))
+    setSandboxStarterEvMode(starter.evMode ?? (starter.evs ? 'custom' : 'zero'))
+    setSandboxStarterEvs(Object.fromEntries(SANDBOX_STAT_KEYS.map((key) => [key, String(starter.evs?.[key] ?? 0)])))
+    setEditingSandboxStarterIndex(index)
     setError(null)
   }
 
@@ -364,12 +560,53 @@ export default function IntroScreen({ onOpenSettings }) {
     setPlayerTraits(traits)
     const journeyTrainerId = resetTrainerIdentity()
     const sandboxOwned = sandboxMode ? sandboxStarters.flatMap((starter, index) => {
-      const entry = pokedexSpecies.find((species) => species.name.toLowerCase() === String(starter.species).toLowerCase())
+      const entry = pokedexSpecies.find((species) => String(species.species) === String(starter.speciesKey))
+        ?? pokedexSpecies.find((species) => species.name.toLowerCase() === String(starter.species).toLowerCase())
       if (!entry) return []
       const level = Math.max(1, Math.min(100, Math.floor(Number(starter.level) || 1)))
       const built = normalizeAcquiredMon(buildWildMon(entry, level, movesDb))
+      const abilities = (() => {
+        const own = normalizeAbilityOptions(entry.abilities)
+        if (own.length) return own
+        const base = entry.baseSpeciesId
+          ? pokedexSpecies.find((candidate) => pokemonId(candidate.species) === pokemonId(entry.baseSpeciesId))
+          : null
+        return normalizeAbilityOptions(base?.abilities)
+      })()
+      const chosenAbility = starter.abilitySlot && starter.abilitySlot !== 'auto'
+        ? abilities.find((ability) => String(ability.slot) === String(starter.abilitySlot))
+        : null
+      const allowedGenders = new Set(sandboxGenderOptions(entry).map((option) => option.value))
+      const requestedGender = starter.gender && starter.gender !== 'auto' && allowedGenders.has(starter.gender)
+        ? starter.gender
+        : built.gender
+      let customized = {
+        ...built,
+        shiny: starter.shiny === undefined ? built.shiny : Boolean(starter.shiny),
+        gender: requestedGender,
+        nature: starter.nature && starter.nature !== 'auto' ? starter.nature : built.nature,
+        ivs: starter.ivs ? clampSandboxStats(starter.ivs, 31, 31) : built.ivs,
+        evs: starter.evs ? clampSandboxStats(starter.evs, 252, 0) : built.evs,
+        teraType: starter.teraType && starter.teraType !== 'auto' ? starter.teraType : built.teraType,
+        sizeClass: starter.sizeClass && starter.sizeClass !== 'auto' ? starter.sizeClass : built.sizeClass,
+        friendship: Number.isFinite(starter.friendship) ? Math.max(0, Math.min(255, starter.friendship)) : built.friendship,
+        heldItem: starter.heldItemId ? normalizeHeldItem(starter.heldItemId) : null,
+        nickname: String(starter.nickname ?? '').trim() || undefined,
+        gmaxFactor: Boolean(starter.gmaxFactor),
+      }
+      if (chosenAbility) {
+        customized = {
+          ...customized,
+          ability: chosenAbility.name,
+          abilitySlot: chosenAbility.slot,
+          abilityHidden: Boolean(chosenAbility.hidden),
+        }
+      }
+      customized = recomputeMonStats(customized)
+      customized = { ...customized, hp: customized.maxHp, status: null }
+      customized = applyPerksToMon(customized, traits)
       return [ensurePokemonIdentity({
-        ...applyPerksToMon(built, traits),
+        ...customized,
         acquisitionSourceId: `sandbox-${journeyTrainerId}:starter:${index}:${entry.species ?? entry.name.toLowerCase()}`,
       }, journeyTrainerId)]
     }) : []
@@ -446,7 +683,7 @@ export default function IntroScreen({ onOpenSettings }) {
       // chơi beta phản ánh). Giờ: mặc định vẫn để dành làm cột mốc, NHƯNG
       // nếu cảnh mở màn xoay quanh việc nhận Pokémon thì phải diễn TRỌN VẸN.
       sandboxMode
-        ? `SANDBOX — STATE KHỞI ĐẦU ĐÃ CHỐT TRƯỚC KHI KỂ: tiền=${startingMoney}; Pokémon đã sở hữu=${openingParty.length + openingPc.length ? [...openingParty, ...openingPc].map((mon) => `${mon.name} Lv${mon.level}`).join(', ') : 'không có'}; vật phẩm=${openingInventory.length ? openingInventory.map((item) => `${item.name} ${item.infinite ? '∞' : `x${item.qty}`}`).join(', ') : 'không có'}. Đây là dữ liệu thật đã nằm trong save: KHÔNG dùng MONEY/ITEM/POKEMON để cấp lại chúng trong mở đầu. Hãy coi chúng là tài sản/cộng sự có sẵn trước cảnh đầu và bắt đầu câu chuyện theo nhịp Anime.`
+        ? `SANDBOX — STATE KHỞI ĐẦU ĐÃ CHỐT TRƯỚC KHI KỂ: tiền=${startingMoney}; Pokémon đã sở hữu=${openingParty.length + openingPc.length ? [...openingParty, ...openingPc].map((mon) => `${mon.nickname ? `${mon.nickname} (${mon.name})` : mon.name} Lv${mon.level}${mon.shiny ? ' ✨' : ''}${mon.gender === 'female' ? ' ♀' : mon.gender === 'male' ? ' ♂' : mon.gender === 'unknown' ? ' ◇' : ''} [Nature ${mon.nature}; Ability ${mon.ability}; Tera ${String(mon.teraType ?? 'auto').toUpperCase()}]`).join(', ') : 'không có'}; vật phẩm=${openingInventory.length ? openingInventory.map((item) => `${item.name} ${item.infinite ? '∞' : `x${item.qty}`}`).join(', ') : 'không có'}. Đây là dữ liệu thật đã nằm trong save: KHÔNG dùng MONEY/ITEM/POKEMON để cấp lại chúng trong mở đầu. Hãy coi chúng là tài sản/cộng sự có sẵn trước cảnh đầu và bắt đầu câu chuyện theo nhịp Anime.`
         : `Người chơi KHỞI ĐẦU TAY TRẮNG — CHƯA có Pokémon nào. Bình thường, việc nhận Pokémon ĐẦU TIÊN nên là một cột mốc có ý nghĩa${ageNum && ageNum < 10 ? ' (nhân vật còn nhỏ tuổi — có thể để muộn hơn nữa, vài chương sau mới nhận)' : ''} đến từ diễn biến tự nhiên, KHÔNG phát vội ngay câu đầu. NHƯNG nếu tình huống mở đầu mà người chơi chọn CHÍNH LÀ cảnh đi nhận Pokémon (đến phòng nghiên cứu, gặp giáo sư, lễ trao Pokémon...) thì hãy diễn cảnh đó TRỌN VẸN và ĐẦY ĐỦ: giới thiệu từng Pokémon khởi đầu có mặt, cho người chơi cơ hội quan sát/tương tác/lựa chọn — TUYỆT ĐỐI không "đuổi" người chơi lên đường khi chưa giới thiệu hay trao Pokémon nào. Khi trao thật thì dùng tag [[POKEMON Tên | Lv..]].`,
       opening
         ? `TÌNH HUỐNG MỞ ĐẦU BẮT BUỘC BÁM THEO (đây là mong muốn của người chơi, phải là hạt nhân của đoạn mở đầu): ${opening.seed}`
@@ -1031,29 +1268,224 @@ export default function IntroScreen({ onOpenSettings }) {
               </div>
 
               <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--line)', borderRadius: 10 }}>
-                <div style={{ color: 'var(--amber)', fontWeight: 800, marginBottom: 8 }}>Pokémon khởi đầu · không giới hạn số lượng</div>
-                <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) 110px auto', gap: 8 }}>
+                <div style={{ color: 'var(--amber)', fontWeight: 800, marginBottom: 4 }}>Pokémon Builder · không giới hạn số lượng</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginBottom: 10 }}>
+                  Mỗi cá thể được chốt riêng trước khi mở đầu. 6 con đầu vào Party, từ con thứ 7 vào PC. Không để AI random lại thuộc tính đã chọn.
+                </div>
+
+                <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(190px,1.4fr) minmax(170px,1fr) 100px', gap: 8 }}>
                   <div>
+                    <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Loài</label>
                     <input
                       list="sandbox-pokemon-list"
                       value={sandboxStarterSpecies}
-                      onChange={(event) => setSandboxStarterSpecies(event.target.value)}
-                      placeholder="Tên Pokémon, VD: Garchomp"
+                      onChange={(event) => {
+                        setSandboxStarterSpecies(event.target.value)
+                        setSandboxStarterFormSpecies('')
+                        setSandboxStarterAbilitySlot('auto')
+                        setSandboxStarterGender('auto')
+                      }}
+                      placeholder="VD: Garchomp, Eevee, Giratina"
                     />
                     <datalist id="sandbox-pokemon-list">
                       {pokedexSpecies.map((entry) => <option key={entry.species ?? entry.name} value={entry.name} />)}
                     </datalist>
                   </div>
-                  <input type="number" min="1" max="100" value={sandboxStarterLevel} onChange={(event) => setSandboxStarterLevel(event.target.value)} title="Level 1-100" />
-                  <button className="btn btn--primary" type="button" onClick={addSandboxStarter}>+ Thêm</button>
+                  <div>
+                    <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Hình thái / Form</label>
+                    <select
+                      value={sandboxEffectiveStarterEntry?.species ?? ''}
+                      disabled={!sandboxBaseStarterEntry}
+                      onChange={(event) => {
+                        setSandboxStarterFormSpecies(event.target.value)
+                        setSandboxStarterAbilitySlot('auto')
+                        setSandboxStarterGender('auto')
+                      }}
+                    >
+                      {!sandboxBaseStarterEntry && <option value="">Chọn loài trước</option>}
+                      {sandboxStarterForms.map((entry) => (
+                        <option key={entry.species} value={entry.species}>
+                          {entry.forme ? `${entry.forme} · ${entry.name}` : `Mặc định · ${entry.name}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Level</label>
+                    <input type="number" min="1" max="100" value={sandboxStarterLevel} onChange={(event) => setSandboxStarterLevel(event.target.value)} title="Level 1-100" />
+                  </div>
                 </div>
-                <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 6 }}>Level không bị giới hạn theo tiến trình: chọn bất kỳ Lv1–100. Có thể thêm nhiều cá thể cùng loài.</div>
+
+                {sandboxEffectiveStarterEntry && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '90px minmax(0,1fr)', gap: 12, alignItems: 'start', marginTop: 12, padding: 10, border: '1px solid var(--line)', borderRadius: 10, background: 'rgba(255,255,255,0.015)' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <MonAvatar mon={sandboxPreviewMon} side="enemy" size={82} />
+                      <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>{sandboxEffectiveStarterEntry.name}</div>
+                    </div>
+                    <div style={{ display: 'grid', gap: 9 }}>
+                      <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(120px,1fr))', gap: 8 }}>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Giới tính</label>
+                          <select value={sandboxStarterGenderOptions.some((option) => option.value === sandboxStarterGender) ? sandboxStarterGender : sandboxStarterGenderOptions[0]?.value} onChange={(event) => setSandboxStarterGender(event.target.value)}>
+                            {sandboxStarterGenderOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Nature</label>
+                          <select value={sandboxStarterNature} onChange={(event) => setSandboxStarterNature(event.target.value)}>
+                            <option value="auto">🎲 Tự động</option>
+                            {Object.keys(NATURES).map((nature) => <option key={nature} value={nature}>{nature}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Ability</label>
+                          <select value={sandboxStarterAbilitySlot} onChange={(event) => setSandboxStarterAbilitySlot(event.target.value)}>
+                            <option value="auto">🎲 Tự động</option>
+                            {sandboxStarterAbilityOptions.map((ability) => (
+                              <option key={`${ability.slot}-${ability.name}`} value={ability.slot}>{ability.name}{ability.hidden ? ' · Hidden' : ''}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(110px,1fr))', gap: 8 }}>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Tera Type</label>
+                          <select value={sandboxStarterTeraType} onChange={(event) => setSandboxStarterTeraType(event.target.value)}>
+                            <option value="auto">🎲 Tự động</option>
+                            {ALL_TYPES.map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Kích thước</label>
+                          <select value={sandboxStarterSize} onChange={(event) => setSandboxStarterSize(event.target.value)}>
+                            <option value="auto">🎲 Tự động</option>
+                            <option value="tiny">Tiny</option>
+                            <option value="average">Average</option>
+                            <option value="jumbo">Jumbo</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Friendship 0–255</label>
+                          <input type="number" min="0" max="255" value={sandboxStarterFriendship} onChange={(event) => setSandboxStarterFriendship(event.target.value)} placeholder="Auto" />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Nickname</label>
+                          <input value={sandboxStarterNickname} onChange={(event) => setSandboxStarterNickname(event.target.value)} placeholder="Không bắt buộc" />
+                        </div>
+                      </div>
+
+                      <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(170px,1fr) 1fr', gap: 8, alignItems: 'end' }}>
+                        <div>
+                          <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Held item</label>
+                          <select value={sandboxStarterHeldItem} onChange={(event) => setSandboxStarterHeldItem(event.target.value)}>
+                            <option value="">Không cầm</option>
+                            {HELD_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, minHeight: 34, alignItems: 'center' }}>
+                          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--text-mid)' }}>
+                            <input type="checkbox" checked={sandboxStarterShiny} onChange={(event) => setSandboxStarterShiny(event.target.checked)} /> ✨ Shiny
+                          </label>
+                          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11.5, color: 'var(--text-mid)' }} title="Cho phép dùng forme Gigantamax khi loài có Gmax và trận cho phép Dynamax.">
+                            <input type="checkbox" checked={sandboxStarterGmaxFactor} onChange={(event) => setSandboxStarterGmaxFactor(event.target.checked)} /> G-Max Factor
+                          </label>
+                        </div>
+                      </div>
+
+                      <div style={{ padding: 9, border: '1px solid var(--line)', borderRadius: 8 }}>
+                        <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1fr)', gap: 10, alignItems: 'start' }}>
+                          <div>
+                            <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>IV</label>
+                            <select value={sandboxStarterIvMode} onChange={(event) => setSandboxStarterIvMode(event.target.value)}>
+                              <option value="random">🎲 Random 0–31</option>
+                              <option value="max">31 tất cả</option>
+                              <option value="custom">Tự nhập</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,minmax(38px,1fr))', gap: 5 }}>
+                            {SANDBOX_STAT_KEYS.map((key) => (
+                              <label key={`iv-${key}`} style={{ fontSize: 9.5, color: 'var(--text-dim)', textAlign: 'center' }}>
+                                {SANDBOX_STAT_LABELS[key]}
+                                <input
+                                  type="number" min="0" max="31"
+                                  disabled={sandboxStarterIvMode !== 'custom'}
+                                  value={sandboxStarterIvMode === 'max' ? '31' : sandboxStarterIvMode === 'random' ? '' : sandboxStarterIvs[key]}
+                                  placeholder={sandboxStarterIvMode === 'random' ? '🎲' : '31'}
+                                  onChange={(event) => setSandboxStarterIvs((current) => ({ ...current, [key]: event.target.value }))}
+                                  style={{ padding: '6px 3px', textAlign: 'center' }}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '150px minmax(0,1fr)', gap: 10, alignItems: 'start', marginTop: 8 }}>
+                          <div>
+                            <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>EV</label>
+                            <select value={sandboxStarterEvMode} onChange={(event) => setSandboxStarterEvMode(event.target.value)}>
+                              <option value="zero">0 tất cả</option>
+                              <option value="max">252 tất cả · Sandbox</option>
+                              <option value="custom">Tự nhập</option>
+                            </select>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,minmax(38px,1fr))', gap: 5 }}>
+                            {SANDBOX_STAT_KEYS.map((key) => (
+                              <label key={`ev-${key}`} style={{ fontSize: 9.5, color: 'var(--text-dim)', textAlign: 'center' }}>
+                                {SANDBOX_STAT_LABELS[key]}
+                                <input
+                                  type="number" min="0" max="252"
+                                  disabled={sandboxStarterEvMode !== 'custom'}
+                                  value={sandboxStarterEvMode === 'max' ? '252' : sandboxStarterEvMode === 'zero' ? '0' : sandboxStarterEvs[key]}
+                                  onChange={(event) => setSandboxStarterEvs((current) => ({ ...current, [key]: event.target.value }))}
+                                  style={{ padding: '6px 3px', textAlign: 'center' }}
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 9.8, color: 'var(--text-dim)', marginTop: 6 }}>
+                          Sandbox cho phép preset EV 252 ở cả 6 chỉ số để tạo cá thể siêu mạnh. Gameplay sau đó vẫn chạy bằng công thức battle hiện tại.
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
+                        {editingSandboxStarterIndex !== null && (
+                          <button className="btn" type="button" onClick={() => resetSandboxStarterDraft({ keepLevel: true })}>Huỷ sửa</button>
+                        )}
+                        <button className="btn btn--primary" type="button" onClick={addSandboxStarter}>
+                          {editingSandboxStarterIndex !== null ? '✓ Lưu Pokémon' : '+ Thêm Pokémon'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!sandboxEffectiveStarterEntry && (
+                  <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 7 }}>
+                    Chọn đúng tên Pokémon để mở toàn bộ tuỳ chỉnh giới tính, form, Shiny, Nature, Ability, IV/EV và các thuộc tính cá thể.
+                  </div>
+                )}
+
                 {sandboxStarters.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
                     {sandboxStarters.map((entry, index) => (
-                      <div key={`${entry.species}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: '7px 9px', border: '1px solid var(--line)', borderRadius: 8 }}>
-                        <span style={{ color: 'var(--text-hi)', fontSize: 12 }}>{index < 6 ? `Party ${index + 1}` : `PC ${index - 5}`} · {entry.species} · Lv.{entry.level}</span>
-                        <button className="btn" type="button" onClick={() => setSandboxStarters((current) => current.filter((_, at) => at !== index))}>×</button>
+                      <div key={`${entry.speciesKey ?? entry.species}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', padding: '8px 9px', border: `1px solid ${editingSandboxStarterIndex === index ? 'var(--amber)' : 'var(--line)'}`, borderRadius: 8 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ color: 'var(--text-hi)', fontSize: 12, fontWeight: 700 }}>
+                            {index < 6 ? `Party ${index + 1}` : `PC ${index - 5}`} · {entry.shiny ? '✨ ' : ''}{entry.nickname ? `${entry.nickname} (${entry.species})` : entry.species} · Lv.{entry.level} · {starterGenderLabel(entry.gender)}
+                          </div>
+                          <div style={{ fontSize: 9.8, color: 'var(--text-dim)', marginTop: 2 }}>
+                            Nature {entry.nature === 'auto' ? 'Auto' : entry.nature} · Ability {entry.abilityName ?? (entry.abilitySlot === 'auto' ? 'Auto' : `slot ${entry.abilitySlot}`)} · Tera {entry.teraType === 'auto' ? 'Auto' : String(entry.teraType).toUpperCase()} · IV {entry.ivMode === 'random' ? 'Random' : entry.ivMode === 'max' ? '31×6' : 'Custom'} · EV {entry.evMode === 'max' ? '252×6' : entry.evMode === 'zero' ? '0' : 'Custom'}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+                          <button className="btn" type="button" onClick={() => editSandboxStarter(index)}>Sửa</button>
+                          <button className="btn" type="button" onClick={() => {
+                            setSandboxStarters((current) => current.filter((_, at) => at !== index))
+                            if (editingSandboxStarterIndex === index) resetSandboxStarterDraft({ keepLevel: true })
+                            else if (editingSandboxStarterIndex !== null && editingSandboxStarterIndex > index) setEditingSandboxStarterIndex(editingSandboxStarterIndex - 1)
+                          }}>×</button>
+                        </div>
                       </div>
                     ))}
                   </div>

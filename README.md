@@ -2822,3 +2822,25 @@ Bản full đóng tên **`pokemon-new.zip`** và bên trong có đúng một th�
 ### File bàn giao đợt 103
 
 Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đúng một thư mục gốc **`pokemon-new/`**, để giải nén trực tiếp vào `D:\\` và ghi đè `D:\\pokemon-new\\`.
+
+## Cập nhật (đợt 104) — Sandbox Pokémon Builder: form, gender và build cá thể tự chọn
+
+**SANDBOX KHÔNG CÒN CHỈ CHỌN LOÀI + LEVEL.** Mỗi Pokémon khởi đầu có một builder cá thể riêng trước khi thêm vào Party/PC. Người chơi chọn được hình thái/form trong cùng họ Pokédex, giới tính hợp lệ theo dữ liệu canon của loài, Shiny, Nature, Ability (kể cả Hidden Ability nếu loài có), Tera Type, kích thước, Friendship, nickname, held item và G-Max Factor. Mục nào để `Tự động` tiếp tục dùng logic random/canon hiện tại; mục đã chốt được ghi thẳng vào object Pokémon trước opening và AI không có quyền random lại.
+
+**FORM LƯU BẰNG `speciesKey`, KHÔNG CHỈ TÊN HIỂN THỊ.** Builder nhóm các entry có cùng số Pokédex/root species để người chơi đổi giữa form mặc định, regional, special form, Mega/Gmax/battle form có trong dữ liệu runtime. Khi tạo cá thể thật, app tìm đúng entry bằng `speciesKey`, nhờ đó `spriteId`, base stats, types, forme và metadata của form đã chọn đi cùng cá thể. Cơ chế này cũng nối thẳng với resolver Shiny đợt 103.
+
+**GIỚI TÍNH KHÔNG RANDOM NẾU NGƯỜI CHƠI ĐÃ CHỌN.** Dropdown gender chỉ hiện lựa chọn mà loài/form cho phép: loài chỉ đực/chỉ cái/vô giới tính bị khóa đúng canon; loài có tỉ lệ hỗn hợp cho phép chọn đực/cái hoặc để tự động theo tỉ lệ. Giá trị đã chọn được ghi vào cùng cá thể nên Summary/party/PC/battle đọc một nguồn duy nhất.
+
+**IV/EV ĐƯỢC CHỐT THẬT VÀ TÍNH LẠI STATS.** IV có ba chế độ Random, 31 tất cả hoặc tự nhập 0–31 từng stat. EV có 0 tất cả, tự nhập 0–252 từng stat, hoặc preset Sandbox 252 cả sáu chỉ số. Preset 252×6 cố ý không ép tổng 510 ở bước tạo Sandbox để cho phép cá thể siêu mạnh theo đúng mục đích chế độ; sau khi build, app gọi `recomputeMonStats` nên HP/Atk/Def/SpA/SpD/Spe trong battle là chỉ số thật từ IV/EV/Nature đã chọn, không phải metadata trang trí.
+
+**ABILITY/HELD ITEM/GIMMICK LÀ STATE GAMEPLAY THẬT.** Ability chọn theo slot dữ liệu Showdown và ghi `ability`, `abilitySlot`, `abilityHidden`; held item đi qua `normalizeHeldItem`; Tera Type và `gmaxFactor` được ghi trực tiếp lên cá thể. Vì vậy battle engine hiện tại đọc ngay cấu hình này, không cần AI kể lại để kích hoạt.
+
+**CÓ THỂ SỬA LẠI POKÉMON ĐÃ THÊM.** Danh sách starter có nút `Sửa`; builder nạp ngược toàn bộ cấu hình của cá thể đã chọn và lưu đè đúng slot thay vì bắt người dùng xoá rồi nhập lại từ đầu. Preset tạo nhân vật tiếp tục lưu nguyên `sandboxStarters`, nên build chi tiết cũng đi theo preset.
+
+**OPENING ĐƯỢC BÁO RÕ BUILD ĐÃ CHỐT.** Prompt mở đầu Sandbox ngoài loài/level/Shiny/gender còn truyền Nature, Ability và Tera Type của Pokémon đã sở hữu, đồng thời giữ luật cấm cấp lại MONEY/ITEM/POKEMON. Chính văn vì vậy có đủ thông tin để miêu tả đúng cá thể nhưng không được biến phần mô tả thành một lần grant state thứ hai.
+
+**Kiểm tra đợt 104:** regression đợt 73, 74, 99, 100, 101, 102, 103 tiếp tục PASS sau khi cập nhật assertion Sandbox cũ theo builder mới. `test-dot104.mjs` bổ sung 12 ca cho form/speciesKey, gender canon, Shiny, Nature, Ability/Hidden Ability, IV/EV, tính lại combat stats, Tera/size/friendship/nickname, held item, G-Max Factor và opening prompt. Toàn bộ `.js` tiếp tục qua `node --check`; toàn bộ `.jsx` được parse bằng TypeScript JSX parser trước khi đóng gói.
+
+### File bàn giao đợt 104
+
+Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đúng một thư mục gốc **`pokemon-new/`**, để giải nén trực tiếp vào `D:\` và ghi đè `D:\pokemon-new\`. Không đưa `.git` hoặc `node_modules` vào ZIP.

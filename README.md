@@ -2713,3 +2713,30 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/` (đặc biệt nhạc rất nặng), `test-dot*.mjs`, ảnh báo lỗi, preset JSON hay ZIP bàn giao. ZIP đợt 98 chỉ chứa đúng `src/` và `README.md`.
+
+## Cập nhật (đợt 99) — State Audit có evidence + chế độ Sandbox
+
+**STATE API KHÔNG CÒN CHỈ NÉM TAG TRẦN.** Khi provider/model hỗ trợ định dạng mới, mỗi đề xuất state phải nằm trong `<STATE_PATCH>` và đi kèm một `evidence` là đoạn trích nguyên văn liên tục từ đúng chính văn hiển thị. App chuẩn hoá Unicode/khoảng trắng rồi kiểm tra evidence có thực sự tồn tại trong `displayText`; proposal không có evidence thật bị loại trước khi tới semantic validator. Nếu model đã xuất marker structured nhưng JSON hỏng, app bỏ toàn bộ lượt scan đó thay vì lén nhặt các tag còn sót bên ngoài. Provider cũ vẫn được tương thích bằng tag trần, nhưng các tag đó tiếp tục phải qua validator cũ.
+
+**HAI AI SOI BIẾN ĐƯỢC TÁCH VAI TRÒ.** Pass 1 là `Extractor`: rà toàn bộ chính văn để tăng độ bao phủ. Pass 2 là `Auditor`: nhận state snapshot và ledger mới nhất, rồi rà lại checklist MONEY, REL, BODY, POKEMON, EVOLVE, LEVEL, FRIEND, ITEM, EQUIP/UNEQUIP, SHOP, LOOT, POKECENTER, HUNGER, DATE, TRAIN, MOVE, NPC, FACT, BADGE, QUEST, REP, WANTED, LEGENDARY_ACCESS, RIBBON/MARK để chỉ bổ sung phần còn thiếu. Mỗi pass nhận snapshot tiền/party/PC/inventory/vị trí hiện tại để phân biệt tài sản cũ với sự kiện mới, nhưng snapshot không tự có quyền sửa save.
+
+**PIPELINE GIỮ MÔ HÌNH PRE-COMMIT CỦA MVU.** Candidate được trích xuất trước, kiểm tra evidence, parse thành state directive, lọc `preAppliedState`, lọc ledger chống trùng, kiểm tra luật cửa hàng/chế độ/encounter và `validateStateAgainstProse` trên `displayText` trước khi bất kỳ setter gameplay nào được gọi. State API chỉ đề xuất patch; app vẫn là nơi duy nhất commit state thật. Ledger tiếp tục làm khóa idempotent cho quét nền, State API 2 và `Quét lại biến thật`.
+
+**THÊM STATE AUDIT NGAY TRONG NÚT 🧬.** Mỗi lượt lưu `meta.stateAudit`: canon đang dùng, số candidate model chính đã áp/bác và từng pass Extractor/Auditor đã đề xuất bao nhiêu, bao nhiêu candidate bị loại ở evidence/validator, bao nhiêu thực sự được nhận. `Quét lại biến thật` cũng ghi audit riêng thay vì trở thành một đường cập nhật mù. Mục này chỉ hiển thị metadata vận hành, không dùng suy nghĩ/CoT làm bằng chứng state.
+
+**ĐỔI CHẾ ĐỘ `SẢNG VĂN` THÀNH `SANDBOX`.** Save cũ mang key `sang` được migrate mềm sang `sandbox`. Sandbox tự do ở khâu tạo nhân vật: người chơi tự đặt tiền khởi đầu, thêm không giới hạn số Pokémon khởi đầu và chọn bất kỳ level hợp lệ của Pokémon người chơi (Lv1–100), thêm vật phẩm với số lượng lớn hoặc cờ vô hạn, đồng thời dùng năng lực tự mô tả để đặt một hay nhiều cơ chế/sức mạnh. Sáu Pokémon đầu vào party, cá thể thứ bảy trở đi tự vào PC; Pokémon hợp lệ phát sinh thêm ngay trong opening cũng tuân cùng quy tắc nên không còn bị mất khi party đầy.
+
+**SANDBOX KHÔNG TỰ NERF THIẾT LẬP NGƯỜI CHƠI.** Năng lực custom trong Sandbox là canon của nhân vật: prompt không tự hạ cấp, cân bằng lại hoặc thêm cái giá/giới hạn mà người chơi không viết. Các cơ chế deterministic app đã nhận biết như Max IV/EV, nhân EXP, cả đội nhận EXP, Kẹo Hiếm vô hạn và bonus bắt tiếp tục do engine tự áp. Sau khi state khởi đầu đã chốt, nhịp kể và luật encounter/huyền thoại vận hành như Anime; Sandbox không biến mọi câu tuyên bố tài nguyên giữa lúc chơi thành state miễn phí.
+
+**STATE KHỞI ĐẦU SANDBOX ĐƯỢC COMMIT TRƯỚC OPENING.** Tiền, party, PC và inventory do người chơi chọn được ghi vào save trước khi gọi model mở đầu. Prompt báo rõ đây là tài sản đã tồn tại và cấm model dùng MONEY/ITEM/POKEMON để cấp lại chúng, tránh double grant. Vật phẩm Sandbox trùng id được hợp nhất; nếu một bản ghi là vô hạn thì inventory giữ trạng thái vô hạn thay vì sinh nhiều dòng trùng.
+
+**Kiểm tra đợt 99:** `test-dot73.mjs` PASS, `test-dot74.mjs` PASS, `test-dot99.mjs` PASS 16 kiểm tra; toàn bộ 64 module `.js` qua `node --check` và 52 file `.jsx` qua lượt parse TypeScript `--noResolve`. Không chạy được build Vite đầy đủ trong môi trường kiểm tra này vì `npm ci` bị registry nội bộ trả 404 cho dependency `youch-core-0.3.3`; đây là giới hạn môi trường cài dependency, không được ghi nhận như lỗi source.
+
+### File cần cập nhật lên GitHub sau đợt 99
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+`test-dot99.mjs` là regression đi kèm bản bàn giao để kiểm tra cục bộ, không bắt buộc đưa lên repository deploy.

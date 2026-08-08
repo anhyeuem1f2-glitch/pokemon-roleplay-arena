@@ -2844,3 +2844,57 @@ Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đ�
 ### File bàn giao đợt 104
 
 Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đúng một thư mục gốc **`pokemon-new/`**, để giải nén trực tiếp vào `D:\` và ghi đè `D:\pokemon-new\`. Không đưa `.git` hoặc `node_modules` vào ZIP.
+
+---
+
+## Đợt 105 — Semantic State Engine: bỏ phụ thuộc TAG, state mở cho roleplay tự sáng tạo
+
+Đợt 105 thay kiến trúc cập nhật biến sau phản hồi beta rằng hệ tag/evidence cũ quá cứng: vật phẩm tự sáng tạo bị bác vì không có trong catalog, event diễn đạt tự nhiên dễ rớt, và người chơi nhìn thấy nhiều dòng `KHÔNG ÁP` dù chính văn đã xác nhận sự kiện.
+
+### Kiến trúc mới
+
+- Đường cập nhật chính là `src/services/semanticStateEngine.js`.
+- Model chính chỉ cần viết chính văn tự nhiên, **không cần phát `[[MONEY]]`, `[[ITEM]]`, `[[POKEMON]]`, `[[REL]]`...**.
+- Sau khi `displayText` cuối cùng đã chốt, Semantic State Engine đọc chính văn + snapshot state + ledger lượt hiện tại và trả **semantic event** theo nghĩa sự kiện.
+- Ưu tiên JSONL: mỗi event là một JSON object độc lập. Một object hỏng/truncated không làm mất toàn bộ batch.
+- Parser vẫn nhận `{ "events": [...] }` để tương thích provider ép JSON object.
+- Nếu provider trả format hỏng hoàn toàn, engine có một pass sửa format ngắn; pass khác vẫn tiếp tục nếu pass này lỗi.
+- Event được commit độc lập. Một event sai không được phép kéo chết các event rõ ràng khác.
+- Tag parser cũ vẫn tồn tại **chỉ để tương thích preset/save đời cũ**, không còn là nguồn state chính.
+
+### State tự sáng tạo
+
+- Vật phẩm không có trong `SHOP_ITEMS` được tạo descriptor động và persist trong inventory (`Vé tàu VIP`, thiết bị fan-made, chìa khóa riêng, v.v.).
+- `custom_state` và cả semantic kind chưa biết trước được lưu vào `trainer-arena:dynamic-state` thay vì bị vứt.
+- Dynamic state hỗ trợ `set`, `merge`, `delta`, `append`, `remove` và được đưa trở lại prompt các lượt sau để AI nhớ state tự tạo.
+- Custom state đồng thời có FACT trong notebook để truy hồi theo ngữ nghĩa/cốt truyện.
+- Save game tự động chứa kho dynamic vì SaveManager snapshot toàn bộ key `trainer-arena:*` thuộc ván chơi.
+
+### Pokémon và inventory
+
+- Semantic `pokemon_acquired` có thể mang gender, shiny, Nature, Ability, Tera Type, nickname, form, friendship.
+- `pokemon_patch` thay đổi thuộc tính cùng một cá thể thay vì tạo bản sao.
+- `item_change` có thể suy số lượng ±1 từ hành động receive/use khi model không ghi quantity nhưng sự kiện đã rõ.
+- Số tiền chấp nhận cách viết `5.000₽`, `5,000`, số thập phân hỗn hợp; deterministic Money Reconciler đợt 101 vẫn chạy song song như chốt an toàn.
+- Held item tự tạo có cờ `holdable` có thể được resolve từ inventory thay vì bắt buộc nằm trong catalog tĩnh.
+
+### Mở đầu và UI debug
+
+- `IntroScreen` cũng chạy Semantic State Engine; opening không còn phụ thuộc model nhớ xuất POKEMON/ITEM tag.
+- Sandbox asset đã pre-commit vẫn được báo cho semantic extractor để tránh cấp lại.
+- State Audit nâng lên **v6**. Legacy tag bị bác chỉ ở audit debug, không còn hiện thẻ `KHÔNG ÁP` màu cam làm người chơi tưởng state semantic đã thất bại.
+- Audit hiển thị JSON salvage / format repair / pass chuyên môn.
+
+### Khả năng chịu tải
+
+- Cơ chế shard đợt 102 vẫn giữ: economy, Pokémon, world, progress.
+- Ngưỡng recovery hạ xuống để ưu tiên false-positive về số lần quét hơn false-negative state.
+- Cues mới bao gồm quyền VIP, giấy phép, chìa khóa, danh hiệu, thiết bị, trạng thái tự sáng tạo.
+- Snapshot chuyên môn giờ có relationship/body/hunger/world progress/dynamic state tương ứng để auditor có đủ context mà không phải kéo toàn bộ save.
+
+### Regression
+
+- `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đến `test-dot105.mjs` đều PASS sau khi cập nhật các assertion cũ vốn bắt buộc tag sang kiến trúc semantic.
+- `test-dot105.mjs` bao phủ JSONL nhiều event, event lỗi độc lập, item tự tạo, unknown kind → dynamic state, set/merge/delta/append/remove, Pokémon patch top-level, opening semantic và legacy compatibility.
+- 68 module `.js` qua `node --check`.
+- 52 file `.jsx` qua parser TypeScript (`tsc --allowJs --jsx react-jsx --noEmit`).

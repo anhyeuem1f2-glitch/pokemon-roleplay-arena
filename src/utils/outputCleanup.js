@@ -27,7 +27,7 @@ function extractContent(text) {
   if (openMatch) {
     let rest = text.slice(text.search(/<content>/i) + openMatch[0].length)
     // cắt ở thẻ mở của bất kỳ block hậu kỳ nào (chữ cái/ gạch dưới/ khoảng trắng).
-    rest = rest.split(/<(?:\/?\s*)?(?:Thúc đẩy|thinking|Technical_Footer|danmu|disclaimer|schedule|theater|recap|parallel|actions?|action_choices?|choices?|choice|selection|status|Hậu Trường|Bảng)/i)[0]
+    rest = rest.split(/<(?:\/?\s*)?(?:Thúc đẩy|thinking|Technical_Footer|danmu|disclaimer|schedule|theater|recap|parallel|actions?|action_choices?|actionchoices|player_actions?|status|Hậu Trường|Bảng)/i)[0]
     return rest
   }
   return null // KHÔNG có content
@@ -56,8 +56,6 @@ const STRIP_BLOCKS = [
   /<(?:character_status|status_panel|calendar_widget|author_note|profile|tableThink|tableEdit|hc)\b[^>]*>[\s\S]*?<\/(?:character_status|status_panel|calendar_widget|author_note|profile|tableThink|tableEdit|hc)>/gi,
   /<theater>[\s\S]*?<\/theater>/gi,
   /<schedule[^>]*>[\s\S]*?<\/schedule[^>]*>/gi,
-  /<(?:actions?|action_choices?|choices?|choice|selection)\b[^>]*>[\s\S]*?<\/(?:actions?|action_choices?|choices?|choice|selection)\s*>/gi,
-  /<details\b[^>]*>\s*<summary\b[^>]*>[^<]*(?:tùy\s*chọn|lựa\s*chọn)[^<]*<\/summary>[\s\S]*?<\/details>/gi,
 ]
 
 const DEFAULT_SCRIPTS = [

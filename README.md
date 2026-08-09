@@ -1,6 +1,67 @@
 # Trainer Arena — Roleplay × Battle Engine
 
 
+
+## Đợt 116 — Pokémon Accessories + Talent-gated Ability Rewrite
+
+- Thêm pocket inventory riêng **Trang sức / phụ kiện Pokémon**. Phụ kiện được lưu ở `mon.accessories`, có thể đeo/tháo cho Pokémon và **không chiếm `heldItem` chiến đấu**.
+- Vật phẩm tiến hóa canon như `Leaf Stone`, `Fire Stone`... **không bao giờ bị biến trực tiếp thành đồ đeo**. Nếu chính văn nói dùng chúng làm nguyên liệu chế trang sức, Semantic Engine phải tạo **một item thành phẩm có tên riêng** như `Bông Tai Lá Xanh`, `Vòng Cổ Lá Xanh`, `Mặt Dây Lá Xanh`... rồi trang bị item thành phẩm đó.
+- Bổ sung reconciliation cho crafting accessory: nếu State AI vẫn trả `equip Leaf Stone`, app tự đổi sang thành phẩm phụ kiện có ID/metadata riêng; nếu không có bằng chứng crafting thì yêu cầu đeo trực tiếp Leaf Stone bị bác.
+- Item Description Protocol nhận category `accessory`; item trang sức fan-made giữ được `sourceMaterial`, `accessorySlot`, `wearable`, `pokemonAccessory` và customAttributes riêng, không bị gán nhầm thành held item/Mega Stone.
+- Pokémon Summary và túi đồ hiển thị riêng các phụ kiện đang đeo; có thể đeo nhiều phụ kiện mà không thay thế held item hiện tại.
+- **Đổi Ability không phải quyền mặc định**, kể cả Sandbox sau khi game đã bắt đầu. Chỉ khi siêu năng lực/thiên phú custom của người chơi mô tả rõ quyền thay/chọn/xóa Ability Pokémon thì `pokemon_patch.ability` mới được commit.
+- Ability được đổi bằng thiên phú là **state thật**: lưu `abilityOverride=true`, `abilitySource=custom-talent`, đồng bộ active/party/PC, battle đọc trực tiếp Ability mới, và override được giữ qua tiến hóa. Ví dụ Slaking đã được đổi khỏi Truant thì engine không còn coi nó có Truant.
+- `pokemon_patch.accessories` cũng được persist thành accessory entity thật thay vì rơi vào metadata/text-only.
+- Bổ sung `test-dot116.mjs`: **14/14 PASS**, bao phủ accessory pocket, Leaf Stone → thành phẩm tên riêng, semantic equip accessory, talent gate Ability, battle effect thật, giữ Ability qua tiến hóa và accessory patch.
+
+### File cần cập nhật lên GitHub sau đợt 116
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs`.
+
+## Đợt 115 — Custom Item State Entity
+
+- Vật phẩm người chơi/AI tự sáng tạo đã canon hóa được ghi thẳng vào `inventory` thật với ID ổn định, quantity, category, provenance và `customAttributes`; không bị đẩy sang text-only/dynamic memory chỉ vì không có trong catalog.
+- Thêm semantic event `item_patch`: thuộc tính của item đã sở hữu (effect/effects, charges, durability, rarity, usage, quyền truy cập, ngoại hình, trạng thái và customAttributes fan-made) có thể thay đổi ở lượt sau mà không cần quantity đổi.
+- Semantic snapshot gửi lại đầy đủ metadata item động để Extractor/Auditor biết item tồn tại và cập nhật đúng entity thay vì tạo lại.
+- Item metadata thay đổi sẽ tự đưa vào Item Description Protocol để mô tả UI được làm mới từ canon; description free-form của State API vẫn không được tin mù.
+- Item vừa nhận và item_patch trong cùng một lượt được xử lý theo dependency: nhận entity trước, patch sau. Patch không tìm thấy item không bị mất mà được giữ ở dynamic fallback để chờ resolve.
+- Nếu item fan-made chưa có trong snapshot nhưng chính văn chứng minh người chơi đang sở hữu/mang/rút/dùng nó như tài sản sẵn có, Semantic Engine được phép reconciliation ownership vào inventory mà không bắt phải có đúng câu “nhận được”.
+- Bổ sung `test-dot115.mjs`: 11/11 PASS.
+
+### File cần cập nhật lên GitHub sau đợt 115
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs`.
+
+## Đợt 114 — Item Description Protocol + API work scheduler
+
+- Sửa lỗi resolver held-item suy mọi tên kết thúc bằng `-ite` thành Mega Stone. `Elite` từng trúng heuristic này, khiến item như `Đồ hộp dinh dưỡng Pokémon hạng Elite` nhận mô tả Mega Stone và có thể bị coi là đồ cầm. Mega Stone/Z-Crystal giờ chỉ nhận theo whitelist canon thật.
+- Item fan-made/custom không còn mặc định được coi là holdable chỉ vì `custom=true`; muốn cầm phải có `holdable=true` rõ ràng.
+- Thêm **Item Description Protocol** riêng. Semantic State Engine chỉ phát hiện việc nhận/mất item; mô tả free-form của extractor không còn được tin trực tiếp để ghi vào túi.
+- Item mới được commit ngay để gameplay không phải chờ AI. Trong lúc chờ enrich, UI hiện mô tả bảo thủ `Đang hoàn thiện mô tả từ ngữ cảnh canon…`, tuyệt đối không mượn mô tả của item khác.
+- Item Description API nhận **tên vật phẩm + đoạn chính văn canon có liên quan + category hiện tại**, rồi trả mô tả 1–2 câu và pocket phù hợp. Prompt cấm tự bịa HP/PP/EV, Mega Stone, hệ, loài tương thích hay cơ chế battle nếu canon không xác lập.
+- Thêm scheduler provider theo `baseUrl + model`: state scan, action choices, main story và item metadata cùng báo trạng thái bận. Item description ưu tiên API phụ đang rảnh; nếu tất cả API phụ bận thì chờ slot nhả rồi xử lý lần lượt. Chỉ fallback API chính khi không có API phụ nào được cấu hình.
+- Save cũ bị bug `Elite -> Mega Stone` được tự sửa: fake Mega/Z metadata bị gỡ, item đang bị đeo sai được tháo khỏi Pokémon và trả về túi đúng một bản theo UID, sau đó xếp hàng enrich mô tả. Không cần reset save.
+- Bổ sung `test-dot114.mjs`: 11/11 PASS, bao phủ false `-ite`, Mega Stone thật, custom holdable, pending description, save repair, API scheduler và protocol enrich.
+
+### File cần cập nhật lên GitHub sau đợt 114
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs`.
+
 ## Đợt 113 — Reroll side-effect firewall + nút Xuống cuối không tự mắc kẹt
 
 - Sửa nút `↓ Xuống cuối` trên mobile: nút được đưa ra ngoài luồng cuộn thành overlay tuyệt đối, nên bản thân nút không còn làm tăng `scrollHeight` rồi tự khiến hệ thống tưởng vẫn chưa tới đáy.

@@ -53,7 +53,7 @@ import { envFromWeather } from '../data/battleEnvironments.js'
 import { buildFestivalLine } from '../data/festivals.js'
 import { buildCanonNote } from '../services/wikiLookup.js'
 import { buildModeRulesNote, legendaryAccess, normalizeGameMode } from '../data/gameModes.js'
-import { restoreTurnCheckpoint, saveTurnCheckpoint } from '../utils/saveManager.js'
+import { restoreBranchStateCheckpoint, restoreTurnCheckpoint, saveBranchStateCheckpoint, saveTurnCheckpoint } from '../utils/saveManager.js'
 import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
 import { addCollectionAward } from '../data/pokemonLife.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
@@ -68,6 +68,10 @@ import {
 // Cửa sổ gần luôn có trần. Phần cũ được truy hồi từ biên niên sử chính xác;
 // embedding/rerank là lớp tăng cường tùy chọn, không còn là điều kiện để nhớ.
 const MEMORY_RECENT_WINDOW = 24
+
+function makeMessageId(prefix = 'msg') {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
 
 const OUTCOME_LABEL = {
   win: 'Thắng',
@@ -775,12 +779,19 @@ export default function RoleplayChat() {
 
   // Dọn ký ức + tóm tắt cho các tin bị xoá (đợt 61). idxs = mảng index bị xoá.
   // Xoá sạch mọi lớp trí nhớ (đợt 61) — dùng cho "Xoá toàn bộ lịch sử".
-  function wipeAllMemory() {
+  async function wipeAllMemory() {
+    // Bẻ mọi callback nền khỏi transcript cũ trước khi rollback toàn nhánh.
+    latestMessagesRef.current = []
+    const firstTurn = (messages ?? []).find((message) => message?.role === 'user' && message?.id)
+    let restored = null
+    if (firstTurn?.id) restored = await restoreBranchStateCheckpoint(trainerId, firstTurn.id, [])
+    if (!restored && messages.length) rollbackLegacyBranch(messages)
     resetChat()
     closeIndexBoundUi()
     try { clearMemory() } catch { /* ignore */ }
-    void clearArchive(trainerId)
+    await clearArchive(trainerId)
     try { clearSummary() } catch { /* ignore */ }
+    if (restored) window.location.reload()
   }
 
   async function cleanupMemoryFor(idxs, newCount) {
@@ -811,23 +822,142 @@ export default function RoleplayChat() {
     }
   }
 
-  function handleDeleteMessage(i) {
-    const m = messages[i]
-    if (!m) return
-    // Xoá INPUT người chơi → xoá LUÔN tin AI trả lời ngay sau (đợt 61: theo
-    // yêu cầu "xóa input thì tự động xóa luôn output của input đó").
-    const idxs = [i]
-    if (m.role === 'user' && messages[i + 1]?.role === 'assistant') idxs.push(i + 1)
-    const isPair = idxs.length > 1
-    if (!window.confirm(
-      isPair
-        ? 'Xoá lượt này (tin của bạn + phần AI trả lời)? Ký ức và phần tóm tắt liên quan cũng được dọn theo. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.'
-        : 'Xoá tin nhắn này khỏi truyện? Ký ức/tóm tắt liên quan cũng được dọn. Không hoàn tác được — biến đã áp KHÔNG bị hoàn lại.',
-    )) return
-    const next = messages.filter((_, idx) => !idxs.includes(idx))
-    setMessages(next)
-    void cleanupMemoryFor(idxs, next.length)
+  function findTurnTriggerIndex(messageIndex) {
+    const message = messages[messageIndex]
+    if (!message) return -1
+    if (message.role === 'user') return messageIndex
+    const checkpointId = message.meta?.branchCheckpointId
+    if (checkpointId) {
+      const exact = messages.findIndex((entry) => entry?.id === checkpointId)
+      if (exact >= 0) return exact
+    }
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user') return index
+    }
+    return messageIndex
+  }
+
+  // Fallback cho save/tin quá cũ chưa có branch checkpoint. Không thể phục
+  // hồi chính xác evolution/level tuyệt đối của lịch sử đời cũ, nhưng ít nhất
+  // mọi entity có source id + delta cộng dồn phải được gỡ để không sinh Pokémon
+  // ma/bản sao khi người chơi reroll sau đó.
+  function rollbackLegacyBranch(branchMessages) {
+    const assistantMessages = (branchMessages ?? []).filter((message) => message?.role === 'assistant')
+    const sourceIds = new Set(assistantMessages.map((message) => message?.id).filter(Boolean))
+    const manifests = assistantMessages.map((message) => message?.meta?.appliedState).filter(Boolean)
+
+    const acquiredByRemovedSource = (mon) => {
+      const source = String(mon?.acquisitionSourceId ?? '')
+      return source && [...sourceIds].some((id) => source.startsWith(`${id}:pokemon:`))
+    }
+    const nextParty = (latestPartyRef.current ?? []).filter((mon) => !acquiredByRemovedSource(mon))
+    const nextPc = (latestPcBoxRef.current ?? []).filter((mon) => !acquiredByRemovedSource(mon))
+    let nextActive = latestPlayerMonRef.current
+    if (acquiredByRemovedSource(nextActive)) nextActive = nextParty[0] ?? null
+    setParty(nextParty)
+    setPcBox(nextPc)
+    setPlayerMon(nextActive)
+    latestPartyRef.current = nextParty
+    latestPcBoxRef.current = nextPc
+    latestPlayerMonRef.current = nextActive
+
+    const moneyDelta = manifests.reduce((sum, manifest) => sum + (Number(manifest?.money) || 0), 0)
+    if (moneyDelta) setPlayerProfile((cur) => ({ ...cur, money: Math.max(0, (Number(cur?.money) || 0) - moneyDelta) }))
+
+    const relDeltas = new Map()
+    const bodyDeltas = new Map()
+    const hungerDelta = { player: 0, mon: 0 }
+    const itemDeltas = new Map()
+    for (const manifest of manifests) {
+      for (const entry of manifest?.rel ?? []) relDeltas.set(normalizeMonTarget(entry.name), (relDeltas.get(normalizeMonTarget(entry.name)) ?? 0) + (Number(entry.delta) || 0))
+      for (const entry of manifest?.body ?? []) bodyDeltas.set(entry.part, (bodyDeltas.get(entry.part) ?? 0) + (Number(entry.delta) || 0))
+      for (const entry of manifest?.hunger ?? []) hungerDelta[entry.who === 'mon' ? 'mon' : 'player'] += Number(entry.delta) || 0
+      for (const entry of manifest?.items ?? []) {
+        const key = resolveItemByName(entry.name)?.id ?? normalizeMonTarget(entry.name)
+        const row = itemDeltas.get(key) ?? { name: entry.name, qty: 0 }
+        row.qty += Number(entry.qty) || 0
+        itemDeltas.set(key, row)
+      }
+    }
+    if (relDeltas.size) setRelationships((cur) => (cur ?? []).map((entry) => {
+      const delta = relDeltas.get(normalizeMonTarget(entry.name)) ?? 0
+      return delta ? { ...entry, affinity: Math.max(-100, Math.min(100, (Number(entry.affinity) || 0) - delta)) } : entry
+    }))
+    if (bodyDeltas.size) setBodyStatus((cur) => {
+      const next = { ...(cur ?? {}) }
+      for (const [part, delta] of bodyDeltas) next[part] = Math.max(0, Math.min(100, (Number(next[part]) || 0) - delta))
+      return next
+    })
+    if (hungerDelta.player || hungerDelta.mon) adjustHunger({ player: -hungerDelta.player, mon: -hungerDelta.mon })
+    if (itemDeltas.size) setInventory((cur) => {
+      const next = [...(cur ?? [])]
+      for (const row of itemDeltas.values()) {
+        const known = resolveInventoryItemByName(row.name, next) ?? resolveItemByName(row.name) ?? createCustomItemDescriptor(row.name)
+        if (!known || !row.qty) continue
+        const at = next.findIndex((item) => item.id === known.id)
+        const inverse = -row.qty
+        if (inverse > 0) {
+          if (at >= 0) next[at] = { ...next[at], qty: (Number(next[at].qty) || 0) + inverse }
+          else next.push({ ...known, qty: inverse })
+        } else if (at >= 0 && !next[at].infinite) {
+          const left = Math.max(0, (Number(next[at].qty) || 0) + inverse)
+          if (left > 0) next[at] = { ...next[at], qty: left }
+          else next.splice(at, 1)
+        }
+      }
+      latestInventoryRef.current = next
+      return next
+    })
+
+    if (sourceIds.size) {
+      const current = latestDynamicStateRef.current ?? { version: 1, values: {} }
+      const values = Object.fromEntries(Object.entries(current.values ?? {}).filter(([, entry]) => !sourceIds.has(entry?.sourceMessageId)))
+      const nextDynamic = { ...current, values }
+      latestDynamicStateRef.current = nextDynamic
+      setDynamicState(nextDynamic)
+    }
+  }
+
+  async function handleDeleteMessage(i) {
+    const target = messages[i]
+    if (!target || loading) return
+    const triggerIndex = findTurnTriggerIndex(i)
+    if (triggerIndex < 0) return
+    const trigger = messages[triggerIndex]
+    const checkpointId = target.role === 'assistant'
+      ? (target.meta?.branchCheckpointId ?? trigger?.id)
+      : trigger?.id
+    // Xoá output: giữ input để người chơi có thể bấm gửi/reroll lại. Xoá input:
+    // cắt luôn cả lượt. Mọi tin phía sau đều phụ thuộc canon vừa bị cắt nên phải
+    // bỏ cùng nhánh; giữ chúng sẽ tạo một timeline không thể rollback đúng.
+    const keepTrigger = target.role === 'assistant' && trigger?.role === 'user'
+    const restoredMessages = keepTrigger ? messages.slice(0, triggerIndex + 1) : messages.slice(0, triggerIndex)
+    const branchMessages = messages.slice(triggerIndex)
+    const removedAssistantCount = branchMessages.filter((message) => message?.role === 'assistant').length
+    const ok = window.confirm(
+      `Xoá ${target.role === 'assistant' ? 'phản hồi này' : 'lượt này'} và cắt ${Math.max(0, messages.length - restoredMessages.length)} tin thuộc nhánh phía sau?\n\n` +
+      `State của nhánh bị xoá (Pokémon, tiền, vật phẩm, level, vị trí, biến động...) sẽ được hoàn tác. ${removedAssistantCount ? `Có ${removedAssistantCount} phản hồi AI bị loại khỏi canon.` : ''}`,
+    )
+    if (!ok) return
+
+    // Chặn callback State API đang bay của nhánh cũ trước khi đụng storage.
+    // Mọi callback đều kiểm latestMessagesRef theo source id; đổi ref trước sẽ
+    // khiến kết quả trễ tự bị bỏ thay vì ghi state trở lại sau rollback.
+    latestMessagesRef.current = restoredMessages
+    let restored = null
+    if (checkpointId) restored = await restoreBranchStateCheckpoint(trainerId, checkpointId, restoredMessages)
+    if (!restored) {
+      // Tin đời cũ trước đợt 107: rollback tốt nhất theo source/ledger rồi cắt
+      // nhánh. Không giả vờ rằng xoá chữ là đủ.
+      rollbackLegacyBranch(branchMessages)
+    }
+    // Cập nhật React state ngay, không chỉ localStorage. Action-choice/API nền
+    // đang bay dùng setMessages callback; nếu UI còn giữ transcript cũ vài ms
+    // trước reload, callback đó có thể vô tình ghi lại tin vừa xoá.
+    setMessages(restoredMessages)
+    await cleanupMemoryFor([...Array(messages.length - triggerIndex)].map((_, offset) => triggerIndex + offset), restoredMessages.length)
     closeIndexBoundUi()
+    if (restored) window.location.reload()
   }
 
   function openCtxMenuAt(clientX, clientY, i) {
@@ -1272,6 +1402,9 @@ export default function RoleplayChat() {
           ...(pk.nickname ? { nickname: String(pk.nickname) } : {}),
           ...(pk.form ? { forme: String(pk.form) } : {}),
           ...(Number.isFinite(Number(pk.friendship)) ? { friendship: Math.max(0, Math.min(255, Number(pk.friendship))) } : {}),
+          ...((pk.details?.customAttributes && typeof pk.details.customAttributes === 'object') ? {
+            customAttributes: { ...pk.details.customAttributes },
+          } : {}),
         })
         acquiredSnapshot = recomputeMonStats(acquiredSnapshot)
         const newMon = ensurePokemonIdentity({
@@ -1424,6 +1557,9 @@ export default function RoleplayChat() {
           if (fields.ivs) next.ivs = patchStats(fields.ivs, 31, next.ivs)
           if (fields.evs) next.evs = patchStats(fields.evs, 252, next.evs)
           if (fields.status !== undefined) next.status = fields.status ? String(fields.status) : null
+          if (fields.customAttributes && typeof fields.customAttributes === 'object' && !Array.isArray(fields.customAttributes)) {
+            next.customAttributes = { ...(next.customAttributes ?? {}), ...fields.customAttributes }
+          }
           // Mọi thuộc tính fan-made không thuộc schema battle vẫn bám theo đúng
           // cá thể thay vì bị vứt. Chúng được gửi lại cho Semantic Engine ở các
           // lượt sau qua customAttributes.
@@ -2344,6 +2480,7 @@ export default function RoleplayChat() {
         // Giữ toàn bộ chính văn để nút “Quét lại biến” không mất nửa sau của
         // lượt dài/preset dài. raw/thinking mới cần clip vì chỉ là debug.
         evidenceText: displayText,
+        branchCheckpointId: nextMessages[nextMessages.length - 1]?.id ?? null,
         appliedState: turnAppliedManifest,
         preAppliedState,
         presetUiVariables: extractPresetUiVariables(reply),
@@ -2810,9 +2947,12 @@ export default function RoleplayChat() {
 
   async function handleSend() {
     if (!input.trim() || loading) return
-    const userMsg = { role: 'user', content: input.trim() }
+    const userMsg = { id: makeMessageId('user'), role: 'user', content: input.trim() }
     try {
-      await saveTurnCheckpoint(trainerId, messages, userMsg.content)
+      await saveTurnCheckpoint(trainerId, messages, userMsg.content, userMsg.id)
+      if (!await saveBranchStateCheckpoint(trainerId, userMsg.id)) {
+        throw new Error('Không tạo được checkpoint nhánh an toàn; hãy giải phóng bộ nhớ trình duyệt rồi thử lại.')
+      }
     } catch (checkpointError) {
       setError(checkpointError.message)
       return
@@ -2833,12 +2973,26 @@ export default function RoleplayChat() {
       if (messages[i].role === 'assistant') { lastAiIdx = i; break }
     }
     if (lastAiIdx < 0) return
-    const lastUser = [...messages.slice(0, lastAiIdx)].reverse().find((m2) => m2.role === 'user')
-    const restored = await restoreTurnCheckpoint(trainerId, lastUser?.content ?? '', lastAiIdx - 1)
+    const lastUserIndexForReroll = (() => {
+      for (let index = lastAiIdx - 1; index >= 0; index -= 1) if (messages[index]?.role === 'user') return index
+      return -1
+    })()
+    const lastUser = lastUserIndexForReroll >= 0 ? messages[lastUserIndexForReroll] : null
+    let restored = await restoreTurnCheckpoint(trainerId, lastUser?.content ?? '', lastAiIdx - 1)
     if (!restored) {
-      window.alert('Lượt này được tạo trước khi có checkpoint an toàn nên không thể reroll mà không làm lệch state. Hãy gửi một lượt mới trước.')
+      const checkpointId = messages[lastAiIdx]?.meta?.branchCheckpointId ?? lastUser?.id
+      const restoredMessages = lastUserIndexForReroll >= 0 ? messages.slice(0, lastUserIndexForReroll + 1) : []
+      const historical = checkpointId
+        ? await restoreBranchStateCheckpoint(trainerId, checkpointId, restoredMessages)
+        : null
+      if (historical) restored = { ...historical, userText: lastUser?.content ?? '', restoredMessages }
+    }
+    if (!restored) {
+      window.alert('Lượt này quá cũ và chưa có checkpoint nhánh an toàn. App không reroll mù để tránh nhân đôi Pokémon/state; hãy tạo một lượt mới rồi thử lại.')
       return
     }
+    latestMessagesRef.current = restored.restoredMessages
+    setMessages(restored.restoredMessages)
     await cleanupMemoryFor([lastAiIdx], restored.restoredMessages.length)
     sessionStorage.setItem('trainer-arena:pending-reroll', JSON.stringify({ trainerId, userText: restored.userText }))
     window.location.reload()
@@ -2852,11 +3006,18 @@ export default function RoleplayChat() {
     if (loading) return
     const m = messages[idx]
     if (!m || m.role !== 'user') return
-    const restored = await restoreTurnCheckpoint(trainerId, m.content ?? '', idx)
+    let restored = await restoreTurnCheckpoint(trainerId, m.content ?? '', idx)
+    if (!restored && m.id) {
+      const restoredMessages = messages.slice(0, idx + 1)
+      const historical = await restoreBranchStateCheckpoint(trainerId, m.id, restoredMessages)
+      if (historical) restored = { ...historical, userText: m.content ?? '', restoredMessages }
+    }
     if (!restored) {
-      window.alert('Không có checkpoint an toàn cho lượt này; không thể gửi lại mà vẫn hoàn tác chính xác state.')
+      window.alert('Không có checkpoint nhánh an toàn cho lượt này. App không gửi lại mù vì có thể làm state/Pokémon bị nhân đôi.')
       return
     }
+    latestMessagesRef.current = restored.restoredMessages
+    setMessages(restored.restoredMessages)
     await cleanupMemoryFor(messages.slice(idx + 1).map((_, offset) => idx + 1 + offset), restored.restoredMessages.length)
     sessionStorage.setItem('trainer-arena:pending-reroll', JSON.stringify({ trainerId, userText: restored.userText }))
     window.location.reload()
@@ -2999,6 +3160,7 @@ export default function RoleplayChat() {
     }
 
     const note = {
+      id: makeMessageId('system-user'),
       role: 'user',
       hidden: true,
       resultLabel: bought.length > 0 ? `Đã mua sắm tại ${shopName}` : `Rời ${shopName}`,
@@ -3017,7 +3179,10 @@ export default function RoleplayChat() {
     // Mua sắm đã đổi tiền/túi trước khi AI kể tiếp. Chờ updater persist rồi
     // chụp checkpoint ở đúng trạng thái SAU giao dịch, TRƯỚC các tag mới.
     await new Promise((resolve) => setTimeout(resolve, 0))
-    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
+    try {
+      await saveTurnCheckpoint(trainerId, baseMessages, note.content, note.id)
+      await saveBranchStateCheckpoint(trainerId, note.id)
+    } catch (checkpointError) { setError(checkpointError.message) }
     // Functional update (đợt 64): STATE phải dựng từ bản MỚI NHẤT, tránh
     // closure cũ xoá mất cập nhật chạy nền (meta biến của API phụ...).
     // LƯU Ý: React chạy hàm cập nhật ở pha render, KHÔNG đồng bộ tại đây —
@@ -3036,6 +3201,7 @@ export default function RoleplayChat() {
     const idx = pokecenterMsg?.index ?? null
     setPokecenterMsg(null)
     const note = {
+      id: makeMessageId('system-user'),
       role: 'user',
       hidden: true,
       resultLabel: what === 'heal' ? 'Đã chữa trị tại Trung tâm Pokémon' : 'Đã dùng máy PC',
@@ -3049,7 +3215,10 @@ export default function RoleplayChat() {
       idx !== null ? arr.map((mm, i) => (i === idx ? { ...mm, pokecenter: undefined } : mm)) : arr
     const baseMessages = markUsed(messages)
     await new Promise((resolve) => setTimeout(resolve, 0))
-    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
+    try {
+      await saveTurnCheckpoint(trainerId, baseMessages, note.content, note.id)
+      await saveBranchStateCheckpoint(trainerId, note.id)
+    } catch (checkpointError) { setError(checkpointError.message) }
     setMessages((cur) => [...markUsed(cur), note])
     await callAI([...baseMessages, note])
   }
@@ -3127,6 +3296,7 @@ export default function RoleplayChat() {
     const idx = activeBattleMsgIndex
     if (idx !== null) setActiveBattleMsgIndex(null)
     const note = {
+      id: makeMessageId('system-user'),
       role: 'user',
       hidden: true,
       resultLabel: (() => {
@@ -3164,7 +3334,10 @@ export default function RoleplayChat() {
       : arr
     const baseMessages = markUsed(messages)
     await new Promise((resolve) => setTimeout(resolve, 0))
-    try { await saveTurnCheckpoint(trainerId, baseMessages, note.content) } catch (checkpointError) { setError(checkpointError.message) }
+    try {
+      await saveTurnCheckpoint(trainerId, baseMessages, note.content, note.id)
+      await saveBranchStateCheckpoint(trainerId, note.id)
+    } catch (checkpointError) { setError(checkpointError.message) }
     setMessages((cur) => [...markUsed(cur), note])
     const nextMessages = [...baseMessages, note]
     const override = outcome === 'escaped' ? outcomeApiConfig.escaped : outcome === 'lose' ? outcomeApiConfig.lose : null
@@ -3185,7 +3358,7 @@ export default function RoleplayChat() {
             className="btn"
             onClick={() => {
               // Đợt 46: messages đã persist — xoá là mất hẳn, phải hỏi lại.
-              if (window.confirm('Xoá toàn bộ lịch sử truyện + ký ức + tóm tắt? Không hoàn tác được.')) wipeAllMemory()
+              if (window.confirm('Xoá toàn bộ lịch sử truyện và HOÀN TÁC state phát sinh từ nhánh này? Pokémon/tiền/vật phẩm/biến truyện do các lượt đã xoá cũng sẽ được trả về mốc trước truyện.')) void wipeAllMemory()
             }}
           >
             Xoá lịch sử chat
@@ -3608,8 +3781,8 @@ ${m.content}`
                   danger: true,
                   disabled: loading || messages.length === 0,
                   onClick: () => {
-                    if (window.confirm('Xoá TOÀN BỘ lịch sử truyện + ký ức + tóm tắt? Không hoàn tác được.')) {
-                      wipeAllMemory()
+                    if (window.confirm('Xoá TOÀN BỘ lịch sử truyện và HOÀN TÁC state phát sinh từ nhánh này? Pokémon/tiền/vật phẩm/biến truyện do các lượt đã xoá cũng sẽ được trả về mốc trước truyện.')) {
+                      void wipeAllMemory()
                     }
                   },
                 },

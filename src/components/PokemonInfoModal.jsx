@@ -165,6 +165,13 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
                 <div className="summary-info-card">
                   <span>RIBBON / MARK</span><strong>{(current.ribbons?.length ?? 0)} / {(current.marks?.length ?? 0)}</strong><small>{[...(current.ribbons ?? []), ...(current.marks ?? [])].join(', ') || 'Chưa có danh hiệu cá thể'}</small>
                 </div>
+                {(current.customAttributes?.appearanceNote || current.customAttributes?.visualTraits) && (
+                  <div className="summary-info-card">
+                    <span>ĐẶC ĐIỂM CANON</span>
+                    <strong>{current.customAttributes?.visualTraits || 'Ngoại hình đặc biệt'}</strong>
+                    <small>{current.customAttributes?.appearanceNote || current.customAttributes?.visualTraits}</small>
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -1147,6 +1147,9 @@ export function describeMonForPrompt(mon) {
   if (mon.nature) line += ` — Nature ${describeNatureBehavior(mon)}`
   if (mon.ability) line += ` — Ability ${mon.ability}`
   if (mon.gender !== undefined && mon.gender !== null) line += ` — giới tính ${genderSymbol(mon.gender)} ${genderLabel(mon.gender)}`
+  if (mon.shiny) line += ' — SHINY (dùng ngoại hình Shiny chuẩn của loài/form trong UI)'
+  const appearanceNote = mon.customAttributes?.appearanceNote ?? mon.customAttributes?.visualTraits
+  if (appearanceNote) line += ` — đặc điểm canon: ${String(appearanceNote).slice(0, 260)}`
   const friendship = normalizeFriendship(mon)
   const bond = friendshipTier(friendship.friendship)
   line += ` — độ thân mật ${friendship.friendship}/255 (${bond.label}: ${bond.note})`

@@ -74,6 +74,7 @@ money_change, item_change, pokemon_acquired, pokemon_removed, pokemon_level, pok
 
 Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(delta|absolute), from, to, gender, status, confidence, evidence, note, place, x, y, days, dayPart, intensity, fields, details.
 - pokemon_patch.details: gender, shiny, nature, ability, teraType, nickname, form, friendship, heldItem, ivs, evs, status, customAttributes và mọi thuộc tính fan-made khác.
+- SHINY là một cờ boolean ĐỘC LẬP với màu lửa/aura/hiệu ứng tự sáng tạo. Nếu chính văn nói 'Charmander Shiny với lửa tím', BẮT BUỘC shiny=true; 'lửa tím' phải nằm trong customAttributes.appearanceNote/visualTraits, KHÔNG được biến thành form riêng và KHÔNG được dùng thay cho shiny. Sprite/model đặc biệt ngoài Shiny chuẩn là việc của UI; interpreter chỉ lưu mô tả canon.
 - pokemon_acquired.details có thể thêm types, baseStats, moves, ability, description nếu là Pokémon/form fan-made.
 - item_change.details: description, category, holdable, infinite, keyItem.
 - quest_update.details: id,status,title,giver,objective,reward,region.
@@ -444,6 +445,106 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
   return { parsed, acceptedEvents, rejectedEvents }
 }
 
+
+function normalizeSearchText(value) {
+  return String(value ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function escapeRegex(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function splitNarrativeSentences(text) {
+  return String(text ?? '').split(/(?<=[.!?。！？\n])\s*/).map((part) => part.trim()).filter(Boolean)
+}
+
+function sentenceClaimsShiny(sentence) {
+  const text = normalizeSearchText(sentence)
+  if (!/(?:\bshiny\b|dị sắc|di sac)/i.test(text)) return false
+  // Chỉ phủ định khi cụm phủ định đứng rất gần từ shiny/dị sắc.
+  if (/(?:không|khong|chẳng|chang|chưa|chua|not|isn['’]?t|is not)\s+(?:phải\s+|phai\s+)?(?:là\s+|la\s+)?(?:một\s+|mot\s+)?(?:con\s+)?(?:shiny|dị sắc|di sac)/i.test(text)) return false
+  return true
+}
+
+function appearanceNoteFromSentence(sentence) {
+  const text = String(sentence ?? '').trim()
+  if (!text) return ''
+  return /(lửa|lua|flame|aura|hào quang|hao quang|ánh sáng|anh sang|màu|mau|tím|tim|vàng|vang|đỏ|do|xanh|purple|gold|golden|violet|blue|red)/i.test(text)
+    ? text.slice(0, 320)
+    : ''
+}
+
+/**
+ * Chốt deterministic cho ca model hay bỏ sót: "Charmander shiny với lửa tím".
+ * Shiny chuẩn luôn là boolean riêng; màu lửa/aura chỉ được lưu như mô tả canon
+ * để prompt các lượt sau nhớ, tuyệt đối không ép UI tìm một sprite không tồn tại.
+ */
+export function enrichNarrativePokemonAppearance(events, storyText, stateSnapshot) {
+  const rows = Array.isArray(events) ? events.map((event) => ({ ...event, details: { ...(event?.details ?? {}) } })) : []
+  const sentences = splitNarrativeSentences(storyText)
+  if (!sentences.length) return rows
+
+  const owned = [
+    ...(stateSnapshot?.party ?? []),
+    ...(stateSnapshot?.pc ?? []),
+  ].filter(Boolean)
+  const candidates = new Map()
+  for (const event of rows) {
+    const kind = normalizeKind(event.kind ?? event.type)
+    if (!['pokemon_acquired', 'pokemon_patch', 'pokemon_level', 'pokemon_evolve', 'pokemon_friendship'].includes(kind)) continue
+    const label = String(event.uid ?? event.species ?? event.target ?? event.name ?? '').trim()
+    if (label) candidates.set(normalizeSearchText(label), { label, uid: event.uid ?? null })
+  }
+  for (const mon of owned) {
+    for (const label of [mon.nickname, mon.name, mon.species, mon.pokemonId, mon.uid]) {
+      if (label) candidates.set(normalizeSearchText(label), { label: String(label), uid: mon.uid ?? null })
+    }
+  }
+
+  for (const candidate of candidates.values()) {
+    const nameRe = new RegExp(escapeRegex(candidate.label), 'i')
+    const sentence = sentences.find((part) => nameRe.test(part) && sentenceClaimsShiny(part))
+    if (!sentence) continue
+    const note = appearanceNoteFromSentence(sentence)
+    let matched = false
+    for (const event of rows) {
+      const kind = normalizeKind(event.kind ?? event.type)
+      if (!['pokemon_acquired', 'pokemon_patch'].includes(kind)) continue
+      const target = normalizeSearchText(event.uid ?? event.species ?? event.target ?? event.name)
+      if (target !== normalizeSearchText(candidate.label) && !(candidate.uid && target === normalizeSearchText(candidate.uid))) continue
+      event.shiny = true
+      event.details = { ...(event.details ?? {}), shiny: true }
+      if (note) {
+        event.details.customAttributes = {
+          ...(event.details.customAttributes ?? {}),
+          appearanceNote: note,
+        }
+      }
+      matched = true
+    }
+    // Nếu model hoàn toàn quên pokemon_patch nhưng cá thể đã tồn tại, tự thêm
+    // patch từ canon. Không tự tạo acquisition chỉ vì một Pokémon được nhắc.
+    if (!matched && owned.some((mon) => [mon.uid, mon.pokemonId, mon.nickname, mon.name, mon.species]
+      .filter(Boolean).some((label) => normalizeSearchText(label) === normalizeSearchText(candidate.label)))) {
+      rows.push({
+        id: `canon-shiny-${candidate.uid ?? normalizeSearchText(candidate.label)}`,
+        kind: 'pokemon_patch',
+        uid: candidate.uid ?? undefined,
+        target: candidate.uid ? undefined : candidate.label,
+        shiny: true,
+        status: 'completed',
+        confidence: 1,
+        evidence: sentence.slice(0, 260),
+        details: {
+          shiny: true,
+          ...(note ? { customAttributes: { appearanceNote: note } } : {}),
+        },
+      })
+    }
+  }
+  return rows
+}
+
 function focusKinds(focus) {
   const map = {
     economy: ['money_change', 'item_change', 'equip', 'unequip', 'shop_enter', 'pokecenter_enter'],
@@ -496,13 +597,15 @@ ${repairedRaw}`
       }
     } catch { /* pass khác/auditor vẫn có thể cứu; không làm hỏng lượt */ }
   }
-  const converted = semanticEventsToParsed(parsedResponse.events)
+  const enrichedEvents = enrichNarrativePokemonAppearance(parsedResponse.events, storyText, stateSnapshot)
+  const converted = semanticEventsToParsed(enrichedEvents)
   return {
     raw,
     ...parsedResponse,
+    events: enrichedEvents,
     repairAttempted,
     ...converted,
-    proposedCount: parsedResponse.events.length,
+    proposedCount: enrichedEvents.length,
     acceptedCount: converted.acceptedEvents.length,
     rejectedCount: converted.rejectedEvents.length,
   }

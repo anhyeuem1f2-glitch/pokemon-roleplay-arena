@@ -163,6 +163,19 @@ const LEFT_WORDS = [
   'cánh cửa tự động khép lại sau lưng',
 ]
 
+// Đợt 113: chỉ NHẮC tới Nurse Joy/Pokémon Center không có nghĩa nhân vật
+// đang ở trong đó. Reroll từng làm nút Chữa trị + Máy PC bật ngẫu nhiên chỉ
+// vì model hồi tưởng/nhắc địa danh. Cần ít nhất một cue vào trong hoặc tương
+// tác nội thất rõ ràng ở cùng đoạn cuối.
+const POKECENTER_INSIDE_CUES = [
+  'bước vào', 'đi vào', 'tiến vào', 'bên trong', 'ở trong trung tâm',
+  'đứng trước quầy', 'sau quầy', 'quầy tiếp nhận', 'quầy y tá',
+  'máy hồi phục', 'máy chữa trị', 'máy pc', 'terminal pc',
+  'đưa pokémon cho y tá', 'đưa pokemon cho y tá', 'giao pokémon cho y tá', 'giao pokemon cho y tá',
+  'y tá joy nhận', 'y tá joy trả lại', 'nurse joy nhận', 'nurse joy trả lại',
+  'ngồi chờ chữa', 'đang chữa trị', 'hồi phục toàn đội',
+]
+
 /**
  * Nhân vật có đang Ở TRONG Trung tâm Pokémon không?
  * @returns {{inside: boolean, name: string}}
@@ -173,6 +186,11 @@ export function detectPokecenter(text) {
   const at = lastHit(hay, POKECENTER_WORDS)
   if (at === -1) return { inside: false, name: '' }
   if (lastHit(hay, LEFT_WORDS) > at) return { inside: false, name: '' }
+  const local = hay.slice(Math.max(0, at - 420))
+  const insideCue = lastHit(local, POKECENTER_INSIDE_CUES)
+  if (insideCue === -1) return { inside: false, name: '' }
+  // Cue rời đi nằm sau cue bên trong thì cảnh đã kết thúc.
+  if (lastHit(local, LEFT_WORDS) > insideCue) return { inside: false, name: '' }
   return { inside: true, name: 'Trung tâm Pokémon' }
 }
 

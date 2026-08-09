@@ -28,7 +28,7 @@ import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../dat
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
-import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, reconcileMoneyDirectives } from '../utils/stateEvidence.js'
+import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseSupportsPokemonAcquisition, reconcileMoneyDirectives } from '../utils/stateEvidence.js'
 import { buildStateScanPlan } from '../utils/stateScanPlan.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
@@ -68,6 +68,99 @@ import {
 // Cửa sổ gần luôn có trần. Phần cũ được truy hồi từ biên niên sử chính xác;
 // embedding/rerank là lớp tăng cường tùy chọn, không còn là điều kiện để nhớ.
 const MEMORY_RECENT_WINDOW = 24
+
+
+// Đợt 113: ba loại side-effect có chi phí cao (nhận Pokémon mới, mở PokéCenter,
+// mở battle) không được phép chỉ dựa vào một semantic guess/marker lạc. State
+// vẫn đọc ngữ nghĩa tự nhiên, nhưng ownership/interaction phải có căn cứ canon
+// độc lập để reroll không tự sinh thêm Pokémon hay nút tương tác ngẫu nhiên.
+function rerollContextMentionsTarget(priorText, target) {
+  const targetKey = normalizeMonTarget(target)
+  const priorKey = normalizeMonTarget(priorText)
+  return Boolean(targetKey && priorKey && priorKey.includes(targetKey))
+}
+
+function gateSemanticOwnership(parsed, storyText, { reroll = false, priorText = '' } = {}) {
+  if (!parsed) return parsed
+  const kept = []
+  const rejected = []
+  const seenSemanticSpecies = new Set()
+  for (const pk of parsed.pokemons ?? []) {
+    const species = pk.species ?? pk.name
+    const semantic = Boolean(pk?.semantic || pk?.canon)
+    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, species)
+    // Reroll chỉ được tái hiện Pokémon có liên hệ trực tiếp với nhánh trước đó.
+    // Nếu model tự bịa một loài hoàn toàn mới trong biến thể reroll, dù chính
+    // câu nó vừa viết có nói "nhận được", app vẫn không cho side-effect đó
+    // trở thành state. Điều này chặn reroll tự sinh thêm Pokémon ngoài ý người chơi.
+    const rerollHasPriorAnchor = !reroll || rerollContextMentionsTarget(priorText, species)
+    if (semantic && (!hasCanonAcquisition || !rerollHasPriorAnchor)) {
+      rejected.push({ ...pk, _reason: !hasCanonAcquisition ? 'no-canon-acquisition' : 'reroll-no-prior-anchor' })
+      continue
+    }
+    const speciesKey = normalizeMonTarget(species)
+    // Nhiều pass Semantic đôi khi mô tả cùng một acquisition hai lần với
+    // level/nickname hơi khác. Trong một response chỉ giữ một acquisition cho
+    // cùng loài; việc thật sự bắt thêm cá thể cùng loài ở lượt khác vẫn hợp lệ.
+    if (semantic && speciesKey && seenSemanticSpecies.has(speciesKey)) {
+      rejected.push({ ...pk, _reason: 'same-pass-duplicate' })
+      continue
+    }
+    if (semantic && speciesKey) seenSemanticSpecies.add(speciesKey)
+    kept.push(pk)
+  }
+  return {
+    ...parsed,
+    pokemons: kept,
+    _rejectedPokemonAcquisitions: [
+      ...(parsed._rejectedPokemonAcquisitions ?? []),
+      ...rejected,
+    ],
+  }
+}
+
+function rerollPriorSupportsPokecenter(priorText) {
+  const text = String(priorText ?? '').trim()
+  if (!text) return false
+  if (detectPokecenter(text).inside) return true
+  // Cho phép câu lệnh ngắn khi bối cảnh ngay trước đã ở quầy, ví dụ
+  // "chữa cho cả đội" / "mở máy PC".
+  const centerMention = /(trung\s*tâm\s*pok[eé]mon|pokemon\s*center|pok[eé]mon\s*center|nurse\s*joy|y\s*tá\s*joy)/iu.test(text)
+  const explicitUse = /(chữa\s*trị|hồi\s*phục|heal(?:ing)?|mở\s+(?:máy\s*)?pc|máy\s*pc|gửi\s+pok[eé]mon|rút\s+pok[eé]mon|đứng\s+trước\s+quầy|bước\s+vào|đi\s+vào|tiến\s+vào)/iu.test(text)
+  return centerMention && explicitUse
+}
+
+function gatePokecenterInteraction(parsed, storyText, { reroll = false, priorText = '' } = {}) {
+  if (!parsed?.pokecenter) return parsed
+  const detected = detectPokecenter(storyText)
+  const rerollAllowed = !reroll || rerollPriorSupportsPokecenter(priorText)
+  return detected.inside && rerollAllowed
+    ? parsed
+    : { ...parsed, pokecenter: null, _rejectedPokecenter: parsed.pokecenter }
+}
+
+const STRONG_BATTLE_CUE_RE = /(xuất\s*trận|ra\s*sân|tung\s+ra|sent\s+out|thách\s*đấu|khiêu\s*chiến|giao\s*đấu|đấu\s+pokemon|đấu\s+pokémon|chiến\s*đấu|bắt\s*đầu\s+trận|trận\s+đấu\s+bắt\s*đầu|lao\s+(?:vào|tới)|tấn\s*công|đánh\s+(?:nó|hắn|cậu|cô|pok[eé]mon|trận)|attack(?:ed|s)?|battle\s+begins?|wild\s+pokemon|wild\s+pokémon|pok[eé]mon\s+hoang|hoang\s+dã)/iu
+function rerollPriorSupportsBattle(priorText) {
+  const text = String(priorText ?? '')
+  if (!text.trim()) return false
+  if (STRONG_BATTLE_CUE_RE.test(text)) return true
+  const trainer = detectTrainerBattle(text)
+  return Boolean(trainer.isTrainer && /(đối\s*thủ|trận|battle|gym|nhà\s*thi\s*đấu)/iu.test(text))
+}
+
+function battleMarkerHasCanonSetup(storyText, userText, pokedex, ownNames = [], { reroll = false, priorText = '' } = {}) {
+  if (!String(storyText ?? '').includes(BATTLE_MARKER)) return true
+  // Reroll không được tự tạo một hard side-effect mới chỉ vì model trong lần
+  // viết lại bỗng nảy ra encounter. Nhánh trước/current input phải đã có mầm battle.
+  if (reroll && !rerollPriorSupportsBattle(priorText)) return false
+  const beforeMarker = String(storyText ?? '').split(BATTLE_MARKER)[0]
+  const combined = `${String(userText ?? '')}\n${beforeMarker}`
+  const activeOpponent = detectBattleOpponentSpecies(beforeMarker, pokedex ?? [], { excludeNames: ownNames })
+  if (activeOpponent) return true
+  const trainer = detectTrainerBattle(combined)
+  return Boolean(trainer.isTrainer && STRONG_BATTLE_CUE_RE.test(combined))
+    || STRONG_BATTLE_CUE_RE.test(beforeMarker)
+}
 
 function makeMessageId(prefix = 'msg') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -328,6 +421,9 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
   // level đôi chút. Dedupe theo loài+nickname thay vì loài+level để không sinh
   // bản sao chỉ vì Auditor đoán Lv12 còn Extractor đoán Lv13.
   const appliedPokemon = new Set((applied?.pokemons ?? []).map((entry) => `${monKey(entry.species)}|${monKey(entry.nickname ?? '')}`))
+  const appliedSemanticPokemonSpecies = new Set((applied?.pokemons ?? [])
+    .filter((entry) => entry?.semantic || entry?.canon)
+    .map((entry) => monKey(entry.species)))
   const appliedPokemonRemovalTargets = new Set((applied?.pokemonRemovals ?? []).map((entry) => monKey(entry.target)))
   const appliedRel = new Set((applied?.rel ?? []).map((entry) => `${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`))
   const appliedBody = new Set((applied?.body ?? []).map((entry) => `${entry.part}|${Number(entry.delta)}`))
@@ -389,7 +485,9 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriendTargets.has(monKey(entry.target)) && !appliedFriends.has(`${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     pokemonPatches: (extra?.pokemonPatches ?? []).filter((entry) => !appliedPokemonPatchTargets.has(monKey(entry.target))),
     equipment: (extra?.equipment ?? []).filter((entry) => !appliedEquipment.has(`${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`)),
-    pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(`${monKey(entry.species)}|${monKey(entry.nickname ?? '')}`)),
+    pokemons: (extra?.pokemons ?? []).filter((entry) =>
+      !appliedPokemon.has(`${monKey(entry.species)}|${monKey(entry.nickname ?? '')}`)
+      && !((entry?.semantic || entry?.canon) && appliedSemanticPokemonSpecies.has(monKey(entry.species)))),
     pokemonRemovals: (extra?.pokemonRemovals ?? []).filter((entry) => !appliedPokemonRemovalTargets.has(monKey(entry.target))),
     rel: (extra?.rel ?? []).filter((entry) => !appliedRelTargets.has(monKey(entry.name)) && !appliedRel.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     body: (extra?.body ?? []).filter((entry) => !appliedBodyParts.has(entry.part) && !appliedBody.has(`${entry.part}|${Number(entry.delta)}`)),
@@ -772,7 +870,7 @@ export default function RoleplayChat() {
     } catch { /* ignore */ }
     if (!pending || pending.trainerId !== trainerId || loading) return
     const restored = latestMessagesRef.current
-    const timer = setTimeout(() => { void callAI(restored, pending.userText ?? '') }, 80)
+    const timer = setTimeout(() => { void callAI(restored, pending.userText ?? '', null, { reroll: true }) }, 80)
     return () => clearTimeout(timer)
     // Chỉ kiểm tra một lần sau reload; callAI là function declaration ổn định trong lượt mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2061,11 +2159,17 @@ export default function RoleplayChat() {
     return report
   }
 
-  async function callAI(nextMessages, scanExtra = '', configOverride = null) {
+  async function callAI(nextMessages, scanExtra = '', configOverride = null, runOptions = null) {
     setError(null)
     setLoading(true)
     try {
       const scanText = buildScanText(nextMessages, scanExtra)
+      // Khi reroll, đây là nguồn sự thật về những hard side-effect ĐÃ được
+      // người chơi/nhánh trước gieo. Chính response mới không được tự dùng
+      // nội dung nó vừa bịa để hợp thức hóa battle/PokéCenter/Pokémon mới.
+      const rerollPriorContext = runOptions?.reroll
+        ? nextMessages.slice(-6).filter((message) => !message?.hidden).map((message) => message?.content ?? '').join('\n')
+        : ''
       const usingMainApi = !configOverride
       let history = nextMessages.map((m) => ({ role: m.role, content: m.content }))
 
@@ -2223,6 +2327,12 @@ export default function RoleplayChat() {
         role: 'user',
         content: creativeFreedomNote,
       }]
+      if (runOptions?.reroll) {
+        history = [...history, {
+          role: 'system',
+          content: '[Hệ thống — ĐÂY LÀ REROLL của cùng input. Viết một biến thể khác của cùng tình huống nhưng KHÔNG tự chèn side-effect cứng mới (trận đấu, vào PokéCenter/cửa hàng, nhận thêm Pokémon/vật phẩm/quyền) nếu input hiện tại hoặc diễn biến ngay trước đó không trực tiếp dẫn tới nó. Reroll không phải lý do để thế giới tự phát sinh phần thưởng hay tương tác mới. Không nhắc ghi chú này.]',
+        }]
+      }
 
       const nudge = maybeMakeNudge({
         identityKey: playerIdentity,
@@ -2351,6 +2461,19 @@ export default function RoleplayChat() {
           console.warn('[polish] bỏ qua chau chuốt:', polErr.message)
         }
       }
+      // Đợt 113: marker battle là một lệnh UI có side-effect lớn. Model/preset
+      // đôi khi nhả [[BATTLE]] trong reroll dù chính văn không hề có đối thủ
+      // đang ra sân/thách đấu. Khi marker không có setup canon độc lập, bỏ marker
+      // trước khi hiển thị để không xuất hiện Poké Ball ngẫu nhiên.
+      if (displayText.includes(BATTLE_MARKER)) {
+        const ownNames = [...(latestPartyRef.current ?? []).map((mon) => mon?.name), latestPlayerMonRef.current?.name]
+          .filter(Boolean)
+        if (!battleMarkerHasCanonSetup(displayText, stateUserText, pokedexSpecies, ownNames, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })) {
+          displayText = displayText.split(BATTLE_MARKER).join('').trim()
+          console.warn('[battle-marker] bỏ marker không có setup canon độc lập')
+        }
+      }
+
       // Bản được hiển thị mới là canon. Nếu API chau chuốt lỡ bỏ hoặc đổi một
       // sự kiện, tuyệt đối không dùng bản nháp ẩn để ghi save. Đối chiếu lần
       // cuối với đúng displayText rồi mới chạm vào bất kỳ biến thật nào.
@@ -2400,6 +2523,8 @@ export default function RoleplayChat() {
           })
           semanticPrimarySucceeded = true
           let semanticParsed = filterUiPreAppliedState(semantic.parsed, preAppliedState)
+          semanticParsed = gateSemanticOwnership(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+          semanticParsed = gatePokecenterInteraction(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
           // Semantic engine là nguồn chính; deterministic money/UI transaction
           // chỉ được ưu tiên để tránh trừ/cộng đôi. KHÔNG dùng input gate hay
           // validator legacy để phủ quyết event đã được đọc từ canon.
@@ -2432,6 +2557,8 @@ export default function RoleplayChat() {
                 scanMode: 'auditor',
               })
               let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
+              auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+              auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               auditorParsed = filterSupplementalDuplicates(auditorParsed, stateParsed, { consumeExactMoney: true })
               stateParsed = mergeStateManifests(stateParsed, auditorParsed)
               immediateAuditorAudit = {
@@ -2486,6 +2613,8 @@ export default function RoleplayChat() {
                 continue
               }
               let focusParsed = filterUiPreAppliedState(row.result.parsed, preAppliedState)
+              focusParsed = gateSemanticOwnership(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+              focusParsed = gatePokecenterInteraction(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               focusParsed = filterSupplementalDuplicates(focusParsed, stateParsed, { consumeExactMoney: true })
               const accepted = countParsedStateOperations(focusParsed)
               stateParsed = mergeStateManifests(stateParsed, focusParsed)
@@ -2746,6 +2875,8 @@ export default function RoleplayChat() {
                   focus: passSpec.focus,
                 })
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
+                parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+                parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
                 parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true })
                 passAuditBase = {
                   pass: scanIndex + 1,
@@ -2938,6 +3069,8 @@ export default function RoleplayChat() {
             focus: passSpec.focus,
           })
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
+          parsed = gateSemanticOwnership(parsed, storyText)
+          parsed = gatePokecenterInteraction(parsed, storyText)
           parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true })
         } catch (scanError) {
           lines.push(`⚠ Semantic scan ${scanIndex + 1}${passSpec.focus ? ` (${passSpec.focus.label})` : ''} lỗi: ${scanError.message}`)
@@ -3478,6 +3611,7 @@ export default function RoleplayChat() {
       </div>
 
       <div className="panel" style={{ marginTop: 16 }}>
+        <div style={{ position: 'relative' }}>
         <div
           ref={scrollRef}
           onScroll={handleChatScroll}
@@ -3815,18 +3949,19 @@ ${m.content}`
             )
           })}
           {loading && <p style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>Đang viết tiếp câu chuyện...</p>}
-          {showJumpToBottom && (
-            <div style={{ position: 'sticky', bottom: 8, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 12 }}>
-              <button
-                className="btn"
-                onClick={() => jumpToChatBottom({ behavior: 'smooth' })}
-                style={{ pointerEvents: 'auto', boxShadow: '0 4px 18px rgba(0,0,0,.35)', borderRadius: 999, padding: '6px 14px' }}
-                title="Quay về tin mới nhất"
-              >
-                ↓ {hasNewBelow ? 'Tin mới' : 'Xuống cuối'}
-              </button>
-            </div>
-          )}
+        </div>
+        {showJumpToBottom && (
+          <div style={{ position: 'absolute', left: 0, right: 6, bottom: 8, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 12 }}>
+            <button
+              className="btn"
+              onClick={() => jumpToChatBottom({ behavior: 'smooth' })}
+              style={{ pointerEvents: 'auto', boxShadow: '0 4px 18px rgba(0,0,0,.35)', borderRadius: 999, padding: '6px 14px' }}
+              title="Quay về tin mới nhất"
+            >
+              ↓ {hasNewBelow ? 'Tin mới' : 'Xuống cuối'}
+            </button>
+          </div>
+        )}
         </div>
 
         {/* Menu chuột phải trên tin nhắn (đợt 48 — học card PNTT). */}

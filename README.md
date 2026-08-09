@@ -1,5 +1,30 @@
 # Trainer Arena — Roleplay × Battle Engine
 
+
+## Đợt 112 — Tách rõ Chỉ số thực tế / IV / EV
+
+- Khôi phục thanh trực quan ở mục Chỉ số. Đây là **chỉ số thực tế dùng trong battle** sau Level + Base Stat + IV + EV + Nature, không phải thanh EV.
+- Tách hẳn `IV — Chỉ số bẩm sinh` thành panel riêng theo thang 0–31 cho từng stat.
+- Tách hẳn `EV — Điểm rèn luyện` thành panel riêng, hiển thị từng stat theo thang 0–252 và tổng EV hiện có.
+- Ghi chú rõ luật chuẩn 510 EV tổng; Sandbox vẫn được phép vượt tổng nếu người chơi đã chọn cấu hình tự do.
+- Giữ hydration stat của save cũ: Pokémon thiếu calculated stat vẫn được tính lại deterministic trước khi hiển thị.
+
+### File cần cập nhật lên GitHub sau đợt 112
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs`.
+
+## Đợt 110 — Scroll lock + Tera Type Picker
+
+- Chat auto-scroll giờ khóa ngay khi người chơi chủ động kéo lên; action choices/state audit/background callback không còn tự giật xuống đáy. Chỉ mở khóa khi tự kéo sát đáy hoặc bấm `↓ Xuống cuối`.
+- Loại bỏ CSS smooth toàn cục của khung chat để tránh nhiều animation cuộn nối đuôi nhau.
+- Có Tera Orb và bấm Terastal giờ mở bảng chọn đủ 18 hệ. Người chơi tự chọn hệ Tera của lần biến hình; engine không auto dùng `teraType`/hệ mặc định nữa.
+- Bảng Tera dùng màu + biểu tượng từng hệ, responsive cho mobile.
+
 Web app roleplay dạng đọc truyện liên tục (không chia tab), người chơi tự nhập
 API key (chuẩn OpenAI-compatible). Khi AI kể tới đoạn nhân vật chính bị thách
 đấu, một quả pokeball hiện ngay dưới dòng chữ đó — bấm vào mới mở modal hình
@@ -3091,3 +3116,58 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 108 không thay các phần đó.
+
+---
+
+## Đợt 109 — Inventory Commit Integrity + Open-world Bag Visibility
+
+Đợt 109 xử lý phản hồi beta "State Audit báo ĐÃ ÁP vật phẩm nhưng Túi đồ không hiện/không tăng". Điều tra cho thấy đây là hai lỗi độc lập ở tầng sau Semantic State Engine, không phải lỗi AI không đọc được chính văn.
+
+### Item đã có trong state nhưng bị UI giấu
+
+- Inventory open-world từ đợt 105 có thể tạo vật phẩm fan-made. Trước đây item động mặc định mang `category: custom`.
+- `PlayerHUD` chỉ render các tab có trong `SHOP_CATEGORY_LABELS`; không có tab `custom`, nên item đã tồn tại thật trong `trainer-arena:inventory` nhưng bị vô hình trên sidebar.
+- Từ đợt 109 mọi category không được UI biết (`custom`, `quest-item`, category fan-made...) đều được normalize về `misc` khi hiển thị. Save cũ không cần migration mới vẫn thấy lại item ngay.
+- Item động mới mặc định dùng category `misc`, vì đây là pocket chắc chắn có UI.
+- `BagPanel` và PlayerHUD tiếp tục giữ inventory gốc; thay đổi này chỉ bảo đảm không có item hợp lệ nào biến mất vì metadata category.
+
+### Bổ sung metadata cho các vật phẩm Pokémon chuẩn thường xuất hiện trong roleplay
+
+Bổ sung catalog tra cứu cho `Ether`, `Max Ether`, `Elixir`, `Max Elixir`, `HP Up`, `Protein`, `Iron`, `Calcium`, `Zinc`, `Carbos`, `PP Up`, `PP Max`. Các món này không bị ép bán ở shop (`noShop`) nhưng khi canon trao cho người chơi thì có id/category/mô tả ổn định và hiện đúng trong Túi đồ. `Iron Ball` tiếp tục dùng metadata held-item hiện có.
+
+### Audit không còn báo xanh trước khi inventory commit
+
+Lỗi transaction cũ:
+
+1. updater tính `previewInventory`;
+2. ghi dòng `✅ Nhận vật phẩm` vào State Audit;
+3. tiếp tục xử lý EQUIP/DATE;
+4. **cuối cùng** mới gọi `setInventory()`.
+
+Nếu một directive sau bước 2 ném exception, audit vẫn hiện `ĐÃ ÁP` nhưng React/localStorage chưa từng nhận inventory mới.
+
+Đợt 109 thêm checkpoint commit ngay sau khi xử lý ITEM/LOOT/evolution debit. EQUIP tiếp tục trên snapshot đã commit và chỉ commit phần chênh lệch trang bị lần hai. Vì vậy lỗi ở equipment/time không còn có thể nuốt các vật phẩm đã được audit xác nhận.
+
+### Regression đợt 109
+
+- `test-dot109.mjs`: 11/11 PASS — bao phủ item động mới/cũ luôn có pocket hiển thị, Max Ether/HP Up/Protein/Calcium/Iron Ball resolve đúng category và inventory commit xảy ra trước EQUIP/DATE.
+- `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đến `test-dot108.mjs` vẫn PASS.
+- 69/69 file `.js` qua `node --check`.
+- Production Vite build chưa được xác nhận trong môi trường bàn giao vì `node_modules` không có sẵn; không dùng điều này để tuyên bố build PASS.
+
+### File cần cập nhật lên GitHub sau đợt 109
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 109 không thay các phần đó.
+
+
+## Đợt 111 — Nickname toàn chế độ, battle target & state audit
+- Nickname có thể sửa trực tiếp trong Pokémon Summary ở mọi chế độ; đồng bộ active/party/PC.
+- Battle resolver ưu tiên Pokémon có cue ra sân/xuất trận và loại spectator, sửa ca Heliolisk/Dedenne.
+- Tab Chỉ số bỏ thanh tương đối gây hiểu nhầm; save cũ thiếu 6 stat được hydrate từ Pokédex rồi tính lại deterministic.
+- Semantic badge/quest giữ provenance semantic để validator legacy không bác lại; money recognizer hiểu thêm ngữ cảnh trao/nhận phần thưởng.
+- Hệ chiêu vẫn không giới hạn 4 và không tự xoá chiêu khi tiến hoá.

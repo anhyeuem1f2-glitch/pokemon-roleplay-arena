@@ -2898,3 +2898,87 @@ Bản full tiếp tục đóng tên **`pokemon-new.zip`** và bên trong có đ�
 - `test-dot105.mjs` bao phủ JSONL nhiều event, event lỗi độc lập, item tự tạo, unknown kind → dynamic state, set/merge/delta/append/remove, Pokémon patch top-level, opening semantic và legacy compatibility.
 - 68 module `.js` qua `node --check`.
 - 52 file `.jsx` qua parser TypeScript (`tsc --allowJs --jsx react-jsx --noEmit`).
+
+---
+
+## Đợt 106 — Canon-first State Synchronizer v7: semantic thật sự làm nguồn chính
+
+Đợt 106 xử lý triệt để phản hồi beta rằng dù đã có Semantic State Engine, updater vẫn còn bị các luật tag/catalog đời cũ chen vào và có thể hiện các lỗi kiểu “Pokédex không có trong danh mục”, “chính văn chưa xác nhận người chơi nhận Ditto” hoặc xử lý sai thứ tự một lượt vừa nhận Pokémon vừa đổi nhiều thuộc tính.
+
+### Tag/catalog legacy không còn quyền phủ quyết canon
+
+- `displayText` cuối cùng người chơi nhìn thấy vẫn là nguồn sự thật duy nhất.
+- Manifest state chính **khởi tạo rỗng**; deterministic reconciler và semantic events mới là nguồn commit mặc định.
+- `[[TAG]]` chỉ được parse để làm sạch output và làm fallback khi Semantic API thật sự không chạy được.
+- `validateStateAgainstProse` legacy không còn đứng trước semantic event để bác state vì thiếu từ khóa chính xác, catalog hay Pokédex.
+- Cổng encounter/legendary/input chỉ định hướng truyện **trước khi canon được sinh**. Nếu chính văn cuối đã xác lập quyền sở hữu thì pipeline hậu kỳ phải đồng bộ save với canon thay vì làm UI mâu thuẫn với truyện.
+
+### Entity mở: vật phẩm và Pokémon fan-made là state thật
+
+- Item lạ được tạo bằng custom descriptor và persist trong inventory; không cần có trong `SHOP_ITEMS`.
+- Item tự tạo đã sở hữu có thể tiếp tục bị dùng/mất/trang bị ở lượt sau theo tên/id hiện có.
+- Pokémon/form lạ được dựng thành custom species tối thiểu đủ cho UI/battle/save, thay vì bị loại vì Pokédex không biết.
+- Held item fan-made có thể tồn tại trên cá thể thật.
+- `pokemon_patch` giữ cả thuộc tính chuẩn lẫn thuộc tính fan-made trong `customAttributes`; các thuộc tính này được gửi lại cho Semantic Engine ở các lượt sau.
+- Unknown semantic kind tiếp tục đi vào dynamic state + FACT thay vì mất dữ liệu.
+
+### Transaction Pokémon có dependency, không còn phụ thuộc thứ tự JSON
+
+Pipeline Pokémon trong cùng một lượt hiện hiểu dependency thay vì chạy cứng theo thứ tự tag:
+
+1. mất/chuyển quyền sở hữu cá thể;
+2. nhận/tạo cá thể mới;
+3. retry level/friendship/attribute patch nhắm vào cá thể vừa tạo;
+4. tiến hóa;
+5. retry lần cuối các level dùng tên sau tiến hóa;
+6. trang bị/vật phẩm và các state liên quan.
+
+Nhờ vậy lượt “Ditto gia nhập + lên cấp + đổi giới tính/Shiny/Nature” không còn thất bại chỉ vì event LEVEL xuất hiện trước event POKEMON trong JSON. Event chưa resolve được lần đầu được giữ trong transaction và thử lại ngay; chỉ sau khi transaction kết thúc mới fallback sang dynamic state.
+
+### Active / Party / PC dùng cùng một cá thể
+
+- Resolver cá thể ưu tiên `uid`/`pokemonId`, sau đó mới tới nickname/species.
+- Level, friendship, evolution, gender, Pokémon patch, ribbon/mark, held item và EXP training đồng bộ active + party + PC.
+- Snapshot gửi cho State API chứa metadata đầy đủ của Pokémon trong PC (Nature, Ability, Tera, Friendship, held item, status, custom attributes), không còn coi PC là dữ liệu hạng hai.
+- Nhận Pokémon khi party đầy đưa thẳng vào PC và cập nhật preview/ref ngay trong transaction.
+
+### Auditor luôn chạy; lượt phức tạp được chia shard trước commit
+
+- Mọi lượt có Semantic Engine đều có **Auditor đồng bộ ngay**, kể cả Extractor chỉ trả 0–2 event. Không còn logic “ít proposal thì khỏi audit”, vì chính việc bỏ sót event có thể khiến proposal count bằng 0.
+- Khi chính văn có mật độ state cao, bốn pass chuyên môn chạy **song song trước commit**: Kinh tế & vật phẩm, Pokémon & sinh hoạt, Xã hội & thế giới, Tiến trình & ký ức.
+- Mỗi pass không có trần số event; shard chỉ giảm tải chú ý và nguy cơ JSON lớn bị cắt.
+- Các pass sau đi qua ledger/dedupe nên không cộng cùng state hai lần.
+- Recovery nền vẫn giữ để quét thêm sau đó, nhưng không còn là lớp duy nhất cứu lượt nhiều biến.
+
+### Semantic parser mềm hơn nhưng vẫn bám canon
+
+- JSONL bị truncate/trailing garbage vẫn salvage từng object hoàn chỉnh.
+- Format hỏng hoàn toàn được thử repair một lần.
+- `operation=used/payment` tự sửa dấu quantity/money nếu model trả số dương.
+- Confidence không còn là catalog gate; ngưỡng chỉ loại event cực kỳ không chắc (`0.30`), còn entity fan-made rõ trong canon không bị phạt vì lạ.
+- Prompt yêu cầu hiểu đại từ, biệt danh, câu nhiều đoạn, sở hữu gián tiếp và nội dung tự sáng tạo; evidence là paraphrase, không cần copy nguyên văn.
+
+### Simulator Dev cũng bỏ tag-primary
+
+`SimulationTester` nay gọi Semantic State Engine giống gameplay thật. Test scenario không còn yêu cầu model “tự khai tag”; item/Pokémon fan-made, money, relationship/body/hunger và location semantic được áp từ chính văn.
+
+### State Audit v7
+
+- Hiển thị Semantic primary, Auditor đồng bộ và các focus shard trước commit.
+- Legacy rejection chỉ là debug khi semantic đã chạy, không được hiện như lỗi state chính.
+- Audit tiếp tục cho biết deterministic money transaction và các pass recovery nền.
+
+### Regression đợt 106
+
+- `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đến `test-dot106.mjs` đều PASS.
+- `test-dot106.mjs`: 20/20 kiểm tra, bao phủ custom Pokédex/item, dấu item/money, Pokémon fan-made, `pokemon_removed`, UID targeting, custom held item/attributes, JSON salvage, semantic-first/fallback legacy, transaction dependency, PC sync, Auditor luôn chạy, focused shard song song và Dev simulator semantic.
+- Toàn bộ `.js` và `.jsx` được kiểm tra cú pháp trước khi đóng gói.
+
+### File cần cập nhật lên GitHub sau đợt 106
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 106 không thay các phần đó.

@@ -2982,3 +2982,47 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 106 không thay các phần đó.
+
+---
+
+## Đợt 107 — Shiny canonical + Branch State Rollback
+
+Đợt 107 xử lý hai phản hồi beta còn gây lệch canon: Pokémon được mô tả `Shiny` nhưng có hiệu ứng tự sáng tạo như lửa tím/lửa vàng khiến updater không bật cờ Shiny; và việc xóa/reroll một nhánh chat từng chỉ xóa transcript nhưng state đã áp (đặc biệt Pokémon đã nhận) vẫn còn trong party/PC, làm reroll sinh bản sao.
+
+### Shiny tách hoàn toàn khỏi hiệu ứng ngoại hình tự sáng tạo
+
+- `Shiny` là boolean độc lập. Câu như `Charmander Shiny với lửa tím` luôn được chuẩn hóa thành `shiny: true`.
+- Màu lửa, aura, hào quang hoặc chi tiết ngoại hình fan-made được lưu trong `customAttributes.appearanceNote`/`visualTraits`; chúng **không** được dùng làm tên form và không bắt UI tìm sprite không tồn tại.
+- Có deterministic enrichment sau Semantic API: nếu chính văn canon nói rõ một Pokémon là Shiny nhưng model phụ quên field `shiny`, app tự bổ sung `pokemon_patch` cho đúng cá thể đã sở hữu. Phủ định như `không phải Shiny` không bị nhận nhầm.
+- Chỉ nói `lửa tím`/`lửa vàng` mà không xác nhận Shiny thì app không tự suy diễn thành Shiny.
+- Sprite resolver vẫn chỉ dựa vào `species/form + gender + shiny`; vì vậy cá thể `Shiny + lửa tím` dùng sprite Shiny chuẩn của loài/form. Phần lửa tím được giữ như canon mô tả.
+- Pokémon Summary có thêm `ĐẶC ĐIỂM CANON` khi cá thể có visual trait tự sáng tạo.
+- Main story prompt cũng nhận lại `SHINY` và `appearanceNote`, nên AI kể chuyện các lượt sau không quên chi tiết ngoại hình đã xác lập.
+
+### Xóa/reroll giờ rollback state thật, không chỉ xóa chữ
+
+- Mỗi input mới có `id` ổn định và được chụp một **branch state checkpoint** trước khi AI sinh canon.
+- Checkpoint lưu trong IndexedDB, không nhét transcript lặp lại vào localStorage; chỉ giữ 96 checkpoint gần nhất mỗi trainer để tránh phình vô hạn.
+- Mỗi assistant message lưu `branchCheckpointId` trỏ tới state trước lượt đã sinh nó.
+- Xóa một user/assistant message sẽ cắt toàn bộ timeline phụ thuộc phía sau. App khôi phục checkpoint trước nhánh rồi mới xóa transcript/ký ức/tóm tắt.
+- Xóa riêng output AI có thể giữ lại input người chơi, nhưng mọi output phía sau vẫn bị cắt vì chúng phụ thuộc canon đã xóa.
+- Reroll ưu tiên checkpoint lượt cuối như trước; nếu checkpoint lượt cuối không còn, app fallback sang historical branch checkpoint. Nếu không có checkpoint an toàn, app **không reroll mù** để tránh nhân đôi Pokémon/state.
+- Callback State API/action-choice đang bay bị vô hiệu hóa bằng `latestMessagesRef` + cập nhật React transcript trước reload; kết quả trễ không thể ghi state/tin đã bị xóa trở lại.
+- `Xóa toàn bộ lịch sử truyện` trên các lượt có checkpoint mới sẽ khôi phục state về mốc trước nhánh đầu tiên, thay vì giữ lại Pokémon/vật phẩm/tiền ma.
+- Save/tin quá cũ trước đợt 107 không có historical checkpoint: fallback ledger/source cleanup vẫn gỡ Pokémon theo `acquisitionSourceId`, dynamic state theo `sourceMessageId`, và đảo các delta money/item/relationship/body/hunger có thể xác định. App không tuyên bố rollback tuyệt đối cho dữ liệu đời cũ thiếu checkpoint.
+
+### Regression đợt 107
+
+- `test-dot107.mjs`: 10/10 PASS, bao phủ Shiny + lửa tím, không suy diễn lửa tím thành Shiny, phủ định Shiny, deterministic patch cho owned Pokémon, sprite không phụ thuộc appearanceNote, branch checkpoint, delete/reroll safety và customAttributes.
+- `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đến `test-dot106.mjs` vẫn PASS sau thay đổi.
+- 69 file `.js` qua `node --check`.
+- Production Vite build chưa xác nhận trong môi trường bàn giao vì dependency `youch-core` không có trong npm cache offline; lỗi này thuộc registry/cache, không phải regression source.
+
+### File cần cập nhật lên GitHub sau đợt 107
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 107 không thay các phần đó.

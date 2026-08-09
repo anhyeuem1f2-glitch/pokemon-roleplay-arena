@@ -22,7 +22,7 @@ export const MAX_SLOTS = 3
 // Khoá KHÔNG thuộc ván chơi → không lưu vào save, không ghi đè khi tải.
 const EXCLUDE = [
   'api-config', 'outcome-api', 'anime-api', 'state-api', 'memory-api', 'wiki',
-  'char-presets', 'music-volume', 'music-muted', 'music-settings', 'bridge-needed',
+  'char-presets', 'music-volume', 'music-muted', 'music-settings', 'bridge-needed', 'chat-preferences', 'chat-preferences',
   // Đợt 78: đây là cache tải lại được, không phải save. Đặc biệt `saves`
   // tuyệt đối không được chụp vào chính một ô save — code cũ tạo save lồng
   // save, mỗi lần ghi đè lại phình theo cấp số nhân đến đầy localStorage.

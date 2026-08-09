@@ -3026,3 +3026,68 @@ Chỉ upload/ghi đè:
 - file `README.md`.
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 107 không thay các phần đó.
+
+---
+
+## Đợt 108 — Chat UX + Canon Lineage Repair
+
+Đợt 108 gom hai phản hồi beta: khung chat tự giật xuống cuối nhiều lần khi người chơi đang kéo lên đọc lại, và một đường xoá lượt từ menu ô nhập từng chỉ xoá transcript mà không rollback state, làm Pokémon/state từ timeline đã xoá vẫn tồn tại rồi bị nhân đôi khi chạy lại.
+
+### Auto-scroll có ý thức, không giật người đang đọc lịch sử
+
+- Chat chỉ tự bám đáy khi người chơi đang ở gần cuối (ngưỡng 96 px).
+- Khi người chơi kéo lên đọc tin cũ, mọi hydrate/action choice/state audit/loading update phía dưới đều không được kéo họ trở lại cuối.
+- Lần mount/load đầu chỉ đặt scroll xuống cuối một lần bằng `behavior: auto`; không smooth-scroll lặp 3–4 lần khi callback nền lần lượt hoàn tất.
+- Khi có nội dung mới trong lúc người chơi đang ở trên, hiện nút sticky `↓ Tin mới` / `↓ Xuống cuối`; bấm mới quay về đáy.
+- Có setting `Tự bám xuống cuối khi đang đọc ở cuối chat`; đây là preference của thiết bị, không bị save game ghi đè.
+
+### Enter trên mobile/desktop có thể tùy chỉnh
+
+Trong `Cài đặt → Trò chuyện & bàn phím`:
+
+- `Enter = Gửi · Shift+Enter = xuống dòng` — kiểu desktop cũ.
+- `Enter = Xuống dòng · Ctrl/⌘+Enter = Gửi` — phù hợp điện thoại và người viết đoạn dài.
+
+Preference persist qua reload nhưng bị loại khỏi snapshot save game để đổi save không làm thay cách gõ của thiết bị.
+
+### Mọi đường xoá transcript dùng chung một rollback transaction
+
+- Thêm `rollbackAndCutBranch()` làm đường duy nhất để cắt timeline + rollback state + dọn memory/archive/summary.
+- Menu chuột phải trên tin nhắn tiếp tục dùng branch checkpoint.
+- **FIX quan trọng:** menu trên ô nhập `Xoá lượt trả lời gần nhất` không còn `filter()` tin nhắn thuần; nó cũng bắt buộc restore branch checkpoint trước khi xoá cặp user + AI.
+- Khi cắt nhánh, `latestMessagesRef` được đổi ngay và lock scan nền bị clear, nên callback Semantic State cũ không thể chui vào ghi lại state sau rollback.
+
+### Orphan sweeper chữa save đã dính bug cũ
+
+Pokémon được nhận từ Semantic Engine có `acquisitionSourceId` dạng `assistant-...:pokemon:...`. Khi load hoặc transcript thay đổi:
+
+- nếu message assistant nguồn không còn trong canon, cá thể đó được coi là **Pokémon mồ côi** và tự loại khỏi party/PC/active slot;
+- starter Sandbox (`sandbox-...`), starter Intro (`intro-...`) và các nguồn không phải assistant không bị quét;
+- dynamic state có `sourceMessageId` trỏ tới assistant message đã xoá cũng bị loại để không quay lại prompt sau F5.
+
+Lớp này sửa trực tiếp các save từng bị bug cũ tạo 2–3 Charmander sau nhiều lần xoá/reroll, thay vì chỉ ngăn lỗi mới.
+
+### Không biến mô tả Pokémon đã sở hữu thành acquisition mới
+
+Semantic enrichment thêm một chốt deterministic:
+
+- nếu snapshot đã có Charmander và canon chỉ mô tả `Charmander Shiny/lửa tím/...` mà **không có hành vi nhận/bắt/gia nhập**, event `pokemon_acquired` do model đoán nhầm được chuyển thành `pokemon_patch` nhắm đúng cá thể cũ;
+- nếu canon thực sự nói `bắt được/nhận thêm/gia nhập` thì acquisition vẫn giữ nguyên, nên game vẫn hỗ trợ sở hữu nhiều Pokémon cùng loài.
+
+Nhờ đó chỉnh Shiny/Nature/ngoại hình cho Pokémon đang có không tự sinh thêm một bản sao.
+
+### Regression đợt 108
+
+- `test-dot108.mjs`: 15/15 PASS — bao phủ sticky auto-scroll, nút Tin mới, Enter mobile, settings persistence, unified rollback, đường xoá lượt từ ô nhập, orphan Pokémon/dynamic state repair và acquisition→patch khi chỉ mô tả cá thể đã sở hữu.
+- `test-dot73.mjs`, `test-dot74.mjs`, `test-dot99.mjs` đến `test-dot107.mjs` vẫn PASS sau thay đổi.
+- 69/69 file `.js` qua `node --check`.
+- Production Vite build chưa xác nhận trong môi trường bàn giao vì dependency npm không được cài sẵn; không dùng kết quả đó để tuyên bố source build PASS.
+
+### File cần cập nhật lên GitHub sau đợt 108
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs` vì đợt 108 không thay các phần đó.

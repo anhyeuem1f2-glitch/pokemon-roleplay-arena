@@ -3,9 +3,11 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
-import { cleanAiOutput, extractStateTags } from '../utils/outputCleanup.js'
-import { parseStoryStateTags } from '../utils/storyStateProtocol.js'
+import { cleanAiOutput } from '../utils/outputCleanup.js'
+import { extractSemanticStateEvents } from '../services/semanticStateEngine.js'
 import { buildMonSmart } from '../data/pokemonSpecies.js'
+import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
+import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 import { REGIONS, getRegion, getArea, detectMentionedArea, detectLocationFromMetadata } from '../data/regions.js'
 import { normalizeMapLocation } from '../data/mapPins.js'
 import { IDENTITIES_V2, getIdentityV2 } from '../data/identities.js'
@@ -17,8 +19,8 @@ import PokeballSpinner from './PokeballSpinner.jsx'
 
 // ============ GIẢ LẬP CHƠI (đợt 44) ============
 // Bỏ qua bước tạo nhân vật dài dòng: nhập 1 prompt tình huống → AI gen ra
-// chương truyện đầu qua ĐÚNG pipeline chính (worldbook, wiki, đạo diễn, tag
-// trạng thái...) → set state tối thiểu → nhảy thẳng vào màn chơi thật để
+// chương truyện đầu qua ĐÚNG pipeline chính (worldbook, wiki, đạo diễn, Semantic
+// State Engine...) → set state tối thiểu → nhảy thẳng vào màn chơi thật để
 // test liên tục (cập nhật biến, battle, shop, tóm tắt, ký ức). Có nút
 // "trang bị nhanh" để test gimmick/đồ mà không phải đi kiếm.
 
@@ -40,7 +42,7 @@ export default function SimulationTester({ onEnterGame }) {
     apiConfig, character, stylePreset, mainPreset, assistantPrefill, worldbook,
     setPlayerName, setPlayerMon, setParty, setMessages, setGameStarted,
     setPlayerLocation, setPlayerIdentity, setPlayerCharacter, setStoryDate,
-    setInventory, setPlayerProfile, pokedexSpecies, movesDb,
+    setInventory, setPlayerProfile, setPcBox, pokedexSpecies, movesDb,
     setRelationships, setBodyStatus, setHunger, storyTone,
   } = useGame()
 
@@ -137,39 +139,106 @@ export default function SimulationTester({ onEnterGame }) {
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) throw new Error('AI chỉ trả CoT, chưa ra chính văn — thử lại hoặc tăng max tokens.')
 
-      const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
-      const parsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
+      // Đợt 106: simulator cũng dùng Semantic State Engine như gameplay thật.
+      // Không còn yêu cầu AI tự khai [[TAG]] để state khởi đầu được ghi.
+      let parsed = null
+      try {
+        const semantic = await extractSemanticStateEvents(apiConfig, {
+          storyText: cleaned,
+          userText: scenario.trim(),
+          stateSnapshot: {
+            money: Number(money) || 0,
+            location: { regionKey, areaKey, region: region?.name, area: area?.name },
+            party: starterEntry ? [{ name: starterEntry.name, level: 12 }] : [],
+            inventory: giveItems ? QUICK_ITEMS : [],
+          },
+          appliedState: null,
+          mode: storyTone,
+          scanMode: 'extractor',
+        })
+        parsed = semantic.parsed
+      } catch (semanticError) {
+        console.warn('[simulation] Semantic State Engine lỗi; giữ chương truyện, không đoán state bằng tag:', semanticError.message)
+      }
       setMessages([
         { role: 'user', hidden: true, resultLabel: 'Giả lập: ' + scenario.trim().slice(0, 40), content: directive },
-        { role: 'assistant', content: parsed.cleaned },
+        { role: 'assistant', content: cleaned },
       ])
 
-      // Áp tag Pokémon/địa danh nếu AI khai ngay.
-      for (const pk of parsed.pokemons ?? []) {
-        const entry = pokedexSpecies.find((e) => e.name.toLowerCase() === pk.species.toLowerCase())
-        if (entry) {
-          const mon = buildMonSmart(entry, pk.level, movesDb)
+      if (parsed) {
+        if (parsed.money) setPlayerProfile((cur) => ({ ...(cur ?? {}), money: Math.max(0, (Number(cur?.money) || 0) + Number(parsed.money || 0)) }))
+        if ((parsed.rel ?? []).length) setRelationships((cur) => {
+          const next = [...(cur ?? [])]
+          for (const rel of parsed.rel) {
+            const at = next.findIndex((entry) => String(entry.name).toLowerCase() === String(rel.name).toLowerCase())
+            if (at >= 0) next[at] = { ...next[at], affinity: Math.max(-100, Math.min(100, (Number(next[at].affinity) || 0) + Number(rel.delta || 0))), note: rel.note ?? next[at].note }
+            else next.push({ id: `sim-${Date.now()}-${next.length}`, name: rel.name, affinity: Math.max(-100, Math.min(100, Number(rel.delta) || 0)), note: rel.note ?? '' })
+          }
+          return next
+        })
+        if ((parsed.body ?? []).length) setBodyStatus((cur) => {
+          const next = { ...(cur ?? {}) }
+          for (const body of parsed.body) next[body.part] = Math.max(0, Math.min(100, (Number(next[body.part]) || 0) + Number(body.delta || 0)))
+          return next
+        })
+        if ((parsed.hunger ?? []).length) {
+          const delta = (parsed.hunger ?? []).reduce((acc, entry) => {
+            acc[entry.who === 'mon' ? 'mon' : 'player'] += Number(entry.delta) || 0
+            return acc
+          }, { player: 0, mon: 0 })
+          setHunger((cur) => ({
+            player: Math.max(0, Math.min(100, (Number(cur?.player) || 100) + delta.player)),
+            mon: Math.max(0, Math.min(100, (Number(cur?.mon) || 100) + delta.mon)),
+          }))
+        }
+
+        setInventory((cur) => {
+          const next = [...(cur ?? [])]
+          for (const item of parsed.items ?? []) {
+            let entry = resolveInventoryItemByName(item.name, next)
+            if (!entry && Number(item.qty) > 0) entry = createCustomItemDescriptor(item.name, item)
+            if (!entry) continue
+            const at = next.findIndex((owned) => owned.id === entry.id)
+            if (Number(item.qty) > 0) {
+              if (at < 0) next.push({ ...entry, qty: Number(item.qty) })
+              else next[at] = { ...next[at], qty: (Number(next[at].qty) || 0) + Number(item.qty) }
+            } else if (at >= 0 && !next[at].infinite) {
+              const left = Math.max(0, (Number(next[at].qty) || 0) + Number(item.qty))
+              if (left) next[at] = { ...next[at], qty: left }
+              else next.splice(at, 1)
+            }
+          }
+          return next
+        })
+
+        // Acquisition semantic không phụ thuộc catalog; loài fan-made vẫn vào
+        // party/PC như một cá thể thật để simulator phản ánh đúng gameplay.
+        for (const pk of parsed.pokemons ?? []) {
+          const entry = resolveSpeciesEntryFlexible(pokedexSpecies, pk.species)
+            ?? buildCustomSpeciesEntry(pk.species, pk.details ?? pk)
+          const mon = buildMonSmart(entry, Math.max(1, Number(pk.level) || 1), movesDb)
+          setParty((cur) => {
+            const next = [...(cur ?? [])]
+            if (next.length < 6) return [...next, mon]
+            setPcBox((pc) => [...(pc ?? []), mon])
+            return next
+          })
           setPlayerMon((cur) => cur ?? mon)
-          setParty((cur) => (cur.length < 6 ? [...cur, mon] : cur))
         }
       }
-      // Vị trí (đợt 47): NGƯỜI DÙNG đã chọn tường minh vùng+khu ở form nên
-      // đoạn mở đầu KHÔNG dùng quét-địa-danh mờ (detectMentionedArea) nữa —
-      // truyện nhắc thoáng qua "Mt. Moon" là bị dịch chuyển sai khỏi khu đã
-      // chọn. Chỉ tag [[MOVE]] tường minh hoặc dòng [Metadata|..] mới đè.
+
+      // Vị trí semantic được ưu tiên; metadata chỉ là fallback tương thích.
       let movedTo = null
-      if ((parsed.moveDirectives ?? []).length) {
-        const directive = parsed.moveDirectives[parsed.moveDirectives.length - 1]
-        const named = detectMentionedArea(directive.place, { regionKey, areaKey })
+      if ((parsed?.moveDirectives ?? []).length) {
+        const moveDirective = parsed.moveDirectives[parsed.moveDirectives.length - 1]
+        const named = detectMentionedArea(moveDirective.place, { regionKey, areaKey })
         const base = named ?? { regionKey, areaKey }
         movedTo = normalizeMapLocation({
           ...base,
-          x: directive.x ?? (named ? undefined : null),
-          y: directive.y ?? (named ? undefined : null),
-          source: 'simulation-move',
+          x: moveDirective.x ?? (named ? undefined : null),
+          y: moveDirective.y ?? (named ? undefined : null),
+          source: 'simulation-semantic-move',
         })
-      } else if ((parsed.moves ?? []).length) {
-        movedTo = detectMentionedArea(parsed.moves[parsed.moves.length - 1], { regionKey, areaKey })
       }
       if (!movedTo) movedTo = detectLocationFromMetadata(reply, { regionKey, areaKey })
       if (movedTo) setPlayerLocation(normalizeMapLocation(movedTo))
@@ -199,8 +268,8 @@ export default function SimulationTester({ onEnterGame }) {
     <div className="panel">
       <h2 className="page-title">Giả lập chơi</h2>
       <p className="page-subtitle">
-        Nhập một tình huống → AI gen chương truyện qua ĐÚNG pipeline chính (worldbook, đạo diễn, tag
-        biến, battle, shop, tóm tắt…) → nhảy thẳng vào màn chơi thật để test liên tục. Bỏ qua bước
+        Nhập một tình huống → AI gen chương truyện qua ĐÚNG pipeline chính (worldbook, đạo diễn, Semantic
+        State Engine, battle, shop, tóm tắt…) → nhảy thẳng vào màn chơi thật để test liên tục. Bỏ qua bước
         tạo nhân vật cho nhanh.
       </p>
 
@@ -214,7 +283,7 @@ export default function SimulationTester({ onEnterGame }) {
         />
         <small style={{ color: 'var(--text-dim)' }}>
           Muốn test shop thì tả cảnh vào cửa hàng; test battle thì tả gặp Pokémon/đối thủ; test biến thì
-          tả mua bán/ăn uống/di chuyển… AI sẽ tự khai tag tương ứng.
+          tả mua bán/ăn uống/di chuyển… Semantic State Engine sẽ tự hiểu các thay đổi từ chính văn, không cần tag.
         </small>
       </div>
 

@@ -1,4 +1,4 @@
-// ============ SEMANTIC STATE ENGINE (đợt 105) ============
+// ============ SEMANTIC STATE ENGINE (đợt 106) ============
 // Đường cập nhật state chính không còn phụ thuộc cú pháp [[TAG]]. Model phụ
 // đọc DUY NHẤT chính văn đã hiển thị và trả danh sách SỰ KIỆN có nghĩa.
 // App chuyển event -> directive nội bộ, rồi commit từng directive độc lập.
@@ -11,7 +11,10 @@ import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.
 const KIND_ALIASES = {
   money: 'money_change', money_change: 'money_change', payment: 'money_change', income: 'money_change', expense: 'money_change',
   item: 'item_change', item_change: 'item_change', inventory: 'item_change', inventory_change: 'item_change',
+  item_received: 'item_change', receive_item: 'item_change', item_gain: 'item_change', item_lost: 'item_change', item_used: 'item_change', consume_item: 'item_change',
   pokemon_acquired: 'pokemon_acquired', pokemon_gain: 'pokemon_acquired', acquire_pokemon: 'pokemon_acquired', catch_pokemon: 'pokemon_acquired',
+  pokemon_received: 'pokemon_acquired', receive_pokemon: 'pokemon_acquired', pokemon_owned: 'pokemon_acquired', pokemon_joined: 'pokemon_acquired',
+  pokemon_removed: 'pokemon_removed', release_pokemon: 'pokemon_removed', pokemon_released: 'pokemon_removed', pokemon_lost: 'pokemon_removed', pokemon_traded_away: 'pokemon_removed',
   pokemon_level: 'pokemon_level', level: 'pokemon_level', level_change: 'pokemon_level',
   pokemon_evolve: 'pokemon_evolve', evolve: 'pokemon_evolve', evolution: 'pokemon_evolve',
   pokemon_friendship: 'pokemon_friendship', friendship: 'pokemon_friendship', bond: 'pokemon_friendship',
@@ -38,40 +41,45 @@ const KIND_ALIASES = {
   custom: 'custom_state', custom_state: 'custom_state', world_state: 'custom_state', dynamic_state: 'custom_state', state_change: 'custom_state',
 }
 
-const SEMANTIC_SYSTEM = `Bạn là Semantic State Engine của game nhập vai Pokémon.
+const SEMANTIC_SYSTEM = `Bạn là CANON STATE INTERPRETER của game nhập vai Pokémon.
 
-NHIỆM VỤ: đọc CHÍNH VĂN CUỐI CÙNG người chơi thực sự nhìn thấy, cộng snapshot state hiện tại, rồi liệt kê TẤT CẢ thay đổi trạng thái ĐÃ XẢY RA trong lượt. Bạn KHÔNG viết tag, KHÔNG phụ thuộc từ khóa cố định, và KHÔNG được yêu cầu chính văn dùng một mẫu câu máy móc.
+MỤC TIÊU DUY NHẤT: biến CHÍNH VĂN CUỐI CÙNG người chơi thực sự nhìn thấy thành các SỰ KIỆN TRẠNG THÁI đã xảy ra. Bạn không kiểm luật game, không kiểm database, không viết tag, không đòi đúng từ khóa. Nếu chính văn đã canon hóa một việc thì state phải phản chiếu việc đó.
 
-Nguyên tắc:
-1. Chỉ chính văn đã hiển thị là canon. Input người chơi chỉ là ý định; chỉ ghi state nếu chính văn đã tiếp nhận/biến nó thành sự kiện thật.
-2. Hiểu ngôn ngữ tự nhiên, đại từ, lược chủ ngữ, nhiều câu/đoạn, ẩn dụ nhẹ, danh sách, hóa đơn, chuyển khoản, đồ tự sáng tạo, NPC tự sáng tạo và vật phẩm chưa có trong database.
-3. Không có giới hạn số event. Một lượt có 2, 10 hay 30 thay đổi đều phải trả đủ.
-4. Mỗi event độc lập. Một event mơ hồ không được làm mất các event rõ ràng khác.
-5. Với sự kiện đã hoàn tất nhưng số điểm mang tính chủ quan (quan hệ/thân mật), hãy tự chọn delta hợp lý, thường nhỏ-vừa; đừng bỏ cập nhật chỉ vì văn không ghi con số.
-6. Với vật phẩm tự sáng tạo, giữ NGUYÊN tên, mô tả ngắn, số lượng và thuộc tính nếu văn cho biết. Không được bác vì database không có.
-7. MONEY: chỉ ghi tiền thực sự vào/ra. Giá niêm yết, dự định mua, con số level/số lượng/số Route không phải tiền. Nếu có số dư trước→sau, dùng chênh lệch. Nếu hóa đơn + thanh toán hoàn tất, dùng tổng hóa đơn.
-8. Pokémon mới: chỉ khi quyền sở hữu/đồng hành đã thực sự xác lập. Pokémon cũ lên cấp/tiến hóa phải là event riêng, không tạo bản sao.
-9. Anime/Sandbox: tôn trọng những thứ người chơi tự sáng tạo khi chính văn đã xác lập chúng; không viện database để loại bỏ vật phẩm, danh hiệu, vé, thiết bị hay tài sản hư cấu.
-10. Realistic: vẫn ghi những sự kiện chính văn đã canon hóa; app sẽ tự áp luật gameplay cuối cùng.
-11. confidence là mức chắc chắn event đã xảy ra trong CHÍNH VĂN, không phải mức chắc rằng bạn đoán đúng con số. Event >=0.55 có thể được app dùng; nếu thật sự chưa xảy ra thì bỏ hẳn.
+NGUYÊN TẮC CỐT LÕI:
+1. CHÍNH VĂN là nguồn sự thật. INPUT chỉ để hiểu chủ thể/ý định, không tự tạo state.
+2. Đọc theo NGỮ NGHĨA: đại từ, biệt danh, lược chủ ngữ, câu dài, nhiều đoạn, diễn đạt gián tiếp, danh sách, hóa đơn, chuyển khoản, đồ/NPC/quyền/năng lực tự sáng tạo đều hợp lệ.
+3. KHÔNG BAO GIỜ bác một sự kiện chỉ vì "không có trong Pokédex/danh mục/database". Pokédex cũng có thể là TÊN MỘT VẬT PHẨM trong truyện. Database là việc của app sau này.
+4. Nếu chính văn nói người chơi đã nhận/sở hữu một vật, Pokémon, quyền, danh hiệu, giấy tờ, thiết bị... thì xuất event tương ứng. Không cần câu phải chứa đúng "nhận được".
+5. Nếu chính văn nói Pokémon đã thuộc về NGƯỜI CHƠI/đội của người chơi, đó là pokemon_acquired. Nếu một cá thể của người chơi đã được thả, trao đi hoặc trade khỏi quyền sở hữu thì pokemon_removed. Nếu Pokémon chỉ xuất hiện, được nhìn thấy, hoặc thuộc NPC thì KHÔNG phải pokemon_acquired.
+6. Nếu một Pokémon đã có trong PARTY/PC, các thay đổi của nó phải nhắm vào đúng cá thể hiện có (ưu tiên uid nếu snapshot có), không tạo bản sao.
+7. Event nào đã xảy ra thì status=completed. Việc đang cân nhắc/dự định/giá niêm yết/khả năng tương lai thì bỏ.
+8. Không giới hạn số event. Mỗi event độc lập; một event mơ hồ không được làm mất các event rõ khác.
+9. Vật phẩm: trả NET CHANGE của từng tên vật phẩm trong lượt. Nhận 3 rồi dùng 1 => quantity=2. Mất/dùng/trả => quantity âm. Vật phẩm lạ vẫn giữ nguyên tên.
+10. MONEY: chỉ tiền thật sự vào/ra. Giá niêm yết không phải giao dịch. Nếu có số dư trước→sau, dùng chênh lệch. Nếu đã thanh toán hóa đơn, dùng tổng đã trả. operation=spend/payment phải có amount âm; income/reward/refund phải dương.
+11. Quan hệ/thân mật/danh tiếng là thang điểm chủ quan: khi cảm xúc thay đổi rõ nhưng văn không cho số, tự chọn delta nhỏ-vừa hợp lý thay vì bỏ event.
+12. Anime/Sandbox: những thứ tự sáng tạo đã được chính văn xác lập là hợp lệ. Realistic cũng vậy ở bước này: app đã dùng luật để định hướng câu chuyện trước đó; SAU KHI CHÍNH VĂN ĐÃ HIỂN THỊ thì interpreter chỉ có nhiệm vụ đồng bộ canon, không được phủ quyết.
+13. confidence đo độ chắc rằng SỰ KIỆN ĐÃ XẢY RA trong canon. Đừng hạ confidence chỉ vì entity lạ hoặc phi canon. Với sự kiện đã được câu chữ xác lập rõ, ưu tiên >=0.8 dù đó là đồ/Pokémon fan-made.
+14. evidence là một mô tả ngắn/paraphrase của căn cứ. KHÔNG cần copy nguyên văn.
+15. owner: với item_change/pokemon_acquired, chỉ xuất nếu thay đổi tài sản của NGƯỜI CHƠI. Có thể ghi owner="player".
 
 KIND chuẩn:
-money_change, item_change, pokemon_acquired, pokemon_level, pokemon_evolve, pokemon_friendship, pokemon_patch, relationship_change, body_change, hunger_change, move, time_advance, time_of_day, training, npc_upsert, fact_upsert, badge_gain, quest_update, reputation_change, wanted_change, legendary_access, ribbon_gain, mark_gain, shop_enter, pokecenter_enter, equip, unequip, custom_state.
+money_change, item_change, pokemon_acquired, pokemon_removed, pokemon_level, pokemon_evolve, pokemon_friendship, pokemon_patch, relationship_change, body_change, hunger_change, move, time_advance, time_of_day, training, npc_upsert, fact_upsert, badge_gain, quest_update, reputation_change, wanted_change, legendary_access, ribbon_gain, mark_gain, shop_enter, pokecenter_enter, equip, unequip, custom_state.
 
-Định dạng ưu tiên (JSONL — MỖI EVENT MỘT OBJECT RIÊNG để một dòng lỗi không làm mất cả lượt):
+Định dạng ưu tiên JSONL — MỖI EVENT MỘT OBJECT RIÊNG:
 <STATE_EVENTS>
-{"kind":"item_change","target":"Vé tàu VIP","quantity":1,"status":"completed","confidence":0.97,"evidence":"nhân vật đã nhận vé tàu VIP","details":{"description":"Vé VIP do truyện tự tạo","category":"key"}}
-{"kind":"money_change","amount":-5000,"status":"completed","confidence":0.98,"evidence":"thanh toán hoàn tất"}
+{"kind":"item_change","target":"Pokédex","quantity":1,"operation":"receive","owner":"player","status":"completed","confidence":0.96,"evidence":"giáo sư trao Pokédex cho người chơi","details":{"description":"Thiết bị tra cứu Pokémon","category":"key"}}
+{"kind":"pokemon_acquired","target":"Ditto","owner":"player","level":12,"status":"completed","confidence":0.94,"evidence":"Ditto chính thức gia nhập đội"}
+{"kind":"money_change","amount":-5000,"operation":"payment","status":"completed","confidence":0.98,"evidence":"người chơi đã thanh toán 5.000"}
 </STATE_EVENTS>
-Bạn cũng có thể trả {"events":[...]} nếu provider buộc JSON object. App hiểu cả hai. KHÔNG đánh số, không dấu phẩy giữa các dòng JSONL.
 
-Field dùng tùy kind: target, source, amount, quantity, level, mode(delta|absolute), from, to, gender, status, confidence, evidence, note, place, x, y, days, dayPart, intensity, fields, details.
-- pokemon_patch.details có thể chứa gender, shiny, nature, ability, teraType, nickname, form, friendship, heldItem.
-- item_change.details có thể chứa description, category, holdable, infinite, keyItem.
-- quest_update.details có thể chứa id,status,title,giver,objective,reward,region.
-- custom_state dùng target làm khóa và details/value làm dữ liệu cần nhớ khi không khớp loại chuẩn; có thể thêm namespace và operation=set|merge|delta|append|remove. Đây là đường CHÍNH cho biến mới người chơi tự nghĩ ra.
-- item_change nếu số lượng không ghi rõ nhưng văn xác nhận nhận/mất đúng một vật, dùng quantity=1 hoặc -1 thay vì bỏ event.
-Nếu thật sự không có thay đổi state nào, trả <STATE_EVENTS>{\"events\":[]}</STATE_EVENTS>.
+Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(delta|absolute), from, to, gender, status, confidence, evidence, note, place, x, y, days, dayPart, intensity, fields, details.
+- pokemon_patch.details: gender, shiny, nature, ability, teraType, nickname, form, friendship, heldItem, ivs, evs, status, customAttributes và mọi thuộc tính fan-made khác.
+- pokemon_acquired.details có thể thêm types, baseStats, moves, ability, description nếu là Pokémon/form fan-made.
+- item_change.details: description, category, holdable, infinite, keyItem.
+- quest_update.details: id,status,title,giver,objective,reward,region.
+- custom_state dùng cho mọi state mới không khớp loại chuẩn: target là khóa; namespace; operation=set|merge|delta|append|remove; value/details là dữ liệu.
+- Unknown kind cũng được app giữ như dynamic state, nhưng hãy ưu tiên kind chuẩn khi có thể.
+Nếu thật sự không có thay đổi state nào, trả <STATE_EVENTS>{"events":[]}</STATE_EVENTS>.
 Không markdown, không giải thích ngoài khối STATE_EVENTS.`
 
 function normalizeKind(value) {
@@ -107,11 +115,29 @@ function asNumber(value, fallback = 0) {
 function signedQuantity(event) {
   const explicit = event.quantity ?? event.qty ?? event.amount ?? event.delta
   const numeric = asNumber(explicit, NaN)
-  if (Number.isFinite(numeric) && numeric !== 0) return numeric
   const direction = String(event.operation ?? event.op ?? event.action ?? event.direction ?? '').toLowerCase()
-  if (/remove|lose|lost|use|used|consume|consumed|give|gave|sell|sold|spend/.test(direction)) return -1
-  if (/add|gain|gained|receive|received|obtain|obtained|acquire|acquired|buy|bought|find|found/.test(direction)) return 1
+  const negativeDirection = /remove|lose|lost|use|used|consume|consumed|give|gave|sell|sold|spend|discard|return|returned|pay/.test(direction)
+  const positiveDirection = /add|gain|gained|receive|received|obtain|obtained|acquire|acquired|buy|bought|find|found|reward/.test(direction)
+  if (Number.isFinite(numeric) && numeric !== 0) {
+    if (negativeDirection) return -Math.abs(numeric)
+    if (positiveDirection) return Math.abs(numeric)
+    return numeric
+  }
+  if (negativeDirection) return -1
+  if (positiveDirection) return 1
   return 0
+}
+
+function signedMoneyAmount(event) {
+  let amount = asNumber(event.amount ?? event.delta ?? event.value, 0)
+  const direction = String(event.operation ?? event.op ?? event.action ?? event.direction ?? event.kind ?? '').toLowerCase()
+  if (!amount && Number.isFinite(asNumber(event.before, NaN)) && Number.isFinite(asNumber(event.after, NaN))) {
+    amount = asNumber(event.after) - asNumber(event.before)
+  }
+  if (!amount) return 0
+  if (/spend|spent|pay|paid|payment|purchase|buy|bought|fee|cost|debit|lose|lost/.test(direction)) return -Math.abs(amount)
+  if (/income|reward|refund|receive|received|gain|gained|credit|earn|earned/.test(direction)) return Math.abs(amount)
+  return amount
 }
 
 function clamp(value, min, max) {
@@ -121,7 +147,7 @@ function clamp(value, min, max) {
 function emptyParsed() {
   return {
     money: 0, moneyEntries: [], rel: [], body: [], shops: [], loots: [], npcs: [], facts: [],
-    pokemons: [], levels: [], evolutions: [], friendships: [], pokemonPatches: [], equipment: [], hunger: [],
+    pokemons: [], pokemonRemovals: [], levels: [], evolutions: [], friendships: [], pokemonPatches: [], equipment: [], hunger: [],
     moves: [], moveDirectives: [], items: [], badges: [], quests: [], reputations: [], wanted: [],
     legendaryAccess: [], collectionAwards: [], dateAdvance: 0, training: 0, datePart: null,
     pokecenter: null, customEvents: [], dynamicUpdates: [],
@@ -206,7 +232,7 @@ function customFact(event) {
   return { key, text }
 }
 
-export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
+export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
   const parsed = emptyParsed()
   const acceptedEvents = []
   const rejectedEvents = []
@@ -221,10 +247,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
     let accepted = true
     switch (kind) {
       case 'money_change': {
-        let amount = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (!amount && asNumber(event.before, NaN) === asNumber(event.before, NaN) && asNumber(event.after, NaN) === asNumber(event.after, NaN)) {
-          amount = asNumber(event.after) - asNumber(event.before)
-        }
+        const amount = signedMoneyAmount(event)
         if (amount) { parsed.moneyEntries.push(amount); parsed.money += amount } else accepted = false
         break
       }
@@ -237,6 +260,9 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
           semantic: true,
           evidence: event.evidence,
           source: event.source ?? '',
+          semanticEventId: event.id,
+          confidence: event.confidence,
+          canon: true,
         })
         else accepted = false
         break
@@ -244,63 +270,96 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
       case 'pokemon_acquired': {
         const species = String(event.species ?? target).trim()
         if (!species) { accepted = false; break }
-        const mon = { species, level: clamp(event.level ?? details.level ?? 1, 1, 100), semantic: true }
+        const mon = {
+          species,
+          level: clamp(event.level ?? details.level ?? 1, 1, 100),
+          semantic: true,
+          canon: true,
+          semanticEventId: event.id,
+          confidence: event.confidence,
+          evidence: event.evidence,
+          owner: event.owner ?? 'player',
+          details: { ...details },
+        }
         const gender = normalizePokemonGender(event.gender ?? details.gender)
         if (gender) mon.gender = gender
-        for (const key of ['shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship']) {
+        for (const key of ['shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship', 'types', 'baseStats', 'moves', 'description']) {
           if ((event[key] ?? details[key]) != null) mon[key] = event[key] ?? details[key]
         }
         parsed.pokemons.push(mon)
         break
       }
+      case 'pokemon_removed': {
+        const pokemonTarget = String(event.uid ?? event.species ?? target).trim()
+        if (pokemonTarget) parsed.pokemonRemovals.push({
+          target: pokemonTarget,
+          reason: String(event.note ?? event.evidence ?? details.reason ?? ''),
+          semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence,
+        })
+        else accepted = false
+        break
+      }
       case 'pokemon_level': {
+        const pokemonTarget = String(event.uid ?? target).trim()
         const value = asNumber(event.level ?? event.value ?? event.amount, 0)
-        if (!target || !value) { accepted = false; break }
+        if (!pokemonTarget || !value) { accepted = false; break }
         const mode = String(event.mode ?? '').toLowerCase() === 'absolute' || event.level != null ? 'absolute' : 'delta'
-        parsed.levels.push({ target, mode, value: mode === 'absolute' ? clamp(value, 1, 100) : value, semantic: true })
+        parsed.levels.push({ target: pokemonTarget, mode, value: mode === 'absolute' ? clamp(value, 1, 100) : value, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence })
         break
       }
       case 'pokemon_evolve': {
-        const from = String(event.from ?? target).trim()
+        const from = String(event.uid ?? event.from ?? target).trim()
         const to = String(event.to ?? event.value ?? details.to ?? '').trim()
-        if (from && to) parsed.evolutions.push({ from, to, semantic: true }); else accepted = false
+        if (from && to) parsed.evolutions.push({ from, to, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence, details: { ...details } }); else accepted = false
         break
       }
       case 'pokemon_friendship': {
+        const pokemonTarget = String(event.uid ?? target).trim()
         const delta = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (target && delta) parsed.friendships.push({ target, delta, note: event.note ?? event.evidence ?? '', semantic: true }); else accepted = false
+        if (pokemonTarget && delta) parsed.friendships.push({ target: pokemonTarget, delta, note: event.note ?? event.evidence ?? '', semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'pokemon_patch': {
+        const pokemonTarget = String(event.uid ?? target).trim()
         const fields = { ...details }
-        for (const key of ['gender', 'shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship', 'heldItem']) {
+        for (const key of ['gender', 'shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship', 'heldItem', 'ivs', 'evs', 'status', 'customAttributes']) {
           if (event[key] !== undefined) fields[key] = event[key]
         }
-        if (target && Object.keys(fields).length) parsed.pokemonPatches.push({ target, fields, semantic: true })
+        if (pokemonTarget && Object.keys(fields).length) parsed.pokemonPatches.push({ target: pokemonTarget, fields, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence })
         else accepted = false
         break
       }
       case 'relationship_change': {
         const delta = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (target && delta) parsed.rel.push({ name: target, delta, note: event.note ?? event.evidence ?? '' }); else accepted = false
+        if (target && delta) parsed.rel.push({ name: target, delta, note: event.note ?? event.evidence ?? '', semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'body_change': {
         const part = String(event.part ?? target).trim()
         const delta = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (part && delta) parsed.body.push({ part, delta }); else accepted = false
+        if (part && delta) parsed.body.push({ part, delta, semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'hunger_change': {
         const who = /pok|mon/i.test(String(event.who ?? target)) ? 'mon' : 'player'
         const delta = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (delta) parsed.hunger.push({ who, delta }); else accepted = false
+        if (delta) parsed.hunger.push({ who, delta, semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'move': {
         const place = String(event.place ?? target).trim()
-        if (place) { const d = { place, x: Number.isFinite(Number(event.x)) ? clamp(event.x, 0, 100) : null, y: Number.isFinite(Number(event.y)) ? clamp(event.y, 0, 100) : null }; parsed.moveDirectives.push(d); parsed.moves.push(place) }
-        else accepted = false
+        if (place) {
+          const d = { place, x: Number.isFinite(Number(event.x)) ? clamp(event.x, 0, 100) : null, y: Number.isFinite(Number(event.y)) ? clamp(event.y, 0, 100) : null, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence }
+          parsed.moveDirectives.push(d)
+          parsed.moves.push(place)
+          // Bản đồ engine chỉ biết địa danh chuẩn. Mirror vị trí bằng state động
+          // để địa điểm fan-made vẫn được nhớ qua các lượt dù không có map pin.
+          parsed.dynamicUpdates.push({
+            kind: 'custom_state', target: 'Vị trí truyện', namespace: 'world',
+            operation: 'set', value: { place, x: d.x, y: d.y },
+            semantic: true, canon: true, semanticEventId: event.id,
+          })
+        } else accepted = false
         break
       }
       case 'time_advance': {
@@ -311,7 +370,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
       case 'time_of_day': parsed.datePart = String(event.dayPart ?? event.value ?? target).trim() || parsed.datePart; break
       case 'training': parsed.training += Math.max(1, Math.trunc(asNumber(event.intensity ?? event.amount ?? event.value, 1))); break
       case 'npc_upsert': {
-        if (target) parsed.npcs.push({ name: target, fields: { ...(event.fields ?? details) } }); else accepted = false
+        if (target) parsed.npcs.push({ name: target, fields: { ...(event.fields ?? details) }, semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'fact_upsert': parsed.facts.push(customFact(event)); break
@@ -327,11 +386,11 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
       }
       case 'reputation_change': {
         const delta = asNumber(event.amount ?? event.delta ?? event.value, 0)
-        if (target && delta) parsed.reputations.push({ name: target, delta, note: event.note ?? event.evidence ?? '' }); else accepted = false
+        if (target && delta) parsed.reputations.push({ name: target, delta, note: event.note ?? event.evidence ?? '', semantic: true, canon: true, semanticEventId: event.id }); else accepted = false
         break
       }
       case 'wanted_change': parsed.wanted.push({ delta: asNumber(event.amount ?? event.delta ?? event.value, 0), region: event.region ?? details.region ?? '', reason: event.note ?? event.evidence ?? '', bounty: asNumber(event.bounty ?? details.bounty, 0) }); break
-      case 'legendary_access': if (target) parsed.legendaryAccess.push({ species: target, reason: event.note ?? event.evidence ?? '' }); else accepted = false; break
+      case 'legendary_access': if (target) parsed.legendaryAccess.push({ species: target, reason: event.note ?? event.evidence ?? '', semantic: true, canon: true, semanticEventId: event.id }); else accepted = false; break
       case 'ribbon_gain': if (target && (event.value ?? details.name)) parsed.collectionAwards.push({ kind: 'ribbon', target, name: String(event.value ?? details.name) }); else accepted = false; break
       case 'mark_gain': if (target && (event.value ?? details.name)) parsed.collectionAwards.push({ kind: 'mark', target, name: String(event.value ?? details.name) }); else accepted = false; break
       case 'shop_enter': if (target) parsed.shops.push({ name: target, type: details.type ?? '', size: details.size ?? '', semantic: true }); else accepted = false; break
@@ -348,6 +407,8 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
           value: event.value,
           details: { ...details },
           semantic: true,
+          canon: true,
+          semanticEventId: event.id,
         }
         if (!update.target) { accepted = false; break }
         parsed.customEvents.push(update)
@@ -368,6 +429,8 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
           value: event.value,
           details: { ...details },
           semantic: true,
+          canon: true,
+          semanticEventId: event.id,
         }
         parsed.customEvents.push(update)
         parsed.dynamicUpdates.push(update)
@@ -384,7 +447,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.55 } = {}) {
 function focusKinds(focus) {
   const map = {
     economy: ['money_change', 'item_change', 'equip', 'unequip', 'shop_enter', 'pokecenter_enter'],
-    pokemon: ['pokemon_acquired', 'pokemon_level', 'pokemon_evolve', 'pokemon_friendship', 'pokemon_patch', 'hunger_change', 'ribbon_gain', 'mark_gain'],
+    pokemon: ['pokemon_acquired', 'pokemon_removed', 'pokemon_level', 'pokemon_evolve', 'pokemon_friendship', 'pokemon_patch', 'hunger_change', 'ribbon_gain', 'mark_gain'],
     world: ['relationship_change', 'body_change', 'move', 'time_advance', 'time_of_day', 'training', 'npc_upsert', 'reputation_change', 'wanted_change'],
     progress: ['fact_upsert', 'badge_gain', 'quest_update', 'legendary_access', 'custom_state'],
   }

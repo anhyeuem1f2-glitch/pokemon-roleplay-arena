@@ -8,6 +8,7 @@ import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES } from '../data/pokemonSpecies.js'
+import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
 import { validateStateAgainstProse } from '../utils/stateEvidence.js'
 import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
@@ -111,7 +112,7 @@ function starterGenderLabel(value) {
 
 
 const INTRO_STATE_ARRAY_FIELDS = [
-  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'levels', 'evolutions',
+  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'pokemonRemovals', 'levels', 'evolutions',
   'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items',
   'badges', 'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards', 'customEvents', 'dynamicUpdates',
 ]
@@ -768,31 +769,38 @@ export default function IntroScreen({ onOpenSettings }) {
         adminMode: false,
         inventory: openingInventory,
         location: originArea ? { regionKey: originRegionKey, areaKey: resolvedOriginAreaKey } : null,
+        blockPokemonAcquisition: false,
       }).parsed
-      let parsed = legacyParsed
+      // Đợt 106: mở đầu cũng semantic-first. Tag chỉ dùng khi Semantic API lỗi,
+      // tránh cảnh truyện đã trao Pokédex/Ditto nhưng validator từ khóa cũ lại bác.
+      let parsed = parseStoryStateTags('')
+      let semanticSucceeded = false
       try {
         const semantic = await extractSemanticStateEvents(apiConfig, {
           storyText: cleaned,
           userText: directive,
           stateSnapshot: {
+            player: { name: finalName, trainerId: journeyTrainerId, mode: normalizeGameMode(storyTone) },
             money: startingMoney,
             inventory: openingInventory.map((item) => ({ id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite) })),
-            party: openingParty.map((mon) => ({ uid: mon.uid, name: mon.name, species: mon.species, level: mon.level })),
-            pc: openingPc.map((mon) => ({ uid: mon.uid, name: mon.name, species: mon.species, level: mon.level })),
+            party: openingParty.map((mon) => ({ uid: mon.uid, name: mon.name, nickname: mon.nickname, species: mon.species, level: mon.level })),
+            pc: openingPc.map((mon) => ({ uid: mon.uid, name: mon.name, nickname: mon.nickname, species: mon.species, level: mon.level })),
             location: originArea ? { regionKey: originRegionKey, areaKey: resolvedOriginAreaKey } : null,
           },
           appliedState: sandboxMode ? {
             money: startingMoney,
             items: openingInventory.map((item) => ({ name: item.name, qty: item.qty })),
-            pokemons: [...openingParty, ...openingPc].map((mon) => ({ species: mon.species ?? mon.name, level: mon.level })),
+            pokemons: [...openingParty, ...openingPc].map((mon) => ({ species: mon.species ?? mon.name, level: mon.level, nickname: mon.nickname })),
           } : null,
           mode: normalizeGameMode(storyTone),
           scanMode: 'extractor',
         })
         parsed = mergeIntroState(parsed, semantic.parsed)
+        semanticSucceeded = true
       } catch (semanticError) {
         console.warn('[semantic-state:intro] fallback legacy:', semanticError.message)
       }
+      if (!semanticSucceeded) parsed = mergeIntroState(parsed, legacyParsed)
       const openingText = cleaned
       // Chương mở đầu cũng dùng cùng giao thức trạng thái như các lượt sau.
       // Trước đây tag MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ bị parse rồi bỏ
@@ -883,15 +891,29 @@ export default function IntroScreen({ onOpenSettings }) {
       const resolvedOpeningParty = [...openingParty]
       const resolvedOpeningPc = [...openingPc]
       for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
-        const entry = pokedexSpecies.find((sp) => sp.name.toLowerCase() === pk.species.toLowerCase())
-        const access = legendaryAccess(entry, openingWorldProgress, storyTone)
-        if (entry && access.allowed) {
+        const canonEvent = Boolean(pk.semantic || pk.canon)
+        let entry = resolveSpeciesEntryFlexible(pokedexSpecies, pk.species)
+        if (!entry && canonEvent) {
+          entry = buildCustomSpeciesEntry(pk.species, {
+            ...(pk.details ?? {}),
+            types: pk.types ?? pk.details?.types,
+            baseStats: pk.baseStats ?? pk.details?.baseStats,
+            ability: pk.ability ?? pk.details?.ability,
+            friendship: pk.friendship,
+            gender: pk.gender,
+            description: pk.description ?? pk.details?.description,
+          })
+        }
+        if (!entry) continue
+        const access = canonEvent ? { allowed: true } : legendaryAccess(entry, openingWorldProgress, storyTone)
+        if (access.allowed) {
           const { buildMonSmart } = await import('../data/pokemonSpecies.js')
-          // Đợt 70: áp thiên phú cơ chế ngay cho con đầu tiên.
-          const buildOwnedMon = normalizeGameMode(storyTone) === 'realistic' ? buildMonSmart : buildWildMon
+          // Sau khi chính văn đã canon hóa quyền sở hữu, không nắn lại level/
+          // legendary theo mode nữa; mode chỉ được quyền điều hướng trước khi viết.
+          const buildOwnedMon = normalizeGameMode(storyTone) === 'realistic' && !canonEvent ? buildMonSmart : buildWildMon
           let acquired = normalizeAcquiredMon({
             ...buildOwnedMon(entry, pk.level, movesDb),
-            ...(pk.gender ? { gender: pk.gender, genderSource: pk.semantic ? 'semantic' : 'story' } : {}),
+            ...(pk.gender ? { gender: pk.gender, genderSource: canonEvent ? 'semantic' : 'story' } : {}),
             ...(pk.shiny !== undefined ? { shiny: Boolean(pk.shiny) } : {}),
             ...(pk.nature ? { nature: pk.nature } : {}),
             ...(pk.ability ? { ability: pk.ability } : {}),
@@ -903,12 +925,12 @@ export default function IntroScreen({ onOpenSettings }) {
           acquired = recomputeMonStats(acquired)
           const mon = ensurePokemonIdentity({
             ...applyPerksToMon(acquired, traits),
-            acquisitionSourceId: `intro-${journeyTrainerId}:pokemon:${pk.species.toLowerCase()}:${pokemonIndex}`,
+            acquisitionSourceId: `intro-${journeyTrainerId}:pokemon:${String(pk.species).toLowerCase()}:${pokemonIndex}`,
           }, journeyTrainerId)
           if (resolvedOpeningParty.length < 6) resolvedOpeningParty.push(mon)
           else resolvedOpeningPc.push(mon)
-        } else if (entry) {
-          console.warn(`[intro] Chặn ${entry.name}: ${access.reason}`)
+        } else {
+          console.warn(`[intro] Legacy gate chặn ${entry.name}: ${access.reason}`)
         }
       }
       setParty(resolvedOpeningParty)

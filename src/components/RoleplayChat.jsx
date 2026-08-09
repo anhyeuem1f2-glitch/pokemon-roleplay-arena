@@ -18,6 +18,7 @@ import { extractActionChoices } from '../utils/actionChoices.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
 import { buildMonSmart, buildWildMon, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, normalizeAcquiredMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements, recomputeMonStats } from '../data/pokemonSpecies.js'
+import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { detectMentionedArea, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectDoubleBattle, detectPokecenter, detectInteractiveShop, inferInteractiveShop } from '../data/storyScenes.js'
@@ -316,9 +317,14 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
   const appliedRepTargets = new Set((applied?.reputations ?? []).map((entry) => monKey(entry.name)))
   const appliedEvolutions = new Set((applied?.evolutions ?? []).map((entry) => `${monKey(entry.from)}|${monKey(entry.to)}`))
   const appliedItems = new Set((applied?.items ?? []).map((entry) => `${itemKey(entry.name)}|${Number(entry.qty)}`))
+  const appliedSemanticItemTargets = new Set((applied?.items ?? []).filter((entry) => entry?.semantic || entry?.canon).map((entry) => itemKey(entry.name)))
   const appliedFriends = new Set((applied?.friendships ?? []).map((entry) => `${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`))
   const appliedEquipment = new Set((applied?.equipment ?? []).map((entry) => `${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`))
-  const appliedPokemon = new Set((applied?.pokemons ?? []).map((entry) => `${monKey(entry.species)}|${Number(entry.level)}`))
+  // Qua nhiều semantic pass, cùng một Pokémon có thể bị model chấm lệch
+  // level đôi chút. Dedupe theo loài+nickname thay vì loài+level để không sinh
+  // bản sao chỉ vì Auditor đoán Lv12 còn Extractor đoán Lv13.
+  const appliedPokemon = new Set((applied?.pokemons ?? []).map((entry) => `${monKey(entry.species)}|${monKey(entry.nickname ?? '')}`))
+  const appliedPokemonRemovalTargets = new Set((applied?.pokemonRemovals ?? []).map((entry) => monKey(entry.target)))
   const appliedRel = new Set((applied?.rel ?? []).map((entry) => `${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`))
   const appliedBody = new Set((applied?.body ?? []).map((entry) => `${entry.part}|${Number(entry.delta)}`))
   const appliedHunger = new Set((applied?.hunger ?? []).map((entry) => `${entry.who}|${Number(entry.delta)}`))
@@ -344,25 +350,43 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     const appliedMoney = applied?.moneyEntries?.length ? applied.moneyEntries : (applied?.money ? [applied.money] : [])
     for (const value of appliedMoney) appliedMoneyCounts.set(Number(value), (appliedMoneyCounts.get(Number(value)) ?? 0) + 1)
   }
-  const filteredMoneyEntries = extraMoneyEntries.filter((value) => {
+  let filteredMoneyEntries = extraMoneyEntries.filter((value) => {
     if (!consumeExactMoney) return true
     const count = appliedMoneyCounts.get(Number(value)) ?? 0
     if (count <= 0) return true
     appliedMoneyCounts.set(Number(value), count - 1)
     return false
   })
+  // Semantic model đôi khi gộp nhiều giao dịch thành một net delta trong khi
+  // deterministic reconciler đã commit một phần. Nếu giữ nguyên aggregate sẽ
+  // trừ/cộng lặp. Chỉ tách phần dư khi response semantic có đúng MỘT delta và
+  // delta đó bao trùm net đã áp cùng chiều; các event riêng lẻ vẫn giữ nguyên.
+  if (consumeExactMoney && extraMoneyEntries.length === 1 && filteredMoneyEntries.length === 1) {
+    const appliedMoney = applied?.moneyEntries?.length ? applied.moneyEntries.map(Number) : (applied?.money ? [Number(applied.money)] : [])
+    const appliedNet = appliedMoney.reduce((sum, value) => sum + (Number(value) || 0), 0)
+    const candidate = Number(filteredMoneyEntries[0]) || 0
+    if (appliedNet && candidate && Math.sign(appliedNet) === Math.sign(candidate)) {
+      if (Math.abs(candidate) > Math.abs(appliedNet)) {
+        const residual = candidate - appliedNet
+        filteredMoneyEntries = residual ? [residual] : []
+      } else {
+        filteredMoneyEntries = []
+      }
+    }
+  }
   return {
     ...extra,
     moneyEntries: filteredMoneyEntries,
     money: filteredMoneyEntries.reduce((sum, value) => sum + value, 0),
     levels: (extra?.levels ?? []).filter((entry) => !appliedLevelTargets.has(monKey(entry.target)) && !appliedLevels.has(`${monKey(entry.target)}|${entry.mode}|${entry.value}`)),
     evolutions: (extra?.evolutions ?? []).filter((entry) => !appliedEvolutions.has(`${monKey(entry.from)}|${monKey(entry.to)}`)),
-    items: (extra?.items ?? []).filter((entry) => !appliedItems.has(`${itemKey(entry.name)}|${Number(entry.qty)}`)),
+    items: (extra?.items ?? []).filter((entry) => !appliedItems.has(`${itemKey(entry.name)}|${Number(entry.qty)}`) && !((entry?.semantic || entry?.canon) && appliedSemanticItemTargets.has(itemKey(entry.name)))),
     loots: (extra?.loots ?? []).filter((entry) => !appliedLoots.has(`${monKey(entry.type)}|${monKey(entry.size)}`)),
     friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriendTargets.has(monKey(entry.target)) && !appliedFriends.has(`${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     pokemonPatches: (extra?.pokemonPatches ?? []).filter((entry) => !appliedPokemonPatchTargets.has(monKey(entry.target))),
     equipment: (extra?.equipment ?? []).filter((entry) => !appliedEquipment.has(`${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`)),
-    pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(`${monKey(entry.species)}|${Number(entry.level)}`)),
+    pokemons: (extra?.pokemons ?? []).filter((entry) => !appliedPokemon.has(`${monKey(entry.species)}|${monKey(entry.nickname ?? '')}`)),
+    pokemonRemovals: (extra?.pokemonRemovals ?? []).filter((entry) => !appliedPokemonRemovalTargets.has(monKey(entry.target))),
     rel: (extra?.rel ?? []).filter((entry) => !appliedRelTargets.has(monKey(entry.name)) && !appliedRel.has(`${monKey(entry.name)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     body: (extra?.body ?? []).filter((entry) => !appliedBodyParts.has(entry.part) && !appliedBody.has(`${entry.part}|${Number(entry.delta)}`)),
     hunger: (extra?.hunger ?? []).filter((entry) => !appliedHungerWho.has(entry.who) && !appliedHunger.has(`${entry.who}|${Number(entry.delta)}`)),
@@ -416,7 +440,7 @@ function filterUiPreAppliedState(extra, preApplied) {
 }
 
 const STATE_ARRAY_FIELDS = [
-  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'levels', 'evolutions',
+  'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'pokemonRemovals', 'levels', 'evolutions',
   'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items', 'badges',
   'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards', 'customEvents', 'dynamicUpdates',
 ]
@@ -451,7 +475,7 @@ function mergeStateManifests(base, extra) {
 // không tồn tại, thiếu vật phẩm, cổng tiến hoá, v.v. Ledger chỉ được đánh dấu
 // cho operation đã áp hoặc đã ở trạng thái đích; nếu không Auditor sẽ tưởng
 // biến đã cập nhật và bỏ qua lỗi thật.
-const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'items', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates']
+const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'pokemonRemovals', 'items', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates']
 function ledgerManifestFromApplyReport(parsed, report) {
   const manifest = compactStateManifest(parsed)
   for (const field of APPLY_GATED_FIELDS) {
@@ -529,6 +553,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
   } else {
     // Fallback cho tin cũ/test cũ chưa có báo cáo áp biến.
     for (const pk of parsed.pokemons ?? []) out.push(`🔴 Yêu cầu nhận Pokémon: ${pk.species ?? pk.name ?? '???'} Lv.${pk.level}${tag}`)
+    for (const rm of parsed.pokemonRemovals ?? []) out.push(`↗ Yêu cầu chuyển Pokémon khỏi sở hữu: ${rm.target}${tag}`)
     for (const ev of parsed.evolutions ?? []) out.push(`✨ Yêu cầu tiến hoá: ${ev.from} → ${ev.to}${tag}`)
     for (const lv of parsed.levels ?? []) {
       const value = lv.mode === 'delta' ? `${lv.value > 0 ? '+' : ''}${lv.value}` : `Lv.${lv.value}`
@@ -677,7 +702,13 @@ export default function RoleplayChat() {
   // được phép cập nhật trong chính văn.
   function buildStateScanSnapshot(focus, moneyValue) {
     const focusId = focus?.id ?? null
-    const snapshot = {}
+    const snapshot = {
+      player: {
+        name: playerName || playerProfile?.name || 'Người chơi',
+        trainerId,
+        mode: normalizeGameMode(storyTone),
+      },
+    }
     if (!focusId || focusId === 'economy') {
       snapshot.money = Number(moneyValue) || 0
       snapshot.inventory = (latestInventoryRef.current ?? []).map((item) => ({
@@ -686,11 +717,22 @@ export default function RoleplayChat() {
     }
     if (!focusId || focusId === 'pokemon') {
       snapshot.party = (latestPartyRef.current ?? []).map((mon) => ({
-        uid: mon.uid, name: mon.name, species: mon.species, level: mon.level,
-        friendship: mon.friendship, heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+        uid: mon.uid, pokemonId: mon.pokemonId, name: mon.name, nickname: mon.nickname,
+        species: mon.species, forme: mon.forme, level: mon.level, gender: mon.gender,
+        shiny: Boolean(mon.shiny), nature: mon.nature, ability: mon.ability,
+        teraType: mon.teraType, friendship: mon.friendship,
+        heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+        status: mon.status ?? null,
+        customAttributes: mon.customAttributes ?? undefined,
       }))
       snapshot.pc = (latestPcBoxRef.current ?? []).map((mon) => ({
-        uid: mon.uid, name: mon.name, species: mon.species, level: mon.level,
+        uid: mon.uid, pokemonId: mon.pokemonId, name: mon.name, nickname: mon.nickname,
+        species: mon.species, forme: mon.forme, level: mon.level, gender: mon.gender,
+        shiny: Boolean(mon.shiny), nature: mon.nature, ability: mon.ability,
+        teraType: mon.teraType, friendship: mon.friendship,
+        heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+        status: mon.status ?? null,
+        customAttributes: mon.customAttributes ?? undefined,
       }))
     }
     if (!focusId || focusId === 'world') {
@@ -880,8 +922,28 @@ export default function RoleplayChat() {
     const markLedger = (field, entry) => {
       if (report.ledgerState[field]) report.ledgerState[field].push(entry)
     }
+    const semanticFallbackUpdates = []
+    const deferSemanticState = (entry, target, value, namespace = 'unresolved') => {
+      if (!(entry?.semantic || entry?.canon) || !target) return
+      semanticFallbackUpdates.push({
+        kind: 'custom_state',
+        target,
+        namespace,
+        operation: 'set',
+        value,
+        details: {
+          sourceKind: entry.kind ?? null,
+          evidence: entry.evidence ?? entry.note ?? '',
+          semanticEventId: entry.semanticEventId ?? null,
+        },
+        semantic: true,
+        canon: true,
+      })
+    }
     let previewActive = latestPlayerMonRef.current
     let previewParty = [...(latestPartyRef.current ?? [])]
+    let previewPc = [...(latestPcBoxRef.current ?? [])]
+    const resolveOwned = (target) => resolveOwnedMonTarget(target, previewActive, [...previewParty, ...previewPc])
     const evolutionDebits = new Map()
     const appliedFriendshipDirectives = new Set()
     let mysteryBallRevealsApplied = 0
@@ -903,10 +965,19 @@ export default function RoleplayChat() {
     function replacePreviewMon(identity, transform) {
       if (previewActive && monIdentityMatches(previewActive, identity)) previewActive = transform(previewActive)
       previewParty = previewParty.map((mon) => (monIdentityMatches(mon, identity) ? transform(mon) : mon))
+      previewPc = previewPc.map((mon) => (monIdentityMatches(mon, identity) ? transform(mon) : mon))
     }
 
     try {
-      const findSpeciesEntry = (value) => findEvolutionSpeciesEntry(pokedexSpecies, value)
+      const findSpeciesEntry = (value) => resolveSpeciesEntryFlexible(pokedexSpecies, value)
+        ?? findEvolutionSpeciesEntry(pokedexSpecies, value)
+      const isCanonDirective = (entry) => Boolean(entry?.semantic || entry?.canon)
+      // Canon có thể tạo entity và chỉnh nó trong cùng một lượt. Không được
+      // biến thứ tự mảng directive thành thứ tự phụ thuộc dữ liệu. Những patch
+      // nhắm vào Pokémon chưa tồn tại sẽ được giữ trong transaction và retry
+      // NGAY sau acquisition/evolution trước khi mới cân nhắc dynamic fallback.
+      const pendingLevelDirectives = []
+      const pendingEvolutionDirectives = []
       const evolveOne = (targetMon, targetEntry, source = 'tag') => {
         const fromName = targetMon.name
         const identity = { uid: targetMon.uid, name: targetMon.name }
@@ -917,6 +988,7 @@ export default function RoleplayChat() {
         const transform = () => evolvedSnapshot
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? transform() : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? transform() : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? transform() : mon)))
         replacePreviewMon(identity, transform)
         report.lines.push(`✅ Tiến hoá: ${fromName} → ${targetEntry.name} · Lv.${targetMon.level ?? 1}${source === 'inferred' ? ' (app xác nhận từ chính văn)' : ''}`)
       }
@@ -942,7 +1014,7 @@ export default function RoleplayChat() {
         .reduce((sum, item) => sum + Math.abs(item.qty), 0)
       let verifiedCandyBudget = Math.min(candyStock, candyDebit)
       for (const directive of parsed.levels ?? []) {
-        let targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        let targetMon = resolveOwned(directive.target)
         // Model đôi khi gọi luôn TÊN SAU TIẾN HOÁ trong LEVEL dù cá thể trong
         // state vẫn đang mang tên cũ ở thời điểm áp. Nếu cùng lượt có EVOLVE
         // A→B, chuyển target B về đúng cá thể A rồi mới nâng cấp.
@@ -951,21 +1023,27 @@ export default function RoleplayChat() {
             normalizeMonTarget(ev.to) === normalizeMonTarget(directive.target),
           )
           if (linkedEvolution) {
-            targetMon = resolveOwnedMonTarget(linkedEvolution.from, previewActive, previewParty)
+            targetMon = resolveOwned(linkedEvolution.from)
           }
         }
         if (!targetMon) {
-          report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          if (isCanonDirective(directive)) {
+            pendingLevelDirectives.push(directive)
+            report.lines.push(`ℹ Chờ tạo/resolve cá thể “${directive.target}” rồi mới áp cấp trong cùng transaction`)
+          } else {
+            report.lines.push(`⚠ Không áp cấp “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          }
           continue
         }
         const requiredCandy = directive.mode === 'delta'
           ? Math.max(0, directive.value)
           : Math.max(0, directive.value - (targetMon.level ?? 1))
-        if (realisticMode && (requiredCandy <= 0 || verifiedCandyBudget < requiredCandy || !/rare\s*candy|kẹo\s*hiếm/i.test(storyText))) {
-          report.lines.push(`⚠ Chế độ Thực tế chặn tăng cấp trực tiếp cho ${directive.target}: cần ${requiredCandy || 1} Kẹo Hiếm đang có trong túi và đúng số tag trừ vật phẩm`)
+        if (realisticMode && !isCanonDirective(directive)
+          && (requiredCandy <= 0 || verifiedCandyBudget < requiredCandy || !/rare\s*candy|kẹo\s*hiếm/i.test(storyText))) {
+          report.lines.push(`⚠ Chế độ Thực tế chặn tăng cấp legacy cho ${directive.target}: cần ${requiredCandy || 1} Kẹo Hiếm hợp lệ`)
           continue
         }
-        if (realisticMode) verifiedCandyBudget -= requiredCandy
+        if (realisticMode && !isCanonDirective(directive)) verifiedCandyBudget -= requiredCandy
         const before = targetMon.level ?? 1
         const previewAfter = applyLevelDirective(targetMon, directive, movesDb)
         const after = previewAfter?.level ?? before
@@ -978,6 +1056,7 @@ export default function RoleplayChat() {
         const apply = (mon) => applyLevelDirective(mon, directive, movesDb)
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after}`)
         markLedger('levels', directive)
@@ -986,7 +1065,7 @@ export default function RoleplayChat() {
       // FRIEND phải có hiệu lực trước EVOLVE trong cùng lượt. Nếu không, một
       // cảnh đạt ngưỡng thân mật rồi tiến hoá vẫn bị kiểm tra bằng friendship cũ.
       for (const [index, directive] of (parsed.friendships ?? []).entries()) {
-        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        const targetMon = resolveOwned(directive.target)
         if (!targetMon) continue // Có thể là Pokémon mới nhận ở phần POKEMON bên dưới.
         const before = Number.isFinite(targetMon.friendship) ? targetMon.friendship : 70
         const identity = { uid: targetMon.uid, name: targetMon.name }
@@ -994,6 +1073,7 @@ export default function RoleplayChat() {
         const after = apply(targetMon).friendship
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         appliedFriendshipDirectives.add(index)
         markLedger('friendships', directive)
@@ -1001,51 +1081,112 @@ export default function RoleplayChat() {
       }
 
       for (const evolution of parsed.evolutions ?? []) {
-        const targetMon = resolveOwnedMonTarget(evolution.from, previewActive, previewParty)
+        const targetMon = resolveOwned(evolution.from)
         if (!targetMon) {
-          report.lines.push(`⚠ Không tiến hoá “${evolution.from}”: không tìm thấy cá thể tương ứng trong đội`)
+          if (isCanonDirective(evolution)) {
+            pendingEvolutionDirectives.push(evolution)
+            report.lines.push(`ℹ Chờ tạo/resolve cá thể “${evolution.from}” rồi mới áp tiến hoá trong cùng transaction`)
+          } else {
+            report.lines.push(`⚠ Không tiến hoá “${evolution.from}”: không tìm thấy cá thể tương ứng trong đội`)
+          }
           continue
         }
         const fromEntry = findSpeciesEntry(targetMon.species ?? targetMon.name)
-        const targetEntry = findSpeciesEntry(evolution.to)
+        let targetEntry = findSpeciesEntry(evolution.to)
+        if (!targetEntry && isCanonDirective(evolution)) {
+          targetEntry = buildCustomSpeciesEntry(evolution.to, {
+            ...(evolution.details ?? {}),
+            // Custom evolution không có dữ liệu canon thì giữ nền stat/type cũ
+            // để cá thể không đột ngột yếu/khác hệ chỉ vì database chưa biết form.
+            baseStats: evolution.details?.baseStats ?? targetMon.baseStats,
+            types: evolution.details?.types ?? targetMon.types,
+            ability: evolution.details?.ability ?? targetMon.ability,
+          })
+        }
         if (!targetEntry) {
-          report.lines.push(`⚠ Không tiến hoá ${targetMon.name}: không tìm thấy loài “${evolution.to}” trong Pokédex`)
+          report.lines.push(`⚠ Không tiến hoá ${targetMon.name}: không resolve được dạng “${evolution.to}”`)
           continue
         }
-        const evolutionCheck = validateEvolutionRequirements(targetMon, fromEntry, targetEntry, {
-          mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
-          storyText, storyDate, location: latestPlayerLocationRef.current,
-        })
-        if (!evolutionCheck.ok) {
-          report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${evolutionCheck.reason}`)
-          continue
+        if (!isCanonDirective(evolution)) {
+          const evolutionCheck = validateEvolutionRequirements(targetMon, fromEntry, targetEntry, {
+            mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
+            storyText, storyDate, location: latestPlayerLocationRef.current,
+          })
+          if (!evolutionCheck.ok) {
+            report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${evolutionCheck.reason}`)
+            continue
+          }
         }
         if (normalizeMonTarget(targetMon.species ?? targetMon.name) === normalizeMonTarget(targetEntry.species ?? targetEntry.name)) {
           report.lines.push(`ℹ ${targetMon.name} đã ở đúng dạng ${targetEntry.name} — không đổi biến`)
           markLedger('evolutions', evolution)
           continue
         }
-        const itemReservation = reserveEvolutionItem(targetEntry)
-        if (!itemReservation.ok) {
-          report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${itemReservation.reason}`)
-          continue
+        if (!isCanonDirective(evolution)) {
+          const itemReservation = reserveEvolutionItem(targetEntry)
+          if (!itemReservation.ok) {
+            report.lines.push(`⛔ Không tiến hoá ${targetMon.name} → ${targetEntry.name}: ${itemReservation.reason}`)
+            continue
+          }
         }
-        evolveOne(targetMon, targetEntry, evolution.inferred ? 'inferred' : 'tag')
+        evolveOne(targetMon, targetEntry, isCanonDirective(evolution) ? 'semantic' : (evolution.inferred ? 'inferred' : 'tag'))
         markLedger('evolutions', evolution)
       }
 
+      // Semantic ownership loss: trade/thả/trao một cá thể đi. Làm trước
+      // acquisition để một lượt trade có thể giải phóng slot rồi nhận cá thể mới.
+      for (const removal of parsed.pokemonRemovals ?? []) {
+        const targetMon = resolveOwned(removal.target)
+        if (!targetMon) {
+          // State đích đã đúng (không còn cá thể đó); ghi ledger để auditor
+          // không lặp vô tận nhưng không tạo cảnh báo lỗi cho canon.
+          report.lines.push(`ℹ ${removal.target}: canon xác nhận đã rời quyền sở hữu; save hiện không còn cá thể này`)
+          markLedger('pokemonRemovals', removal)
+          continue
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const remainingParty = previewParty.filter((mon) => !monIdentityMatches(mon, identity))
+        previewParty = remainingParty
+        if (previewActive && monIdentityMatches(previewActive, identity)) previewActive = remainingParty[0] ?? null
+        previewPc = previewPc.filter((mon) => !monIdentityMatches(mon, identity))
+        setParty((cur) => (cur ?? []).filter((mon) => !monIdentityMatches(mon, identity)))
+        setPcBox((cur) => (cur ?? []).filter((mon) => !monIdentityMatches(mon, identity)))
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? (remainingParty[0] ?? null) : cur))
+        latestPartyRef.current = previewParty
+        latestPlayerMonRef.current = previewActive
+        latestPcBoxRef.current = previewPc
+        report.lines.push(`✅ ${targetMon.nickname || targetMon.name} đã rời quyền sở hữu${removal.reason ? ` · ${removal.reason}` : ''}`)
+        markLedger('pokemonRemovals', removal)
+      }
+
       for (const [pokemonIndex, pk] of (parsed.pokemons ?? []).entries()) {
-        const entry = findSpeciesEntry(pk.species)
+        let entry = findSpeciesEntry(pk.species)
+        if (!entry && isCanonDirective(pk)) {
+          entry = buildCustomSpeciesEntry(pk.species, {
+            ...(pk.details ?? {}),
+            types: pk.types ?? pk.details?.types,
+            baseStats: pk.baseStats ?? pk.details?.baseStats,
+            ability: pk.ability ?? pk.details?.ability,
+            friendship: pk.friendship,
+            gender: pk.gender,
+            description: pk.description ?? pk.details?.description,
+          })
+        }
         if (!entry) {
-          console.warn('[pokemon-tag] Không tìm thấy loài trong pokedex:', pk.species)
-          report.lines.push(`⚠ Không áp Pokémon “${pk.species}”: không tìm thấy loài trong Pokédex`)
+          console.warn('[pokemon-state] Không resolve được loài:', pk.species)
+          report.lines.push(`⚠ Không đồng bộ Pokémon “${pk.species}”: không resolve được loài`)
           continue
         }
 
-        const access = legendaryAccess(entry, prospectiveWorldProgress, storyTone, adminMode)
-        if (!access.allowed) {
-          report.lines.push(`⛔ Không cấp ${entry.name}: cổng tiến trình ${access.tier?.label ?? 'huyền thoại'} chưa mở — ${access.reason}`)
-          continue
+        // Luật mode/legendary đã phải tác động ở bước SINH CỐT TRUYỆN. Nếu
+        // displayText cuối cùng đã canon hoá quyền sở hữu thì state phải theo
+        // canon, không được để một cổng hậu kỳ làm UI mâu thuẫn với truyện.
+        if (!isCanonDirective(pk)) {
+          const access = legendaryAccess(entry, prospectiveWorldProgress, storyTone, adminMode)
+          if (!access.allowed) {
+            report.lines.push(`⛔ Không cấp ${entry.name}: cổng tiến trình ${access.tier?.label ?? 'huyền thoại'} chưa mở — ${access.reason}`)
+            continue
+          }
         }
 
         // Idempotency theo đúng tin AI + vị trí tag. Reload/callback nền có
@@ -1053,7 +1194,7 @@ export default function RoleplayChat() {
         const acquisitionSourceId = sourceMessageId
           ? `${sourceMessageId}:pokemon:${normalizeMonTarget(pk.species)}:${pokemonIndex}`
           : ''
-        const alreadyApplied = acquisitionSourceId && [previewActive, ...previewParty, ...(latestPcBoxRef.current ?? [])]
+        const alreadyApplied = acquisitionSourceId && [previewActive, ...previewParty, ...previewPc]
           .some((mon) => mon?.acquisitionSourceId === acquisitionSourceId)
         if (alreadyApplied) {
           report.lines.push(`ℹ Bỏ qua ${entry.name}: thay đổi từ tin này đã được áp trước đó`)
@@ -1066,7 +1207,7 @@ export default function RoleplayChat() {
         // tiếp VÀ chính văn khẳng định tiến hoá đã xảy ra, thay đúng cá thể
         // cũ thay vì thêm “con chim cấp 2” thứ hai.
         const owned = []
-        for (const mon of [previewActive, ...previewParty]) {
+        for (const mon of [previewActive, ...previewParty, ...previewPc]) {
           if (mon && !owned.some((x) => isSameMon(x, mon))) owned.push(mon)
         }
         const prevo = owned.find((mon) => {
@@ -1078,7 +1219,7 @@ export default function RoleplayChat() {
           const requestedLevel = Math.max(beforeLevel, Math.min(100, Number(pk.level) || beforeLevel))
           let current = prevo
           if (requestedLevel > beforeLevel) {
-            if (realisticMode) {
+            if (realisticMode && !isCanonDirective(pk)) {
               report.lines.push(`⛔ Chế độ Thực tế bỏ phần tăng cấp ngầm ${prevo.name} Lv.${beforeLevel} → Lv.${requestedLevel} trong tag POKEMON`)
               if (Number.isFinite(entry.evoLevel) && beforeLevel < entry.evoLevel) continue
             } else {
@@ -1086,36 +1227,39 @@ export default function RoleplayChat() {
             const raise = (mon) => raiseMonToLevel(mon, requestedLevel, movesDb)
             setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? raise(cur) : cur))
             setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
+            setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? raise(mon) : mon)))
             replacePreviewMon(identity, raise)
             current = raise(prevo)
             report.lines.push(`✅ ${prevo.name}: Lv.${beforeLevel} → Lv.${requestedLevel}`)
             }
           }
           const fromEntry = findSpeciesEntry(current.species ?? current.name)
-          const inferredCheck = validateEvolutionRequirements(current, fromEntry, entry, {
-            mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
-            storyText, storyDate, location: latestPlayerLocationRef.current,
-          })
-          if (!inferredCheck.ok) {
-            report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${inferredCheck.reason}`)
-            continue
+          if (!isCanonDirective(pk)) {
+            const inferredCheck = validateEvolutionRequirements(current, fromEntry, entry, {
+              mode: normalizeGameMode(storyTone), adminMode, inventory: latestInventoryRef.current,
+              storyText, storyDate, location: latestPlayerLocationRef.current,
+            })
+            if (!inferredCheck.ok) {
+              report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${inferredCheck.reason}`)
+              continue
+            }
+            const itemReservation = reserveEvolutionItem(entry)
+            if (!itemReservation.ok) {
+              report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${itemReservation.reason}`)
+              continue
+            }
           }
-          const itemReservation = reserveEvolutionItem(entry)
-          if (!itemReservation.ok) {
-            report.lines.push(`⛔ Không tiến hoá ${current.name} → ${entry.name}: ${itemReservation.reason}`)
-            continue
-          }
-          evolveOne(current, entry, 'inferred')
+          evolveOne(current, entry, isCanonDirective(pk) ? 'semantic' : 'inferred')
           markLedger('pokemons', pk)
           continue
         }
 
         // Thực tế mới nắn level theo sinh thái. Anime/Sandbox phải giữ đúng
         // level người chơi/AI đã tuyên bố và không biến Pokémon sở hữu thành boss.
-        const saneLv = realisticMode
+        const saneLv = realisticMode && !isCanonDirective(pk)
           ? receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
           : Math.max(1, Math.min(100, Math.floor(Number(pk.level) || 1)))
-        const builtMon = realisticMode
+        const builtMon = realisticMode && !isCanonDirective(pk)
           ? buildMonSmart(entry, saneLv, movesDb)
           : buildWildMon(entry, saneLv, movesDb)
         let acquiredSnapshot = normalizeAcquiredMon({
@@ -1147,6 +1291,8 @@ export default function RoleplayChat() {
         } else {
           // Đội đầy thì đưa vào PC thay vì để DNA báo nhận rồi dữ liệu biến mất.
           setPcBox((cur) => [...(cur ?? []), newMon])
+          previewPc.push(newMon)
+          latestPcBoxRef.current = previewPc
           report.lines.push(`✅ Nhận Pokémon: ${newMon.name} Lv.${newMon.level} · đội đầy, đã gửi vào PC`)
         }
         markLedger('pokemons', pk)
@@ -1155,11 +1301,68 @@ export default function RoleplayChat() {
         }
       }
 
+      // Retry dependency-sensitive semantic operations sau khi acquisition đã
+      // tạo cá thể. Đây là chốt cho lượt “nhận Ditto + tăng cấp/tiến hoá”:
+      // state không còn phụ thuộc model xếp event nào trước trong JSON.
+      const retryPendingLevel = (directive, finalAttempt = false) => {
+        const targetMon = resolveOwned(directive.target)
+        if (!targetMon) {
+          if (finalAttempt) {
+            deferSemanticState(directive, `Pokémon ${directive.target} · cấp`, { mode: directive.mode, value: directive.value }, 'pokemon')
+            report.lines.push(`ℹ Không resolve được cá thể “${directive.target}” sau transaction; đã giữ thay đổi cấp trong state động`)
+          }
+          return false
+        }
+        const before = targetMon.level ?? 1
+        const previewAfter = applyLevelDirective(targetMon, directive, movesDb)
+        const after = previewAfter?.level ?? before
+        if (after <= before) {
+          report.lines.push(`ℹ ${targetMon.name} đang Lv.${before} — chỉ dẫn cấp đã ở trạng thái đích`)
+          markLedger('levels', directive)
+          return true
+        }
+        const identity = { uid: targetMon.uid, name: targetMon.name }
+        const apply = (mon) => applyLevelDirective(mon, directive, movesDb)
+        setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
+        setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        replacePreviewMon(identity, apply)
+        report.lines.push(`✅ ${targetMon.name}: Lv.${before} → Lv.${after} (retry dependency)`)
+        markLedger('levels', directive)
+        return true
+      }
+      let unresolvedPendingLevels = pendingLevelDirectives.filter((directive) => !retryPendingLevel(directive, false))
+
+      for (const evolution of pendingEvolutionDirectives) {
+        const targetMon = resolveOwned(evolution.from)
+        if (!targetMon) {
+          deferSemanticState(evolution, `Pokémon ${evolution.from} · tiến hoá`, evolution.to, 'pokemon')
+          report.lines.push(`ℹ Không resolve được cá thể “${evolution.from}” sau acquisition; đã giữ tiến hoá trong state động`)
+          continue
+        }
+        let targetEntry = findSpeciesEntry(evolution.to)
+        if (!targetEntry) {
+          targetEntry = buildCustomSpeciesEntry(evolution.to, {
+            ...(evolution.details ?? {}),
+            baseStats: evolution.details?.baseStats ?? targetMon.baseStats,
+            types: evolution.details?.types ?? targetMon.types,
+            ability: evolution.details?.ability ?? targetMon.ability,
+          })
+        }
+        evolveOne(targetMon, targetEntry, 'semantic')
+        markLedger('evolutions', evolution)
+      }
+      // Một LEVEL có thể dùng tên SAU tiến hoá; thử lại lần cuối sau evolution.
+      for (const directive of unresolvedPendingLevels) retryPendingLevel(directive, true)
+
       for (const [index, directive] of (parsed.friendships ?? []).entries()) {
         if (appliedFriendshipDirectives.has(index)) continue
-        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        const targetMon = resolveOwned(directive.target)
         if (!targetMon) {
-          report.lines.push(`⚠ Không áp thân mật “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          deferSemanticState(directive, `Pokémon ${directive.target} · friendship`, directive.delta, 'pokemon')
+          report.lines.push((directive.semantic || directive.canon)
+            ? `ℹ Chưa resolve được ${directive.target}; đã giữ thay đổi friendship trong state động`
+            : `⚠ Không áp thân mật “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
           continue
         }
         const before = Number.isFinite(targetMon.friendship) ? targetMon.friendship : 70
@@ -1168,6 +1371,7 @@ export default function RoleplayChat() {
         const after = apply(targetMon).friendship
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         markLedger('friendships', directive)
         report.lines.push(`✅ Thân mật ${targetMon.name}: ${before} → ${after}${directive.note ? ` (${directive.note})` : ''}`)
@@ -1178,10 +1382,12 @@ export default function RoleplayChat() {
       // đổi Nature/Ability/Tera/nickname/form theo cốt truyện, v.v. Mỗi patch
       // nhắm vào đúng uid/name và được đồng bộ active + party + PC.
       for (const patch of parsed.pokemonPatches ?? []) {
-        const targetMon = resolveOwnedMonTarget(patch.target, previewActive, previewParty)
-          ?? (latestPcBoxRef.current ?? []).find((mon) => monIdentityMatches(mon, { name: patch.target }) || normalizeMonTarget(mon?.nickname) === normalizeMonTarget(patch.target))
+        const targetMon = resolveOwned(patch.target)
         if (!targetMon) {
-          report.lines.push(`⚠ Không áp thuộc tính Pokémon “${patch.target}”: không tìm thấy cá thể`)
+          deferSemanticState(patch, `Pokémon ${patch.target} · thuộc tính`, patch.fields ?? {}, 'pokemon')
+          report.lines.push((patch.semantic || patch.canon)
+            ? `ℹ Chưa resolve được cá thể “${patch.target}”; đã giữ thuộc tính trong state động`
+            : `⚠ Không áp thuộc tính Pokémon “${patch.target}”: không tìm thấy cá thể`)
           continue
         }
         const fields = patch.fields ?? {}
@@ -1197,6 +1403,33 @@ export default function RoleplayChat() {
           if (fields.teraType) next.teraType = String(fields.teraType).toLowerCase()
           if (fields.nickname !== undefined) next.nickname = String(fields.nickname ?? '').trim() || undefined
           if (Number.isFinite(Number(fields.friendship))) next.friendship = Math.max(0, Math.min(255, Number(fields.friendship)))
+          if (fields.heldItem !== undefined) {
+            if (!fields.heldItem) next.heldItem = null
+            else {
+              const rawHeld = typeof fields.heldItem === 'object' ? fields.heldItem : { name: String(fields.heldItem) }
+              const knownHeld = resolveHeldItemByName(rawHeld) ?? resolveInventoryItemByName(rawHeld.name, latestInventoryRef.current)
+              const descriptor = knownHeld ?? createCustomItemDescriptor(rawHeld.name, { ...rawHeld, holdable: true })
+              next.heldItem = descriptor ? normalizeHeldItem({ ...descriptor, holdable: true, custom: Boolean(descriptor.custom) }) : next.heldItem
+            }
+          }
+          const patchStats = (raw, max, previous) => {
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return previous
+            const out = { ...(previous ?? {}) }
+            for (const stat of ['hp', 'atk', 'def', 'spa', 'spd', 'spe']) {
+              if (!Number.isFinite(Number(raw[stat]))) continue
+              out[stat] = Math.max(0, Math.min(max, Math.round(Number(raw[stat]))))
+            }
+            return out
+          }
+          if (fields.ivs) next.ivs = patchStats(fields.ivs, 31, next.ivs)
+          if (fields.evs) next.evs = patchStats(fields.evs, 252, next.evs)
+          if (fields.status !== undefined) next.status = fields.status ? String(fields.status) : null
+          // Mọi thuộc tính fan-made không thuộc schema battle vẫn bám theo đúng
+          // cá thể thay vì bị vứt. Chúng được gửi lại cho Semantic Engine ở các
+          // lượt sau qua customAttributes.
+          const knownPatchKeys = new Set(['gender','shiny','nature','ability','teraType','nickname','form','friendship','heldItem','ivs','evs','status'])
+          const extraAttributes = Object.fromEntries(Object.entries(fields).filter(([key]) => !knownPatchKeys.has(key)))
+          if (Object.keys(extraAttributes).length) next.customAttributes = { ...(next.customAttributes ?? {}), ...extraAttributes }
           if (fields.form) {
             const formEntry = findSpeciesEntry(fields.form)
             if (formEntry) {
@@ -1241,6 +1474,7 @@ export default function RoleplayChat() {
       const beforePreviewGender = previewActive?.gender
       previewActive = applyStoryGender(previewActive)
       previewParty = previewParty.map(applyStoryGender)
+      previewPc = previewPc.map(applyStoryGender)
       setPlayerMon((cur) => applyStoryGender(cur))
       setParty((cur) => (cur ?? []).map(applyStoryGender))
       setPcBox((cur) => (cur ?? []).map(applyStoryGender))
@@ -1252,6 +1486,7 @@ export default function RoleplayChat() {
       // vừa áp, không dùng lại snapshot cũ rồi báo DNA lệch lần nữa.
       latestPlayerMonRef.current = previewActive
       latestPartyRef.current = previewParty
+      latestPcBoxRef.current = previewPc
     } catch (e2) {
       console.warn('[state] POKEMON/LEVEL/EVOLVE lỗi:', e2.message)
       report.lines.push(`⚠ Lỗi khi áp Pokémon/cấp/tiến hoá: ${e2.message}`)
@@ -1266,7 +1501,7 @@ export default function RoleplayChat() {
       for (const directive of parsed.equipment ?? []) {
         if (directive.mode !== 'equip') continue
         const entry = resolveHeldItemByName(directive.item) ?? resolveInventoryItemByName(directive.item, latestInventoryRef.current) ?? resolveItemByName(directive.item)
-        if (entry && isHoldableItem(entry)) equipDebits.set(entry.id, (equipDebits.get(entry.id) ?? 0) + 1)
+        if (entry && (isHoldableItem(entry) || (directive.semantic && entry.custom))) equipDebits.set(entry.id, (equipDebits.get(entry.id) ?? 0) + 1)
       }
       const declaredMysteryDebits = (parsed.items ?? []).filter((item) => (
         item.qty < 0 && resolveItemByName(item.name)?.id === 'unknown-pokemon-ball'
@@ -1354,7 +1589,14 @@ export default function RoleplayChat() {
 
       for (const { entry, qty, raw, absorbedByEquip, absorbedByEvolution } of itemChanges) {
         if (!entry) {
-          report.lines.push(`⚠ Không áp vật phẩm “${raw.name}”: không có trong danh mục`)
+          if (raw.semantic || raw.canon) {
+            // Canon nói món đã rời inventory nhưng save hiện không có món đó:
+            // state đích vốn đã đúng. Đánh dấu đã xử lý để auditor không lặp.
+            report.lines.push(`ℹ ${raw.name}: canon xác nhận đã rời túi; inventory hiện đã không có món này`)
+            markLedger('items', raw)
+            continue
+          }
+          report.lines.push(`⚠ Không áp vật phẩm “${raw.name}”: không resolve được vật phẩm`)
           continue
         }
         if (absorbedByEquip > 0) {
@@ -1402,9 +1644,12 @@ export default function RoleplayChat() {
       // đúng. Toàn bộ túi + đội được tính trước rồi set một lần, tránh updater
       // bất đồng bộ làm nhân đôi vật phẩm hoặc đeo xong nhưng túi không trừ.
       for (const directive of parsed.equipment ?? []) {
-        const targetMon = resolveOwnedMonTarget(directive.target, previewActive, previewParty)
+        const targetMon = resolveOwned(directive.target)
         if (!targetMon) {
-          report.lines.push(`⚠ Không áp trang bị “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
+          deferSemanticState(directive, `Pokémon ${directive.target} · held item`, directive.mode === 'unequip' ? null : directive.item, 'pokemon')
+          report.lines.push((directive.semantic || directive.canon)
+            ? `ℹ Chưa resolve được ${directive.target}; đã giữ trạng thái trang bị trong state động`
+            : `⚠ Không áp trang bị “${directive.target}”: không tìm thấy Pokémon tương ứng trong đội`)
           continue
         }
         const identity = { uid: targetMon.uid, name: targetMon.name }
@@ -1426,23 +1671,28 @@ export default function RoleplayChat() {
           continue
         }
 
-        const entry = resolveHeldItemByName(directive.item) ?? resolveInventoryItemByName(directive.item, previewInventory) ?? resolveItemByName(directive.item)
-        if (!entry || !isHoldableItem(entry)) {
-          report.lines.push(`⚠ Không áp trang bị “${directive.item}”: đây không phải held item hợp lệ của Pokémon`)
+        let entry = resolveHeldItemByName(directive.item) ?? resolveInventoryItemByName(directive.item, previewInventory) ?? resolveItemByName(directive.item)
+        if (!entry && (directive.semantic || directive.canon)) {
+          entry = createCustomItemDescriptor(directive.item, { holdable: true, description: 'Trang bị do cốt truyện xác lập.' })
+        }
+        const canonEquip = Boolean(directive.semantic || directive.canon)
+        if (!entry || (!canonEquip && !isHoldableItem(entry))) {
+          report.lines.push(`⚠ Không áp trang bị “${directive.item}”: không resolve được held item`)
           continue
         }
+        if (canonEquip && !isHoldableItem(entry)) entry = { ...entry, holdable: true, custom: Boolean(entry.custom) }
         if (oldItem?.id === entry.id) {
           report.lines.push(`ℹ ${targetMon.name} đã cầm ${entry.name}`)
           markLedger('equipment', directive)
           continue
         }
         const at = previewInventory.findIndex((it) => it.id === entry.id)
-        if (at < 0 || (!previewInventory[at].infinite && (previewInventory[at].qty ?? 0) <= 0)) {
+        if (!canonEquip && (at < 0 || (!previewInventory[at].infinite && (previewInventory[at].qty ?? 0) <= 0))) {
           report.lines.push(`⚠ Không thể cho ${targetMon.name} cầm ${entry.name}: vật phẩm không có trong túi`)
           continue
         }
-        const fromInfinite = Boolean(previewInventory[at].infinite)
-        if (!fromInfinite) {
+        const fromInfinite = at >= 0 && Boolean(previewInventory[at].infinite)
+        if (at >= 0 && !fromInfinite) {
           const left = (previewInventory[at].qty ?? 1) - 1
           if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
           else previewInventory.splice(at, 1)
@@ -1459,9 +1709,11 @@ export default function RoleplayChat() {
         const finalInventory = syncTraitGrantedItems(previewInventory, playerTraits)
         setInventory(finalInventory)
         setParty(previewParty)
+        setPcBox(previewPc)
         setPlayerMon(previewActive)
         latestInventoryRef.current = finalInventory
         latestPartyRef.current = previewParty
+        latestPcBoxRef.current = previewPc
         latestPlayerMonRef.current = previewActive
       }
 
@@ -1483,10 +1735,13 @@ export default function RoleplayChat() {
         }
         setPlayerMon((cur) => (cur ? grow(cur) : cur))
         setParty((cur) => (cur ?? []).map((pm) => grow(pm)))
+        setPcBox((cur) => (cur ?? []).map((pm) => grow(pm)))
         previewActive = previewActive ? grow(previewActive) : previewActive
         previewParty = previewParty.map((pm) => grow(pm))
+        previewPc = previewPc.map((pm) => grow(pm))
         latestPlayerMonRef.current = previewActive
         latestPartyRef.current = previewParty
+        latestPcBoxRef.current = previewPc
       }
 
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {
@@ -1522,15 +1777,19 @@ export default function RoleplayChat() {
         for (const wanted of parsed.wanted ?? []) report.lines.push(`⚖ Truy nã: ${wanted.delta > 0 ? '+' : ''}${wanted.delta}${wanted.reason ? ` · ${wanted.reason}` : ''}`)
       }
       for (const award of parsed.collectionAwards ?? []) {
-        const targetMon = resolveOwnedMonTarget(award.target, previewActive, previewParty)
+        const targetMon = resolveOwned(award.target)
         if (!targetMon) {
-          report.lines.push(`⚠ Không trao ${award.name}: không tìm thấy ${award.target}`)
+          deferSemanticState(award, `Pokémon ${award.target} · ${award.kind}`, award.name, 'pokemon')
+          report.lines.push((award.semantic || award.canon)
+            ? `ℹ Chưa resolve được ${award.target}; đã giữ ${award.name} trong state động`
+            : `⚠ Không trao ${award.name}: không tìm thấy ${award.target}`)
           continue
         }
         const identity = { uid: targetMon.uid, name: targetMon.name }
         const apply = (mon) => addCollectionAward(mon, award.kind, award.name)
         setPlayerMon((cur) => (monIdentityMatches(cur, identity) ? apply(cur) : cur))
         setParty((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
+        setPcBox((cur) => (cur ?? []).map((mon) => (monIdentityMatches(mon, identity) ? apply(mon) : mon)))
         replacePreviewMon(identity, apply)
         report.lines.push(`${award.kind === 'mark' ? '✦ Mark' : '🎗 Ribbon'}: ${targetMon.name} nhận ${award.name}`)
         markLedger('collectionAwards', award)
@@ -1545,7 +1804,7 @@ export default function RoleplayChat() {
     // không cập nhật được”. Mỗi update áp riêng và update hỏng không kéo theo
     // các update khác.
     try {
-      const updates = parsed.dynamicUpdates ?? []
+      const updates = [...(parsed.dynamicUpdates ?? []), ...semanticFallbackUpdates]
       if (updates.length) {
         const result = applyDynamicStateUpdates(latestDynamicStateRef.current, updates, { turn: turnNow, sourceMessageId })
         latestDynamicStateRef.current = result.state
@@ -1806,48 +2065,34 @@ export default function RoleplayChat() {
       // <content> chỉ chứa chính văn, còn nhiều preset đặt tag state ở ngoài.
       // Vớt tag từ reply gốc cho parser nhưng không trả chúng lại UI.
       const rawStateTags = extractStateTags(reply).filter((tag) => !cleaned.includes(tag))
-      let stateParsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
-      // Một số UI (đặc biệt giỏ hàng) đã cập nhật save ngay khi người chơi
-      // xác nhận. Lời kể sau đó chỉ mô tả lại; không được trừ tiền/cộng đồ lần 2.
+      // Đợt 106: tag chỉ còn là DI SẢN TƯƠNG THÍCH. Ta vẫn parse để gỡ khỏi
+      // chính văn và làm fallback khi Semantic API thật sự lỗi, nhưng tuyệt đối
+      // không để tag/validator legacy ngồi trước Semantic Engine rồi phủ quyết
+      // một sự kiện canon chỉ vì thiếu đúng từ khóa hay thiếu catalog.
+      let legacyParsed = parseStoryStateTags(`${cleaned}${rawStateTags.length ? `\n${rawStateTags.join('\n')}` : ''}`)
       const preAppliedState = nextMessages.at(-1)?.preAppliedState ?? null
       if (preAppliedState) {
-        stateParsed = filterUiPreAppliedState(stateParsed, preAppliedState)
-        stateParsed = filterSupplementalDuplicates(stateParsed, preAppliedState, { consumeExactMoney: true })
+        legacyParsed = filterUiPreAppliedState(legacyParsed, preAppliedState)
+        legacyParsed = filterSupplementalDuplicates(legacyParsed, preAppliedState, { consumeExactMoney: true })
       }
-      // Chỉ phần chính văn người chơi THỰC SỰ nhìn thấy mới được làm bằng
-      // chứng. Model viết lén kết quả sau [[BATTLE]] sẽ bị cắt trước khi xét
-      // tag, tránh cộng tiền/cấp/vật phẩm của một trận chưa hề diễn ra.
-      const stateEvidenceText = truncateAfterInteractiveMarker(stateParsed.cleaned)
+      const stateEvidenceText = truncateAfterInteractiveMarker(legacyParsed.cleaned)
       const stateUserText = [...nextMessages].reverse().find((m2) => m2.role === 'user' && !m2.hidden)?.content ?? ''
-      // Đợt 76: model có thể kể rõ “Froakie tiến hoá thành Frogadier” nhưng
-      // quên EVOLVE hoặc vẫn dùng nhầm POKEMON. Chỉ suy ra khi phần văn nhìn
-      // thấy xác nhận sự kiện đã xảy ra.
-      stateParsed = inferEvolutionDirectives(
-        stateParsed,
+      legacyParsed = inferEvolutionDirectives(
+        legacyParsed,
         stateEvidenceText,
         pokedexSpecies,
         latestPlayerMonRef.current,
         latestPartyRef.current,
       )
-      // Một lượt có thể vừa đặt chân tới địa điểm nghi thức vừa gọi huyền
-      // thoại. Đối chiếu bằng vị trí sắp áp dụng, nhưng chỉ từ MOVE đã có câu
-      // chính văn xác nhận để tag giả không thể tự dịch chuyển người chơi.
-      const evidencedMoveDirectives = (stateParsed.moveDirectives ?? []).filter((directive) =>
+      const evidencedMoveDirectives = (legacyParsed.moveDirectives ?? []).filter((directive) =>
         proseSupportsMove(stateEvidenceText, directive.place),
       )
       const prospectiveLocation = resolveMoveLocation(
-        { ...stateParsed, moveDirectives: evidencedMoveDirectives },
+        { ...legacyParsed, moveDirectives: evidencedMoveDirectives },
         latestPlayerLocationRef.current,
       ) ?? latestPlayerLocationRef.current
-      // Đợt 101: KHÔNG lọc state ở bản nháp trước khi polish. Trước đây một
-      // false-negative ở validator vòng 1 (đặc biệt MONEY) làm candidate bị
-      // xóa vĩnh viễn, nên dù displayText cuối cùng chứng minh giao dịch rất
-      // rõ thì vòng canon sau cũng không còn gì để cứu. Mọi commit chỉ được
-      // quyết định đúng MỘT LẦN bằng displayText ở finalEvidenceCheck.
-      // Không lọc SHOP bằng bản nháp trước polish. Cùng nguyên tắc với MONEY:
-      // chỉ displayText cuối cùng mới có quyền quyết định UI/state thật.
       const rejectedShops = []
-      let validShops = stateParsed.shops ?? []
+      let validShops = []
 
       // CHAU CHUỐT VĂN PHONG (đợt 50): nếu cấu hình API phụ (slot Combat
       // Anime cũ), model phụ đánh bóng câu chữ theo tông truyện — chạy SAU
@@ -1873,35 +2118,37 @@ export default function RoleplayChat() {
       // Bản được hiển thị mới là canon. Nếu API chau chuốt lỡ bỏ hoặc đổi một
       // sự kiện, tuyệt đối không dùng bản nháp ẩn để ghi save. Đối chiếu lần
       // cuối với đúng displayText rồi mới chạm vào bất kỳ biến thật nào.
-      const finalMoveDirectives = (stateParsed.moveDirectives ?? []).filter((directive) =>
+      // Legacy chỉ được kiểm tra để có FALLBACK/AUDIT. Nó không còn là state
+      // đầu vào mặc định. Chính văn hiển thị được parse thành một manifest rỗng
+      // rồi chỉ cộng các reconciler deterministic + semantic events.
+      const finalMoveDirectives = (legacyParsed.moveDirectives ?? []).filter((directive) =>
         proseSupportsMove(displayText, directive.place),
       )
       const finalProspectiveLocation = resolveMoveLocation(
-        { ...stateParsed, moveDirectives: finalMoveDirectives },
+        { ...legacyParsed, moveDirectives: finalMoveDirectives },
         latestPlayerLocationRef.current,
       ) ?? latestPlayerLocationRef.current
-      // MONEY có thêm một đường deterministic giống computed update của MVU:
-      // nếu AI quên tag nhưng displayText tự nó có tổng tiền + thanh toán hoặc
-      // số dư trước/sau, app tự dựng directive. Candidate AI vẫn phải qua cùng
-      // validator; preAppliedState (Shop UI) được tiêu thụ trước để không trừ đôi.
-      const moneyReconcile = reconcileMoneyDirectives(stateParsed, displayText, { alreadyApplied: preAppliedState })
-      stateParsed = moneyReconcile.parsed
-
-      // Legacy tag (nếu preset cũ còn sinh) chỉ là compatibility input và
-      // vẫn đi qua validator cũ. Đường CHÍNH từ đợt 105 là Semantic State
-      // Engine: đọc displayText trực tiếp, không cần exact quote/tag/câu mẫu.
-      const finalEvidenceCheck = validateStateAgainstProse(stateParsed, displayText, {
+      const legacyMoneyReconcile = reconcileMoneyDirectives(legacyParsed, displayText, { alreadyApplied: preAppliedState })
+      const finalEvidenceCheck = validateStateAgainstProse(legacyMoneyReconcile.parsed, displayText, {
         playerName: playerName || playerProfile?.name,
         party: latestPartyRef.current,
         mode: normalizeGameMode(storyTone), adminMode,
         inventory: latestInventoryRef.current,
         location: finalProspectiveLocation,
-        blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
+        // Cổng input chỉ dùng TRƯỚC khi sinh văn. Nếu canon cuối cùng vẫn nói
+        // người chơi đã nhận Pokémon thì state phải bám canon, không được để
+        // một quyết định từ input cũ phủ định chính văn đã hiển thị.
+        blockPokemonAcquisition: false,
         alreadyApplied: preAppliedState,
       })
-      stateParsed = finalEvidenceCheck.parsed
+
+      let stateParsed = parseStoryStateTags('')
+      const moneyReconcile = reconcileMoneyDirectives(stateParsed, displayText, { alreadyApplied: preAppliedState })
+      stateParsed = moneyReconcile.parsed
+      let semanticPrimarySucceeded = false
 
       let primarySemanticAudit = null
+      let immediateAuditorAudit = null
       const semanticPrimaryCfg = [stateApiConfig, stateApiConfig2, outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
         .find((cfg) => cfg?.baseUrl && cfg?.model)
       const resolvedSemanticCfg = semanticPrimaryCfg ? { ...apiConfig, ...semanticPrimaryCfg } : apiConfig
@@ -1915,12 +2162,109 @@ export default function RoleplayChat() {
             mode: normalizeGameMode(storyTone),
             scanMode: 'extractor',
           })
+          semanticPrimarySucceeded = true
           let semanticParsed = filterUiPreAppliedState(semantic.parsed, preAppliedState)
-          // Semantic engine là nguồn chính, nhưng tag legacy/deterministic money
-          // có thể đã xử lý cùng sự kiện. Consume exact duplicate trước commit.
+          // Semantic engine là nguồn chính; deterministic money/UI transaction
+          // chỉ được ưu tiên để tránh trừ/cộng đôi. KHÔNG dùng input gate hay
+          // validator legacy để phủ quyết event đã được đọc từ canon.
           semanticParsed = filterSupplementalDuplicates(semanticParsed, stateParsed, { consumeExactMoney: true })
-          if (inputAdjudication.blockPokemonAcquisitionThisTurn) semanticParsed.pokemons = []
           stateParsed = mergeStateManifests(stateParsed, semanticParsed)
+
+          // Đợt 106: nếu có State API 2, dùng nó như AUDITOR đồng bộ NGAY trong
+          // lượt thay vì chờ idle. Một extractor có thể bỏ sót cách diễn đạt lạ;
+          // auditor chỉ nhìn ledger đã có và bổ sung phần thiếu. Với lượt phức
+          // tạp/malformed mà không có API 2, cho chính extractor tự audit lần 2.
+          const dedicatedAuditorRaw = stateApiConfig2?.baseUrl && stateApiConfig2?.model
+            ? stateApiConfig2
+            : null
+          // Đợt 106: luôn audit đồng bộ. Nếu extractor bỏ sót toàn bộ một
+          // sự kiện thì proposedCount/rejectedCount đều có thể bằng 0, vì vậy
+          // dùng chính các con số đó để quyết định audit là một vòng lặp logic.
+          // Ưu tiên độ đúng state hơn tiết kiệm một call phụ.
+          const shouldImmediateAudit = true
+          if (shouldImmediateAudit) {
+            try {
+              const auditorCfg = dedicatedAuditorRaw
+                ? { ...apiConfig, ...dedicatedAuditorRaw }
+                : resolvedSemanticCfg
+              const auditor = await extractSemanticStateEvents(auditorCfg, {
+                storyText: displayText,
+                userText: stateUserText,
+                stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
+                appliedState: mergeStateManifests(preAppliedState ?? {}, stateParsed),
+                mode: normalizeGameMode(storyTone),
+                scanMode: 'auditor',
+              })
+              let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
+              auditorParsed = filterSupplementalDuplicates(auditorParsed, stateParsed, { consumeExactMoney: true })
+              stateParsed = mergeStateManifests(stateParsed, auditorParsed)
+              immediateAuditorAudit = {
+                proposed: auditor.proposedCount,
+                accepted: countParsedStateOperations(auditorParsed),
+                semanticRejected: auditor.rejectedCount,
+                malformed: Boolean(auditor.malformed),
+                salvaged: Boolean(auditor.salvaged),
+                repaired: Boolean(auditor.repaired),
+              }
+            } catch (auditorError) {
+              immediateAuditorAudit = { proposed: 0, accepted: 0, error: auditorError.message }
+            }
+          }
+
+          // Lượt dày state: chạy 4 focus shard SONG SONG trước commit. Đây
+          // không phải giới hạn biến; mỗi shard vẫn được trả vô hạn event. Mục
+          // tiêu là không bắt một response JSON duy nhất phải giữ chú ý cho tiền,
+          // Pokémon, NPC và quest cùng lúc.
+          const focusSpecs = buildStateScanPlan({
+            storyText: displayText,
+            explicitOperationCount: Math.max(countParsedStateOperations(stateParsed), semantic.proposedCount),
+            broadPasses: 1,
+          }).filter((spec) => spec.focus)
+          const focusedAudit = []
+          if (focusSpecs.length) {
+            const focusCfgPoolRaw = [stateApiConfig, stateApiConfig2, outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
+              .filter((cfg) => cfg?.baseUrl && cfg?.model)
+            const focusCfgPool = focusCfgPoolRaw.length
+              ? focusCfgPoolRaw.map((cfg) => ({ ...apiConfig, ...cfg }))
+              : [resolvedSemanticCfg]
+            const focusedResults = await Promise.all(focusSpecs.map(async (spec, index) => {
+              const focusCfg = focusCfgPool[index % focusCfgPool.length]
+              try {
+                const result = await extractSemanticStateEvents(focusCfg, {
+                  storyText: displayText,
+                  userText: stateUserText,
+                  stateSnapshot: buildStateScanSnapshot(spec.focus, Number(playerProfile?.money) || 0),
+                  appliedState: mergeStateManifests(preAppliedState ?? {}, stateParsed),
+                  mode: normalizeGameMode(storyTone),
+                  scanMode: 'auditor',
+                  focus: spec.focus,
+                })
+                return { spec, result }
+              } catch (error) {
+                return { spec, error }
+              }
+            }))
+            for (const row of focusedResults) {
+              if (row.error) {
+                focusedAudit.push({ focus: row.spec.focus?.label, proposed: 0, accepted: 0, error: row.error.message })
+                continue
+              }
+              let focusParsed = filterUiPreAppliedState(row.result.parsed, preAppliedState)
+              focusParsed = filterSupplementalDuplicates(focusParsed, stateParsed, { consumeExactMoney: true })
+              const accepted = countParsedStateOperations(focusParsed)
+              stateParsed = mergeStateManifests(stateParsed, focusParsed)
+              focusedAudit.push({
+                focus: row.spec.focus?.label,
+                proposed: row.result.proposedCount,
+                accepted,
+                semanticRejected: row.result.rejectedCount,
+                malformed: Boolean(row.result.malformed),
+                salvaged: Boolean(row.result.salvaged),
+                repaired: Boolean(row.result.repaired),
+              })
+            }
+          }
+
           primarySemanticAudit = {
             proposed: semantic.proposedCount,
             accepted: semantic.acceptedCount,
@@ -1929,6 +2273,8 @@ export default function RoleplayChat() {
             salvaged: semantic.salvaged,
             repaired: Boolean(semantic.repaired),
             repairAttempted: Boolean(semantic.repairAttempted),
+            auditor: immediateAuditorAudit,
+            focused: focusedAudit,
             events: semantic.acceptedEvents.slice(0, 40).map((event) => ({
               kind: event.kind,
               target: event.target ?? event.name ?? event.species ?? null,
@@ -1938,9 +2284,14 @@ export default function RoleplayChat() {
             })),
           }
         } catch (semanticError) {
-          console.warn('[semantic-state] primary pass lỗi, giữ deterministic + legacy compatibility:', semanticError.message)
-          primarySemanticAudit = { proposed: 0, accepted: 0, rejected: 0, error: semanticError.message }
+          console.warn('[semantic-state] primary pass lỗi, dùng fallback legacy đã xác minh:', semanticError.message)
+          primarySemanticAudit = { proposed: 0, accepted: 0, rejected: 0, error: semanticError.message, fallbackLegacy: true }
         }
+      }
+      if (!semanticPrimarySucceeded) {
+        let legacyFallback = filterUiPreAppliedState(finalEvidenceCheck.parsed, preAppliedState)
+        legacyFallback = filterSupplementalDuplicates(legacyFallback, stateParsed, { consumeExactMoney: true })
+        stateParsed = mergeStateManifests(stateParsed, legacyFallback)
       }
 
       validShops = (stateParsed.shops ?? []).filter((shop) => {
@@ -1998,7 +2349,7 @@ export default function RoleplayChat() {
         presetUiVariables: extractPresetUiVariables(reply),
         blockPokemonAcquisition: Boolean(inputAdjudication.blockPokemonAcquisitionThisTurn),
         stateAudit: {
-          version: 6,
+          version: 7,
           engine: 'semantic-events',
           canon: 'displayText',
           semantic: primarySemanticAudit,
@@ -2015,7 +2366,9 @@ export default function RoleplayChat() {
           main: {
             accepted: countParsedStateOperations(committedMainManifest),
             rejected: rejectedShops.length + Math.max(0, countParsedStateOperations(stateParsed) - countParsedStateOperations(committedMainManifest)),
-            legacyRejected: finalEvidenceCheck.rejected.length,
+            legacyRejected: semanticPrimarySucceeded ? 0 : finalEvidenceCheck.rejected.length,
+            legacyIgnored: semanticPrimarySucceeded ? finalEvidenceCheck.rejected.length : 0,
+            legacyFallbackUsed: !semanticPrimarySucceeded,
           },
           passes: [],
         },
@@ -2104,11 +2457,9 @@ export default function RoleplayChat() {
         })
       }
 
-      // API CẬP NHẬT BIẾN (đợt 36, tuỳ chọn): model phụ đọc lại chính văn và
-      // BỔ SUNG các tag model chính quên khai (kèm danh sách tag đã áp để
-      // không áp trùng). Chạy nền — lỗi chỉ warn.
-      // Đợt 52 (yêu cầu beta): lớp cập nhật biến LUÔN BẬT — sổ tay keyword
-      // không được phụ thuộc việc model chính có "nhớ" khai tag hay không.
+      // SEMANTIC RECOVERY nền: đọc lại chính văn canon và bổ sung SỰ KIỆN còn
+      // thiếu theo ledger. Không tạo/đòi tag; mỗi pass độc lập nên một lỗi không
+      // làm mất các nhóm state khác. Có API phụ riêng thì dùng, không thì fallback.
       // Có API phụ riêng (model rẻ) thì dùng, không thì fallback API CHÍNH.
       const dedicatedStateCfgs = [stateApiConfig, stateApiConfig2]
         .filter((cfg) => cfg?.baseUrl && cfg?.model)
@@ -2130,7 +2481,7 @@ export default function RoleplayChat() {
         // hạn số proposal; mục đích chỉ là giảm tải chú ý/JSON cho model.
         const scanPlan = buildStateScanPlan({
           storyText: displayText,
-          explicitOperationCount: countParsedStateOperations(stateParsed) + finalEvidenceCheck.rejected.length,
+          explicitOperationCount: countParsedStateOperations(stateParsed) + Number(primarySemanticAudit?.rejected ?? 0),
           broadPasses: stateCfgs.length > 1 ? 2 : 1,
         })
         stateScanLocksRef.current.add(turnMessageId)
@@ -2159,7 +2510,6 @@ export default function RoleplayChat() {
                 })
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
                 parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true })
-                if (inputAdjudication.blockPokemonAcquisitionThisTurn) parsedExtra.pokemons = []
                 passAuditBase = {
                   pass: scanIndex + 1,
                   role: passSpec.role,
@@ -2352,7 +2702,6 @@ export default function RoleplayChat() {
           })
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
           parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true })
-          if (source.meta?.blockPokemonAcquisition || (source.realisticSearch && !source.realisticSearch.encounterEligible)) parsed.pokemons = []
         } catch (scanError) {
           lines.push(`⚠ Semantic scan ${scanIndex + 1}${passSpec.focus ? ` (${passSpec.focus.label})` : ''} lỗi: ${scanError.message}`)
           rerollAuditPasses.push({
@@ -2418,7 +2767,7 @@ export default function RoleplayChat() {
           changes: [...(message.meta?.changes ?? []), ...lines],
           stateAudit: {
             ...(message.meta?.stateAudit ?? {}),
-            version: 6,
+            version: 7,
             engine: 'semantic-events',
             canon: 'displayText',
             deterministicMoney: {

@@ -168,14 +168,31 @@ const BY_ID = new Map(ALL_EQUIPMENT_ITEMS.map((it) => [itemId(it.id), it]))
 export function normalizeHeldItem(raw) {
   if (!raw) return null
   const resolved = resolveHeldItemByName(raw)
-  return resolved ? { id: resolved.id, name: resolved.name, ...(raw?.fromInfinite || raw?.infinite ? { fromInfinite: true } : {}) } : null
+  if (resolved) return { id: resolved.id, name: resolved.name, ...(raw?.fromInfinite || raw?.infinite ? { fromInfinite: true } : {}) }
+  // Semantic canon có thể tạo held item fan-made. Giữ object tối thiểu thay vì
+  // xoá trang bị chỉ vì bảng item chuẩn không biết tên đó.
+  if (typeof raw === 'object' && raw.name && (raw.holdable || raw.custom)) {
+    return {
+      id: raw.id || `custom-${itemId(raw.name) || 'held-item'}`,
+      name: raw.name,
+      custom: true,
+      holdable: true,
+      ...(raw.fromInfinite || raw.infinite ? { fromInfinite: true } : {}),
+    }
+  }
+  return null
 }
 
 export function heldItemData(monOrItem) {
   const raw = monOrItem && typeof monOrItem === 'object' && Object.prototype.hasOwnProperty.call(monOrItem, 'heldItem')
     ? monOrItem.heldItem
     : monOrItem
-  return resolveHeldItemByName(raw)
+  const resolved = resolveHeldItemByName(raw)
+  if (resolved) return resolved
+  // Held item do cốt truyện tạo không có battle rule chuẩn nhưng vẫn là
+  // state thật: Summary/HUD phải hiển thị và cá thể phải tiếp tục "cầm" nó.
+  if (raw && typeof raw === 'object' && raw.name && (raw.custom || raw.holdable)) return raw
+  return null
 }
 
 export function heldItemLabel(mon) {
@@ -200,6 +217,7 @@ export function resolveHeldItemByName(raw) {
 }
 
 export function isHoldableItem(raw) {
+  if (raw && typeof raw === 'object' && (raw.holdable || raw.custom)) return true
   return Boolean(resolveHeldItemByName(raw)?.holdable)
 }
 

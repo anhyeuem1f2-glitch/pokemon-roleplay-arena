@@ -178,6 +178,11 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
                   <span>TRANG BỊ</span><strong>{heldItemLabel(current)}</strong><small>{current.heldItem ? heldItemDescription(current.heldItem) : 'Không cầm vật phẩm'}</small>
                 </div>
                 <div className="summary-info-card">
+                  <span>TRANG SỨC / PHỤ KIỆN</span>
+                  <strong>{(current.accessories?.length ?? 0) ? `${current.accessories.length} món` : 'Không có'}</strong>
+                  <small>{(current.accessories ?? []).map((item) => item.name).join(', ') || 'Đồ đeo cosmetic/RP riêng, không chiếm held item chiến đấu'}</small>
+                </div>
+                <div className="summary-info-card">
                   <span>TRẠNG THÁI</span><strong>{current.status || 'Bình thường'}</strong><small>{current.hp <= 0 ? 'Đã gục' : 'Có thể chiến đấu'}</small>
                 </div>
                 <div className="summary-info-card">

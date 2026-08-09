@@ -53,6 +53,16 @@ const MEGA_STONE_BY_FORME = {
   swampertmega: 'swampertite', tyranitarmega: 'tyranitarite', venusaurmega: 'venusaurite',
 }
 
+// Đợt 114: KHÔNG được suy "mọi tên kết thúc bằng -ite" là Mega Stone.
+// Từ "Elite" cũng kết thúc bằng `ite`, khiến item fan-made như
+// "Đồ hộp dinh dưỡng Pokémon hạng Elite" bị biến thành Mega Stone, nhận
+// mô tả sai và thậm chí bị coi là held item. Chỉ whitelist đúng các viên
+// Mega Stone canon mà engine thực sự hỗ trợ.
+const CANONICAL_MEGA_STONE_IDS = new Set(Object.values(MEGA_STONE_BY_FORME))
+export function isCanonicalMegaStoneId(value) {
+  return CANONICAL_MEGA_STONE_IDS.has(itemId(value))
+}
+
 // Z-Crystal riêng phải khớp CẢ loài/forme lẫn chiêu gốc. Bản cũ chỉ dò xem
 // tên crystal có chứa tên loài nên Pikanium Z không bao giờ khớp Pikachu, còn
 // một số crystal tên gần giống lại có nguy cơ mở sai. Danh sách này bám đúng
@@ -76,6 +86,11 @@ const SPECIAL_Z_CRYSTALS = {
   solganiumz: { species: ['solgaleo', 'necrozmaduskmane'], moves: ['sunsteelstrike'] },
   tapuniumz: { species: ['tapukoko', 'tapulele', 'tapubulu', 'tapufini'], moves: ['naturesmadness'] },
   ultranecroziumz: { species: ['necrozma', 'necrozmaduskmane', 'necrozmadawnwings'], moves: ['photongeyser'] },
+}
+
+const CANONICAL_Z_CRYSTAL_IDS = new Set([...Object.keys(TYPE_CRYSTALS), ...Object.keys(SPECIAL_Z_CRYSTALS)])
+export function isCanonicalZCrystalId(value) {
+  return CANONICAL_Z_CRYSTAL_IDS.has(itemId(value))
 }
 
 const RESIST_BERRIES = {
@@ -171,7 +186,7 @@ export function normalizeHeldItem(raw) {
   if (resolved) return { id: resolved.id, name: resolved.name, ...(raw?.fromInfinite || raw?.infinite ? { fromInfinite: true } : {}) }
   // Semantic canon có thể tạo held item fan-made. Giữ object tối thiểu thay vì
   // xoá trang bị chỉ vì bảng item chuẩn không biết tên đó.
-  if (typeof raw === 'object' && raw.name && (raw.holdable || raw.custom)) {
+  if (typeof raw === 'object' && raw.name && raw.holdable) {
     return {
       id: raw.id || `custom-${itemId(raw.name) || 'held-item'}`,
       name: raw.name,
@@ -191,7 +206,7 @@ export function heldItemData(monOrItem) {
   if (resolved) return resolved
   // Held item do cốt truyện tạo không có battle rule chuẩn nhưng vẫn là
   // state thật: Summary/HUD phải hiển thị và cá thể phải tiếp tục "cầm" nó.
-  if (raw && typeof raw === 'object' && raw.name && (raw.custom || raw.holdable)) return raw
+  if (raw && typeof raw === 'object' && raw.name && raw.holdable) return raw
   return null
 }
 
@@ -203,21 +218,26 @@ export function resolveHeldItemByName(raw) {
   const id = itemId(raw)
   if (!id) return null
   if (BY_ID.has(id)) return BY_ID.get(id)
-  // Mega Stone: Showdown đặt tên Charizardite X, Gengarite, v.v. Đây là
-  // trang bị hợp lệ dù chưa cần gõ tay hàng trăm viên đá.
-  if (/(ite|itex|itey)$/.test(id) && id.length > 4) {
+  // Mega Stone / Z-Crystal động chỉ được nhận diện qua whitelist canon.
+  // Không suy từ hậu tố tên: "Elite" từng bị hiểu nhầm thành "...ite".
+  if (isCanonicalMegaStoneId(id)) {
     const name = typeof raw === 'object' ? (raw.name ?? raw.id) : String(raw)
     return entry(id, name, 'Mega Stone dành cho đúng loài/forme; cần thêm Key Stone của huấn luyện viên.', { megaStone: true, ignoreKlutz: true })
   }
-  if (id.endsWith('z') && id.length > 2) {
+  if (isCanonicalZCrystalId(id)) {
     const name = typeof raw === 'object' ? (raw.name ?? raw.id) : String(raw)
-    return entry(id, name, 'Z-Crystal đặc biệt; chỉ hoạt động khi đúng Pokémon/chiêu và huấn luyện viên có Z-Ring.', { zCrystal: true, ignoreKlutz: true })
+    const zType = TYPE_CRYSTALS[id]
+    return entry(id, name, zType
+      ? `Z-Crystal hệ ${TYPE_LABEL[zType]}; cần Z-Ring và chiêu gây sát thương cùng hệ.`
+      : 'Z-Crystal đặc biệt; chỉ hoạt động khi đúng Pokémon/chiêu và huấn luyện viên có Z-Ring.', {
+      ...(zType ? { zType } : { zCrystal: true }), ignoreKlutz: true,
+    })
   }
   return null
 }
 
 export function isHoldableItem(raw) {
-  if (raw && typeof raw === 'object' && (raw.holdable || raw.custom)) return true
+  if (raw && typeof raw === 'object' && raw.holdable) return true
   return Boolean(resolveHeldItemByName(raw)?.holdable)
 }
 

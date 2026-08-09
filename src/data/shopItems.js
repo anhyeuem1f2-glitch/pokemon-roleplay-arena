@@ -124,6 +124,7 @@ export const SHOP_CATEGORY_LABELS = {
   human: 'Đồ cho người',
   misc: 'Tiện ích',
   held: 'Trang bị Pokémon',
+  accessory: 'Trang sức / phụ kiện Pokémon',
   gimmick: 'Thiết bị chiến đấu',
   special: 'Đặc biệt',
   treasure: 'Vật phẩm giá trị',
@@ -224,10 +225,27 @@ export function resolveItemByName(rawName) {
 // Vé tàu VIP, huy hiệu fan-made, thiết bị tự chế... phải có thể tồn tại như
 // một item thật nếu chính văn đã canon hóa. ID ổn định theo tên để save và
 // ledger có thể nhận diện cùng món qua các lượt.
+const CUSTOM_ITEM_ATTRIBUTE_KEYS = [
+  'effect', 'effects', 'charges', 'durability', 'rarity', 'usage', 'tags', 'ownerBinding', 'compatibleWith',
+  'appearance', 'appearanceNote', 'visualTraits', 'access', 'permissions', 'state', 'status', 'properties',
+  'sourceMaterial', 'material', 'accessorySlot', 'wearable', 'pokemonAccessory',
+]
+
+function collectCustomItemAttributes(meta = {}) {
+  const out = { ...(meta.customAttributes && typeof meta.customAttributes === 'object' ? meta.customAttributes : {}) }
+  for (const key of CUSTOM_ITEM_ATTRIBUTE_KEYS) {
+    if (meta[key] !== undefined) out[key] = meta[key]
+  }
+  return out
+}
+
 export function createCustomItemDescriptor(rawName, meta = {}) {
   const name = String(rawName ?? '').trim()
   if (!name) return null
   const slug = normalizeName(name).replace(/\s+/g, '-') || 'custom-item'
+  const trustedDescription = meta.descriptionTrusted === true || meta.descriptionSource === 'ai-canon-v1'
+  const explicitDescription = String(meta.description ?? meta.desc ?? '').trim()
+  const customAttributes = collectCustomItemAttributes(meta)
   return {
     id: `custom-${slug}`,
     name,
@@ -236,12 +254,115 @@ export function createCustomItemDescriptor(rawName, meta = {}) {
     // mặc định dùng category `custom` nhưng PlayerHUD không có tab tương ứng,
     // khiến state đã commit mà người chơi tưởng vật phẩm bị mất.
     category: String(meta.category ?? (meta.keyItem ? 'special' : 'misc')).trim() || 'misc',
-    desc: String(meta.description ?? meta.desc ?? 'Vật phẩm do cốt truyện tạo ra.').trim(),
+    // Đợt 114: KHÔNG tin mô tả free-form từ state extractor. Extractor chỉ
+    // cần phát hiện "đã nhận item"; một Item Description API riêng sẽ dùng
+    // chính tên + ngữ cảnh canon để enrich metadata. Trong lúc chờ, hiện mô
+    // tả bảo thủ thay vì mượn bừa mô tả Mega Stone/item gần tên.
+    desc: trustedDescription && explicitDescription
+      ? explicitDescription
+      : `${name} đã được xác lập trong chính văn. Đang hoàn thiện mô tả từ ngữ cảnh canon…`,
+    descriptionStatus: trustedDescription && explicitDescription ? 'ready' : 'pending',
+    descriptionSource: trustedDescription && explicitDescription ? (meta.descriptionSource ?? 'trusted') : 'pending',
     noShop: true,
     custom: true,
+    ...(Object.keys(customAttributes).length ? { customAttributes } : {}),
     ...(meta.holdable ? { holdable: true } : {}),
+    ...(meta.wearable ? { wearable: true } : {}),
+    ...(meta.pokemonAccessory ? { pokemonAccessory: true } : {}),
+    ...(meta.accessorySlot ? { accessorySlot: String(meta.accessorySlot) } : {}),
+    ...(meta.sourceMaterial ? { sourceMaterial: String(meta.sourceMaterial) } : {}),
     ...(meta.keyItem ? { keyItem: true } : {}),
+    ...(meta.infinite ? { infinite: true } : {}),
   }
+}
+
+// Item động là entity có state riêng: các lượt sau có thể thay đổi công dụng,
+// trạng thái, số lần dùng/độ bền, quyền truy cập... mà KHÔNG cần đổi quantity.
+// Description free-form vẫn không được tin trực tiếp; thay đổi metadata sẽ
+// đánh dấu needs-enrichment để Item Description Protocol viết lại từ canon.
+export function applyCustomItemStatePatch(item, patch = {}, { sourceMessageId = '', evidence = '', semanticEventId = '' } = {}) {
+  if (!item) return item
+  const fields = patch?.fields && typeof patch.fields === 'object' ? patch.fields : patch
+  const next = { ...item, custom: item.custom !== false }
+  const attrs = { ...(item.customAttributes ?? {}), ...collectCustomItemAttributes(fields) }
+  if (Object.keys(attrs).length) next.customAttributes = attrs
+  if (fields.category) next.category = String(fields.category)
+  if (fields.price !== undefined && Number.isFinite(Number(fields.price))) next.price = Number(fields.price)
+  if (fields.holdable !== undefined) {
+    if (fields.holdable) next.holdable = true
+    else delete next.holdable
+  }
+  if (fields.wearable !== undefined) {
+    if (fields.wearable) next.wearable = true
+    else delete next.wearable
+  }
+  if (fields.pokemonAccessory !== undefined) {
+    if (fields.pokemonAccessory) next.pokemonAccessory = true
+    else delete next.pokemonAccessory
+  }
+  if (fields.accessorySlot !== undefined) {
+    if (fields.accessorySlot) next.accessorySlot = String(fields.accessorySlot)
+    else delete next.accessorySlot
+  }
+  if (fields.sourceMaterial !== undefined) {
+    if (fields.sourceMaterial) next.sourceMaterial = String(fields.sourceMaterial)
+    else delete next.sourceMaterial
+  }
+  if (fields.keyItem !== undefined) {
+    if (fields.keyItem) next.keyItem = true
+    else delete next.keyItem
+  }
+  if (fields.infinite !== undefined) next.infinite = Boolean(fields.infinite)
+  // Semantic description chỉ được giữ làm căn cứ, không overwrite desc chính.
+  const descriptionNote = String(fields.description ?? fields.desc ?? '').trim()
+  if (descriptionNote) next.customAttributes = { ...(next.customAttributes ?? {}), canonDescriptionNote: descriptionNote }
+  const patchSources = [...new Set([...(item.statePatchSourceIds ?? []), ...(sourceMessageId ? [sourceMessageId] : [])])]
+  if (patchSources.length) next.statePatchSourceIds = patchSources
+  if (evidence) next.lastCanonEvidence = String(evidence)
+  if (semanticEventId) next.lastSemanticEventId = String(semanticEventId)
+  next.descriptionStatus = 'needs-enrichment'
+  if (next.descriptionSource !== 'ai-canon-v1') next.descriptionSource = 'pending'
+  return next
+}
+
+/** Pokémon accessory là đồ đeo/cosmetic riêng, KHÔNG chiếm heldItem battle. */
+export function isPokemonAccessoryItem(item) {
+  if (!item) return false
+  const raw = typeof item === 'object' ? item : resolveItemByName(item)
+  if (!raw) return false
+  if (raw.pokemonAccessory === true || raw.wearable === true || raw.category === 'accessory') return true
+  const attrs = raw.customAttributes ?? {}
+  return attrs.pokemonAccessory === true || attrs.wearable === true || attrs.category === 'accessory'
+}
+
+const ACCESSORY_MATERIAL_LABELS = {
+  'leaf-stone': 'Lá Xanh',
+  'fire-stone': 'Hỏa Thạch',
+  'water-stone': 'Thủy Lam',
+  'thunder-stone': 'Lôi Quang',
+  'moon-stone': 'Nguyệt Thạch',
+  'sun-stone': 'Dương Quang',
+  'shiny-stone': 'Tinh Quang',
+  'dusk-stone': 'Hoàng Hôn',
+  'dawn-stone': 'Bình Minh',
+  'ice-stone': 'Băng Tinh',
+}
+
+/**
+ * Tạo tên THÀNH PHẨM khác nguyên liệu canon. Leaf Stone vẫn là Evolution Item;
+ * nếu chính văn chỉ nói chế một phụ kiện từ nó, item wearable phải mang tên mới.
+ */
+export function craftedPokemonAccessoryName(material, accessoryType = '') {
+  const source = resolveItemByName(material) ?? (typeof material === 'object' ? material : null)
+  const id = String(source?.id ?? material ?? '').toLowerCase()
+  const label = ACCESSORY_MATERIAL_LABELS[id] ?? (String(source?.name ?? material ?? 'Đặc Chế').replace(/\s+Stone$/i, '').trim() || 'Đặc Chế')
+  const kind = String(accessoryType ?? '').toLowerCase()
+  if (/bông tai|earring/.test(kind)) return `Bông Tai ${label}`
+  if (/vòng cổ|necklace|collar/.test(kind)) return `Vòng Cổ ${label}`
+  if (/mặt dây|pendant/.test(kind)) return `Mặt Dây ${label}`
+  if (/vòng tay|bracelet/.test(kind)) return `Vòng Tay ${label}`
+  if (/nơ|bow|ribbon/.test(kind)) return `Nơ ${label}`
+  return `Phụ Kiện ${label}`
 }
 
 /** Tìm trong túi theo id/tên, kể cả item động không có trong SHOP_ITEMS. */

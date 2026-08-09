@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useGame } from '../context/GameContext.jsx'
-import { SHOP_ITEMS, SHOP_CATEGORY_LABELS, displayInventoryCategory } from '../data/shopItems.js'
+import { SHOP_ITEMS, SHOP_CATEGORY_LABELS, displayInventoryCategory, isPokemonAccessoryItem } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
 import MonAvatar from './MonAvatar.jsx'
@@ -372,7 +372,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       const list = [...(cur ?? [])]
       const idx = list.findIndex((it) => it.id === resolved.id)
       if (idx >= 0) list[idx] = { ...list[idx], qty: (list[idx].qty ?? 1) + 1 }
-      else list.push({ id: resolved.id, name: resolved.name, qty: 1 })
+      else list.push({ ...resolved, id: resolved.id, name: resolved.name, qty: 1 })
       return list
     })
   }
@@ -496,6 +496,47 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
       : `Đã tháo ${oldItem.name} khỏi ${mon.name} và cất lại vào túi.`)
   }
 
+
+  // ===== TRANG SỨC / PHỤ KIỆN POKÉMON (đợt 116) =====
+  // Phụ kiện là slot RP/cosmetic riêng, KHÔNG chiếm heldItem chiến đấu.
+  function equipPokemonAccessory(item, monIndex) {
+    const mon = party[monIndex]
+    if (!mon || !isPokemonAccessoryItem(item)) return
+    if (!item.infinite && (item.qty ?? 1) <= 0) return
+    const accessories = Array.isArray(mon.accessories) ? mon.accessories : []
+    if (accessories.some((entry) => entry?.id === item.id)) {
+      setFeedback(`${pokemonDisplayName(mon)} đã đeo ${item.name}.`)
+      return
+    }
+    const accessory = {
+      ...item,
+      category: 'accessory',
+      wearable: true,
+      pokemonAccessory: true,
+      fromInfinite: Boolean(item.infinite),
+    }
+    const updated = { ...mon, accessories: [...accessories, accessory] }
+    setParty(party.map((entry, index) => index === monIndex ? updated : entry))
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon({ ...playerMon, accessories: updated.accessories })
+    if (!item.infinite) consume(item.id)
+    setFeedback(`${pokemonDisplayName(mon)} đã đeo ${item.name}. Phụ kiện không chiếm ô trang bị chiến đấu.`)
+  }
+
+  function unequipPokemonAccessory(monIndex, accessoryIndex) {
+    const mon = party[monIndex]
+    const accessories = Array.isArray(mon?.accessories) ? mon.accessories : []
+    const accessory = accessories[accessoryIndex]
+    if (!mon || !accessory) return
+    const nextAccessories = accessories.filter((_, index) => index !== accessoryIndex)
+    const updated = { ...mon, accessories: nextAccessories }
+    setParty(party.map((entry, index) => index === monIndex ? updated : entry))
+    if (playerMon && isSameMon(playerMon, mon)) setPlayerMon({ ...playerMon, accessories: nextAccessories })
+    if (!accessory.fromInfinite) addInventoryItem({ ...accessory, fromInfinite: undefined, qty: 1 })
+    setFeedback(accessory.fromInfinite
+      ? `Đã tháo ${accessory.name} khỏi ${pokemonDisplayName(mon)}; bản vô hạn vẫn ở trong túi.`
+      : `Đã tháo ${accessory.name} khỏi ${pokemonDisplayName(mon)} và cất lại vào túi.`)
+  }
+
   function healBodyPart(item, partKey) {
     const amount = Number(item.humanHeal) || HUMAN_HEAL[item.id] || 10
     if ((bodyStatus[partKey] ?? 0) <= 0) {
@@ -542,7 +583,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
     setFeedback(`Đã cho ${mon.name} dùng ${item.name}: độ no Pokémon ${hunger?.mon ?? 0} → ${nextValue}${friendshipGain ? `, thân mật +${friendshipGain}` : ''}.`)
   }
 
-  if ((inventory ?? []).length === 0 && !party.some((mon) => mon?.heldItem)) {
+  if ((inventory ?? []).length === 0 && !party.some((mon) => mon?.heldItem || (mon?.accessories?.length ?? 0) > 0)) {
     return <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Trống — mua hoặc nhận đồ trong truyện.</div>
   }
 
@@ -558,6 +599,19 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                 <button className="btn" style={{ fontSize: 9.5, padding: '2px 7px' }} onClick={() => unequipHeldItem(i)}>Tháo</button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+      {party.some((mon) => (mon?.accessories?.length ?? 0) > 0) && (
+        <div style={{ border: '1px solid var(--line)', borderRadius: 8, padding: 7, marginBottom: 8 }}>
+          <div style={{ fontSize: 10.5, color: 'var(--mint)', marginBottom: 5 }}>✧ PHỤ KIỆN ĐANG ĐEO</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {party.flatMap((mon, monIndex) => (mon.accessories ?? []).map((accessory, accessoryIndex) => (
+              <div key={`${mon.uid ?? monIndex}-acc-${accessory.id ?? accessoryIndex}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', fontSize: 10.5 }}>
+                <span>{pokemonDisplayName(mon)} — {accessory.name}</span>
+                <button className="btn" style={{ fontSize: 9.5, padding: '2px 7px' }} onClick={() => unequipPokemonAccessory(monIndex, accessoryIndex)}>Tháo</button>
+              </div>
+            )))}
           </div>
         </div>
       )}
@@ -599,6 +653,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
             const canFeedPlayer = Number(info?.hungerPlayer) > 0
             const canFeedMon = Number(info?.hungerMon) > 0
             const canEquip = isHoldableItem(info)
+            const canAccessory = isPokemonAccessoryItem(it) || isPokemonAccessoryItem(info)
             const trainerGear = isTrainerGear(info)
             return (
               <div key={it.id} style={{ border: '1px solid var(--line)', borderRadius: 7 }}>
@@ -692,10 +747,23 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         </div>
                       </div>
                     )}
+                    {canAccessory && (
+                      <div>
+                        <div style={{ marginBottom: 4, color: 'var(--mint)' }}>Đeo làm phụ kiện (không chiếm held item):</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {party.map((mon, i) => (
+                            <button key={mon.uid ?? i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => equipPokemonAccessory(it, i)}>
+                              {pokemonDisplayName(mon)} · {(mon.accessories ?? []).length} phụ kiện
+                            </button>
+                          ))}
+                          {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}
+                        </div>
+                      </div>
+                    )}
                     {trainerGear && (
                       <div style={{ color: 'var(--text-dim)' }}>Thiết bị này nằm trong túi của huấn luyện viên và tự được kiểm tra khi dùng Mega/Z/Dynamax/Tera; không cho Pokémon cầm.</div>
                     )}
-                    {!canHealMon && !canCureMon && !canHealHuman && !canFeedPlayer && !canFeedMon && !canEquip && !trainerGear && it.id !== 'rarecandy' && (
+                    {!canHealMon && !canCureMon && !canHealHuman && !canFeedPlayer && !canFeedMon && !canEquip && !canAccessory && !trainerGear && it.id !== 'rarecandy' && (
                       <div style={{ color: 'var(--text-dim)' }}>Vật phẩm này chưa có thao tác trực tiếp trong giao diện.</div>
                     )}
                   </div>

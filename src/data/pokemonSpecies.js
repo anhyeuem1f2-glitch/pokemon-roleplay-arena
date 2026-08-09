@@ -955,11 +955,13 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     Boolean(mon.isTrainerMon),
   )
   const wasFainted = (mon.hp ?? 1) <= 0
-  const evolvedAbility = resolveAbilityForEntry(
-    targetEntry,
-    mon.abilitySlot,
-    mon.uid ?? `${targetEntry.species}-${level}`,
-  )
+  const evolvedAbility = mon.abilityOverride && mon.ability
+    ? { name: mon.ability, slot: null, hidden: false }
+    : resolveAbilityForEntry(
+        targetEntry,
+        mon.abilitySlot,
+        mon.uid ?? `${targetEntry.species}-${level}`,
+      )
   const seed = {
     ...normalizeFriendship(mon),
     name: targetEntry.name,
@@ -981,6 +983,7 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
     ability: evolvedAbility.name,
     abilitySlot: evolvedAbility.slot,
     abilityHidden: evolvedAbility.hidden,
+    ...(mon.abilityOverride ? { abilityOverride: true, abilitySource: mon.abilitySource ?? 'custom-talent' } : {}),
     // Tiến hoá không được tự xoá bộ chiêu người chơi đang dùng. Chỉ lấy
     // moveset sinh tự động nếu save cũ thật sự chưa có chiêu nào.
     moves: mon.moves?.length ? mon.moves : generated.moves,

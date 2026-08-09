@@ -6,7 +6,7 @@ import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
 import { normalizeMapLocation } from '../data/mapPins.js'
 import { abilityId, ensureMonAbility } from '../data/pokemonAbilities.js'
-import { normalizeHeldItem } from '../data/pokemonHeldItems.js'
+import { normalizeHeldItem, isCanonicalMegaStoneId, isCanonicalZCrystalId } from '../data/pokemonHeldItems.js'
 import { normalizeFriendship } from '../data/pokemonFriendship.js'
 import { loadStoredMessages, persistMessagesSafely } from '../utils/storageOptimizer.js'
 import { repairSaveSlots } from '../utils/saveManager.js'
@@ -21,6 +21,7 @@ import { normalizeStoryTone } from '../data/storyTones.js'
 import { ensurePokemonGender, inferPokemonGenderForMonFromStory } from '../data/pokemonGender.js'
 import { startingMoneyForIdentity } from '../data/identities.js'
 import { normalizeDynamicState } from '../data/dynamicState.js'
+import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -785,6 +786,47 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+  // Đợt 114: sửa save từng dính heuristic "tên kết thúc -ite => Mega Stone".
+  // Item như "... hạng Elite" có thể đã bị gắn megaStone/holdable rồi tự đeo
+  // lên Pokémon. Tách nó khỏi held slot, trả đúng một bản về túi và để Item
+  // Description Protocol enrich lại metadata. Dedupe theo UID để active + party
+  // không hoàn trả cùng một món hai lần.
+  useEffect(() => {
+    const fakeHeld = (held) => {
+      if (!held || typeof held !== 'object') return false
+      if (held.megaStone && !isCanonicalMegaStoneId(held.id ?? held.name)) return true
+      if ((held.zCrystal || held.zType) && !isCanonicalZCrystalId(held.id ?? held.name)) return true
+      return false
+    }
+    const seenMon = new Set()
+    const recovered = []
+    for (const mon of [playerMon, ...(party ?? []), ...(pcBox ?? [])]) {
+      if (!mon || !fakeHeld(mon.heldItem)) continue
+      const monKey = mon.uid || mon.pokemonId || `${mon.species ?? mon.name}:${mon.level ?? 0}`
+      if (seenMon.has(monKey)) continue
+      seenMon.add(monKey)
+      recovered.push(mon.heldItem)
+    }
+    if (!recovered.length) return
+    const repair = (mon) => (mon && fakeHeld(mon.heldItem) ? { ...mon, heldItem: null } : mon)
+    setPlayerMon((cur) => repair(cur))
+    setParty((cur) => (cur ?? []).map(repair))
+    setPcBox((cur) => (cur ?? []).map(repair))
+    setInventory((cur) => {
+      const next = [...(cur ?? [])]
+      for (const held of recovered) {
+        const name = held.name ?? held.id ?? 'Vật phẩm cốt truyện'
+        const existing = resolveInventoryItemByName(name, next)
+        const descriptor = existing ?? createCustomItemDescriptor(name, { category: 'misc' })
+        if (!descriptor) continue
+        const at = next.findIndex((item) => item.id === descriptor.id)
+        if (at >= 0) next[at] = { ...next[at], qty: (Number(next[at].qty) || 0) + 1, descriptionStatus: 'needs-enrichment' }
+        else next.push({ ...descriptor, qty: 1, descriptionStatus: 'needs-enrichment' })
+      }
+      return next
+    })
+  }, [playerMon, party, pcBox, setInventory, setParty, setPcBox, setPlayerMon])
 
   // Đợt 73-74: đồng bộ save NGAY theo năng lực TỰ MÔ TẢ. Nếu save cũ
   // từng bật perk Max IV/EV dựng sẵn, gỡ đúng boost mang cờ `perkMark` để cheat

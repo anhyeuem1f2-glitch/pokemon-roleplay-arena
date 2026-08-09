@@ -8,11 +8,14 @@ import { chatCompletion } from './aiClient.js'
 import { normalizePokemonGender } from '../data/pokemonGender.js'
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
 import { proseSupportsPokemonAcquisition } from '../utils/stateEvidence.js'
+import { craftedPokemonAccessoryName, resolveItemByName } from '../data/shopItems.js'
 
 const KIND_ALIASES = {
   money: 'money_change', money_change: 'money_change', payment: 'money_change', income: 'money_change', expense: 'money_change',
   item: 'item_change', item_change: 'item_change', inventory: 'item_change', inventory_change: 'item_change',
   item_received: 'item_change', receive_item: 'item_change', item_gain: 'item_change', item_lost: 'item_change', item_used: 'item_change', consume_item: 'item_change',
+  item_created: 'item_change', item_crafted: 'item_change', craft_item: 'item_change', crafted_item: 'item_change', create_item: 'item_change', item_owned: 'item_change', item_possessed: 'item_change',
+  item_patch: 'item_patch', item_update: 'item_patch', inventory_patch: 'item_patch', item_property: 'item_patch', item_metadata: 'item_patch',
   pokemon_acquired: 'pokemon_acquired', pokemon_gain: 'pokemon_acquired', acquire_pokemon: 'pokemon_acquired', catch_pokemon: 'pokemon_acquired',
   pokemon_received: 'pokemon_acquired', receive_pokemon: 'pokemon_acquired', pokemon_owned: 'pokemon_acquired', pokemon_joined: 'pokemon_acquired',
   pokemon_removed: 'pokemon_removed', release_pokemon: 'pokemon_removed', pokemon_released: 'pokemon_removed', pokemon_lost: 'pokemon_removed', pokemon_traded_away: 'pokemon_removed',
@@ -50,12 +53,14 @@ NGUYÊN TẮC CỐT LÕI:
 1. CHÍNH VĂN là nguồn sự thật. INPUT chỉ để hiểu chủ thể/ý định, không tự tạo state.
 2. Đọc theo NGỮ NGHĨA: đại từ, biệt danh, lược chủ ngữ, câu dài, nhiều đoạn, diễn đạt gián tiếp, danh sách, hóa đơn, chuyển khoản, đồ/NPC/quyền/năng lực tự sáng tạo đều hợp lệ.
 3. KHÔNG BAO GIỜ bác một sự kiện chỉ vì "không có trong Pokédex/danh mục/database". Pokédex cũng có thể là TÊN MỘT VẬT PHẨM trong truyện. Database là việc của app sau này.
-4. Nếu chính văn nói người chơi đã nhận/sở hữu một vật, Pokémon, quyền, danh hiệu, giấy tờ, thiết bị... thì xuất event tương ứng. Không cần câu phải chứa đúng "nhận được".
+4. Nếu chính văn nói người chơi đã nhận/sở hữu một vật, Pokémon, quyền, danh hiệu, giấy tờ, thiết bị... thì xuất event tương ứng. Không cần câu phải chứa đúng "nhận được". Đặc biệt với VẬT PHẨM TỰ SÁNG TẠO: nếu STATE snapshot chưa có item nhưng chính văn cho thấy người chơi đang rút nó từ balo, đang cầm/sở hữu/mang theo hoặc dùng nó như tài sản sẵn có, hãy reconciliation bằng item_change quantity=+1/operation=possess (trừ khi cuối lượt nó đã bị tiêu hao/mất). Không được bác chỉ vì không có acquisition verb trong chính lượt.
 5. Nếu chính văn nói Pokémon đã thuộc về NGƯỜI CHƠI/đội của người chơi, đó là pokemon_acquired. Nếu một cá thể của người chơi đã được thả, trao đi hoặc trade khỏi quyền sở hữu thì pokemon_removed. Nếu Pokémon chỉ xuất hiện, được nhìn thấy, hoặc thuộc NPC thì KHÔNG phải pokemon_acquired.
 6. Nếu một Pokémon đã có trong PARTY/PC, các thay đổi của nó phải nhắm vào đúng cá thể hiện có (ưu tiên uid nếu snapshot có), không tạo bản sao.
 7. Event nào đã xảy ra thì status=completed. Việc đang cân nhắc/dự định/giá niêm yết/khả năng tương lai thì bỏ.
 8. Không giới hạn số event. Mỗi event độc lập; một event mơ hồ không được làm mất các event rõ khác.
 9. Vật phẩm: trả NET CHANGE của từng tên vật phẩm trong lượt. Nhận 3 rồi dùng 1 => quantity=2. Mất/dùng/trả => quantity âm. Vật phẩm lạ vẫn giữ nguyên tên.
+9a. TRANG SỨC/PHỤ KIỆN POKÉMON là entity RIÊNG với held item chiến đấu. Nếu người chơi dùng Leaf Stone/Fire Stone/vật liệu canon để CHẾ thành bông tai, vòng cổ, mặt dây, vòng tay, nơ... thì THÀNH PHẨM phải có TÊN RIÊNG khác nguyên liệu (VD Leaf Stone -> Bông Tai Lá Xanh / Vòng Cổ Lá Xanh / Phụ Kiện Lá Xanh), category=accessory, wearable=true, pokemonAccessory=true, holdable=false, sourceMaterial=<tên nguyên liệu>. TUYỆT ĐỐI không biến chính Leaf Stone thành đồ đeo.
+9b. Khi chính văn nói Pokémon đeo/tháo phụ kiện, dùng kind=equip/unequip với details.slot="accessory" và item=<tên thành phẩm>. Held item battle vẫn dùng details.slot="held" hoặc bỏ slot.
 10. MONEY: chỉ tiền thật sự vào/ra. Giá niêm yết không phải giao dịch. Nếu có số dư trước→sau, dùng chênh lệch. Nếu đã thanh toán hóa đơn, dùng tổng đã trả. operation=spend/payment phải có amount âm; income/reward/refund phải dương.
 11. Quan hệ/thân mật/danh tiếng là thang điểm chủ quan: khi cảm xúc thay đổi rõ nhưng văn không cho số, tự chọn delta nhỏ-vừa hợp lý thay vì bỏ event.
 12. Anime/Sandbox: những thứ tự sáng tạo đã được chính văn xác lập là hợp lệ. Realistic cũng vậy ở bước này: app đã dùng luật để định hướng câu chuyện trước đó; SAU KHI CHÍNH VĂN ĐÃ HIỂN THỊ thì interpreter chỉ có nhiệm vụ đồng bộ canon, không được phủ quyết.
@@ -64,7 +69,7 @@ NGUYÊN TẮC CỐT LÕI:
 15. owner: với item_change/pokemon_acquired, chỉ xuất nếu thay đổi tài sản của NGƯỜI CHƠI. Có thể ghi owner="player".
 
 KIND chuẩn:
-money_change, item_change, pokemon_acquired, pokemon_removed, pokemon_level, pokemon_evolve, pokemon_friendship, pokemon_patch, relationship_change, body_change, hunger_change, move, time_advance, time_of_day, training, npc_upsert, fact_upsert, badge_gain, quest_update, reputation_change, wanted_change, legendary_access, ribbon_gain, mark_gain, shop_enter, pokecenter_enter, equip, unequip, custom_state.
+money_change, item_change, item_patch, pokemon_acquired, pokemon_removed, pokemon_level, pokemon_evolve, pokemon_friendship, pokemon_patch, relationship_change, body_change, hunger_change, move, time_advance, time_of_day, training, npc_upsert, fact_upsert, badge_gain, quest_update, reputation_change, wanted_change, legendary_access, ribbon_gain, mark_gain, shop_enter, pokecenter_enter, equip, unequip, custom_state.
 
 Định dạng ưu tiên JSONL — MỖI EVENT MỘT OBJECT RIÊNG:
 <STATE_EVENTS>
@@ -74,10 +79,12 @@ money_change, item_change, pokemon_acquired, pokemon_removed, pokemon_level, pok
 </STATE_EVENTS>
 
 Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(delta|absolute), from, to, gender, status, confidence, evidence, note, place, x, y, days, dayPart, intensity, fields, details.
-- pokemon_patch.details: gender, shiny, nature, ability, teraType, nickname, form, friendship, heldItem, ivs, evs, status, customAttributes và mọi thuộc tính fan-made khác.
+- pokemon_patch.details: gender, shiny, nature, ability, teraType, nickname, form, friendship, heldItem, accessories, ivs, evs, status, customAttributes và mọi thuộc tính fan-made khác.
+- ABILITY KHÔNG phải quyền chỉnh tự do trong gameplay. Chỉ xuất pokemon_patch thay ability nếu STATE.player.abilityRewriteAllowed=true VÀ chính văn xác nhận người chơi đã dùng thiên phú đó để thay/chọn/xóa Ability. Nếu cờ false, không tự đổi Ability chỉ vì người chơi mong muốn. Nếu thiên phú xóa một Ability mà không thay bằng Ability khác, ghi ability="None" để state battle không còn nhận Ability cũ. Ability của Pokémon mới nhận hoặc thay đổi do tiến hóa/form chính thức đi theo event tương ứng.
 - SHINY là một cờ boolean ĐỘC LẬP với màu lửa/aura/hiệu ứng tự sáng tạo. Nếu chính văn nói 'Charmander Shiny với lửa tím', BẮT BUỘC shiny=true; 'lửa tím' phải nằm trong customAttributes.appearanceNote/visualTraits, KHÔNG được biến thành form riêng và KHÔNG được dùng thay cho shiny. Sprite/model đặc biệt ngoài Shiny chuẩn là việc của UI; interpreter chỉ lưu mô tả canon.
 - pokemon_acquired.details có thể thêm types, baseStats, moves, ability, description nếu là Pokémon/form fan-made.
-- item_change.details: description, category, holdable, infinite, keyItem.
+- item_change.details: category, holdable, wearable, pokemonAccessory, accessorySlot, sourceMaterial, infinite, keyItem, effect/effects, charges, durability, rarity, usage, customAttributes và mọi thuộc tính fan-made đã được canon xác lập. description KHÔNG bắt buộc; nếu chính văn không nói rõ thì bỏ trống. Mô tả item động sẽ do Item Description Protocol riêng tạo từ canon, không tự mượn mô tả vật phẩm khác.
+- item_patch: dùng khi VẬT PHẨM ĐÃ CÓ trong túi được chính văn bổ sung/thay đổi thuộc tính mà số lượng KHÔNG đổi (công dụng mới, trạng thái, số lần dùng, độ bền, quyền truy cập, ngoại hình, liên kết chủ sở hữu, hiệu ứng fan-made...). target là đúng tên/id vật phẩm; details/fields chứa các thuộc tính mới. KHÔNG dùng item_change quantity=0 cho việc này.
 - quest_update.details: id,status,title,giver,objective,reward,region.
 - custom_state dùng cho mọi state mới không khớp loại chuẩn: target là khóa; namespace; operation=set|merge|delta|append|remove; value/details là dữ liệu.
 - Unknown kind cũng được app giữ như dynamic state, nhưng hãy ưu tiên kind chuẩn khi có thể.
@@ -119,7 +126,7 @@ function signedQuantity(event) {
   const numeric = asNumber(explicit, NaN)
   const direction = String(event.operation ?? event.op ?? event.action ?? event.direction ?? '').toLowerCase()
   const negativeDirection = /remove|lose|lost|use|used|consume|consumed|give|gave|sell|sold|spend|discard|return|returned|pay/.test(direction)
-  const positiveDirection = /add|gain|gained|receive|received|obtain|obtained|acquire|acquired|buy|bought|find|found|reward/.test(direction)
+  const positiveDirection = /add|gain|gained|receive|received|obtain|obtained|acquire|acquired|buy|bought|find|found|reward|create|created|craft|crafted|forge|forged|make|made|own|owned|possess|possessed|carry|carried|have/.test(direction)
   if (Number.isFinite(numeric) && numeric !== 0) {
     if (negativeDirection) return -Math.abs(numeric)
     if (positiveDirection) return Math.abs(numeric)
@@ -150,7 +157,7 @@ function emptyParsed() {
   return {
     money: 0, moneyEntries: [], rel: [], body: [], shops: [], loots: [], npcs: [], facts: [],
     pokemons: [], pokemonRemovals: [], levels: [], evolutions: [], friendships: [], pokemonPatches: [], equipment: [], hunger: [],
-    moves: [], moveDirectives: [], items: [], badges: [], quests: [], reputations: [], wanted: [],
+    moves: [], moveDirectives: [], items: [], itemPatches: [], badges: [], quests: [], reputations: [], wanted: [],
     legendaryAccess: [], collectionAwards: [], dateAdvance: 0, training: 0, datePart: null,
     pokecenter: null, customEvents: [], dynamicUpdates: [],
   }
@@ -269,6 +276,20 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
         else accepted = false
         break
       }
+      case 'item_patch': {
+        const itemTarget = String(event.itemId ?? event.idRef ?? target).trim()
+        const fields = { ...details, ...(event.fields && typeof event.fields === 'object' ? event.fields : {}) }
+        for (const key of ['category', 'holdable', 'wearable', 'pokemonAccessory', 'accessorySlot', 'sourceMaterial', 'infinite', 'keyItem', 'price', 'effect', 'effects', 'charges', 'durability', 'rarity', 'usage', 'tags', 'customAttributes']) {
+          if (event[key] !== undefined) fields[key] = event[key]
+        }
+        if (itemTarget && Object.keys(fields).length) parsed.itemPatches.push({
+          target: itemTarget,
+          fields,
+          semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence, confidence: event.confidence,
+        })
+        else accepted = false
+        break
+      }
       case 'pokemon_acquired': {
         const species = String(event.species ?? target).trim()
         if (!species) { accepted = false; break }
@@ -324,7 +345,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       case 'pokemon_patch': {
         const pokemonTarget = String(event.uid ?? target).trim()
         const fields = { ...details }
-        for (const key of ['gender', 'shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship', 'heldItem', 'ivs', 'evs', 'status', 'customAttributes']) {
+        for (const key of ['gender', 'shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship', 'heldItem', 'accessories', 'ivs', 'evs', 'status', 'customAttributes']) {
           if (event[key] !== undefined) fields[key] = event[key]
         }
         if (pokemonTarget && Object.keys(fields).length) parsed.pokemonPatches.push({ target: pokemonTarget, fields, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence })
@@ -397,8 +418,24 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       case 'mark_gain': if (target && (event.value ?? details.name)) parsed.collectionAwards.push({ kind: 'mark', target, name: String(event.value ?? details.name) }); else accepted = false; break
       case 'shop_enter': if (target) parsed.shops.push({ name: target, type: details.type ?? '', size: details.size ?? '', semantic: true }); else accepted = false; break
       case 'pokecenter_enter': parsed.pokecenter = { name: target || 'Trung tâm Pokémon' }; break
-      case 'equip': if (target && (event.item ?? event.value ?? details.item)) parsed.equipment.push({ target, item: String(event.item ?? event.value ?? details.item), mode: 'equip', semantic: true }); else accepted = false; break
-      case 'unequip': if (target) parsed.equipment.push({ target, item: null, mode: 'unequip', semantic: true }); else accepted = false; break
+      case 'equip': {
+        const item = event.item ?? event.value ?? details.item
+        if (target && item) parsed.equipment.push({
+          target, item: String(item), mode: 'equip',
+          equipmentKind: String(event.slot ?? details.slot ?? '').toLowerCase() === 'accessory' || details.pokemonAccessory ? 'accessory' : 'held',
+          semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence,
+        }); else accepted = false
+        break
+      }
+      case 'unequip': {
+        const item = event.item ?? event.value ?? details.item ?? null
+        if (target) parsed.equipment.push({
+          target, item: item ? String(item) : null, mode: 'unequip',
+          equipmentKind: String(event.slot ?? details.slot ?? '').toLowerCase() === 'accessory' || details.pokemonAccessory ? 'accessory' : 'held',
+          semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence,
+        }); else accepted = false
+        break
+      }
       case 'custom_state': {
         const update = {
           ...event,
@@ -570,9 +607,113 @@ export function enrichNarrativePokemonAppearance(events, storyText, stateSnapsho
   return rows
 }
 
+
+const CRAFT_ACCESSORY_MATERIALS = [
+  ['leaf-stone', /\b(?:leaf\s*stone|đá\s*lá|da\s*la)\b/i],
+  ['fire-stone', /\b(?:fire\s*stone|đá\s*lửa|da\s*lua)\b/i],
+  ['water-stone', /\b(?:water\s*stone|đá\s*nước|da\s*nuoc)\b/i],
+  ['thunder-stone', /\b(?:thunder\s*stone|đá\s*(?:sét|điện)|da\s*(?:set|dien))\b/i],
+  ['moon-stone', /\b(?:moon\s*stone|đá\s*mặt\s*trăng|da\s*mat\s*trang)\b/i],
+  ['sun-stone', /\b(?:sun\s*stone|đá\s*mặt\s*trời|da\s*mat\s*troi)\b/i],
+  ['shiny-stone', /\b(?:shiny\s*stone|đá\s*sáng|da\s*sang)\b/i],
+  ['dusk-stone', /\b(?:dusk\s*stone|đá\s*(?:bóng\s*tối|hoàng\s*hôn)|da\s*(?:bong\s*toi|hoang\s*hon))\b/i],
+  ['dawn-stone', /\b(?:dawn\s*stone|đá\s*bình\s*minh|da\s*binh\s*minh)\b/i],
+  ['ice-stone', /\b(?:ice\s*stone|đá\s*băng|da\s*bang)\b/i],
+]
+
+function craftedAccessoryTypeFromSentence(sentence) {
+  if (/bông\s*tai|earrings?/i.test(sentence)) return 'bông tai'
+  if (/vòng\s*cổ|necklace|collar/i.test(sentence)) return 'vòng cổ'
+  if (/mặt\s*dây|pendant/i.test(sentence)) return 'mặt dây'
+  if (/vòng\s*tay|bracelet/i.test(sentence)) return 'vòng tay'
+  if (/\bnơ\b|\bbow\b|ribbon/i.test(sentence)) return 'nơ'
+  return 'phụ kiện'
+}
+
+/**
+ * Chốt deterministic cho lỗi Leaf Stone bị đem đeo trực tiếp. Khi canon nói
+ * rõ nguyên liệu canon đã được CHẾ thành trang sức/phụ kiện, state phải có một
+ * thành phẩm tên riêng. Không sửa item nếu câu chỉ nói cầm/nhặt Leaf Stone.
+ */
+export function enrichCraftedPokemonAccessories(events, storyText) {
+  const rows = Array.isArray(events) ? events.map((event) => ({ ...event, details: { ...(event?.details ?? {}) } })) : []
+  for (const sentence of splitNarrativeSentences(storyText)) {
+    if (!/(?:chế|che|làm|lam|tạo|tao|gia\s*công|craft|made|make)/i.test(sentence)) continue
+    if (!/(?:phụ\s*kiện|phu\s*kien|trang\s*sức|trang\s*suc|bông\s*tai|vòng\s*cổ|mặt\s*dây|vòng\s*tay|\bnơ\b|earring|necklace|pendant|bracelet|collar|accessor)/i.test(sentence)) continue
+    const materialRow = CRAFT_ACCESSORY_MATERIALS.find(([, re]) => re.test(sentence))
+    if (!materialRow) continue
+    const material = resolveItemByName(materialRow[0]) ?? { id: materialRow[0], name: materialRow[0] }
+    let productName = craftedPokemonAccessoryName(material, craftedAccessoryTypeFromSentence(sentence))
+    const materialKey = String(material?.id ?? materialRow[0]).toLowerCase()
+    // Nếu model/chính văn đã cho thành phẩm một tên RIÊNG thì giữ tên đó;
+    // chỉ dùng tên suy dẫn khi model vẫn gọi nhầm thành phẩm bằng tên nguyên liệu.
+    const explicitProduct = rows.find((event) => {
+      if (normalizeKind(event.kind ?? event.type) !== 'item_change') return false
+      if (Number(event.quantity ?? event.amount ?? 0) <= 0) return false
+      const target = String(event.target ?? event.name ?? '').trim()
+      const resolved = resolveItemByName(target)
+      if (resolved?.id === materialKey) return false
+      const d = event.details ?? {}
+      return d.category === 'accessory' || d.pokemonAccessory === true || d.wearable === true
+        || /(?:phụ\s*kiện|trang\s*sức|bông\s*tai|vòng\s*cổ|mặt\s*dây|vòng\s*tay|accessor|earring|necklace|pendant)/i.test(String(event.evidence ?? ''))
+    })
+    if (explicitProduct?.target || explicitProduct?.name) productName = String(explicitProduct.target ?? explicitProduct.name).trim() || productName
+    let hasProduct = false
+    let equipTargetsProduct = false
+    for (const event of rows) {
+      const kind = normalizeKind(event.kind ?? event.type)
+      const target = String(event.target ?? event.name ?? '').trim()
+      const eventItem = String(event.item ?? event.value ?? event.details?.item ?? '').trim()
+      const eventTargetItem = resolveItemByName(target)
+      const eventEquipItem = resolveItemByName(eventItem)
+      const accessoryFlag = event.details?.category === 'accessory' || event.details?.pokemonAccessory || event.details?.wearable
+      const evidenceMentionsCraft = /(?:phụ\s*kiện|trang\s*sức|bông\s*tai|vòng\s*cổ|mặt\s*dây|vòng\s*tay|accessor|necklace|earring|pendant)/i.test(String(event.evidence ?? ''))
+      if (kind === 'item_change' && Number(event.quantity ?? event.amount ?? 0) > 0
+        && eventTargetItem?.id === materialKey && (accessoryFlag || evidenceMentionsCraft)) {
+        event.target = productName
+        event.details = {
+          ...(event.details ?? {}), category: 'accessory', wearable: true, pokemonAccessory: true,
+          holdable: false, sourceMaterial: material.name,
+        }
+        hasProduct = true
+      } else if (kind === 'item_change' && Number(event.quantity ?? event.amount ?? 0) > 0
+        && (normalizeSearchText(target) === normalizeSearchText(productName) || (accessoryFlag && eventTargetItem?.id !== materialKey))) {
+        event.details = {
+          ...(event.details ?? {}), category: 'accessory', wearable: true, pokemonAccessory: true,
+          holdable: false, sourceMaterial: event.details?.sourceMaterial ?? material.name,
+        }
+        hasProduct = true
+      }
+      if (kind === 'equip' && eventEquipItem?.id === materialKey) {
+        event.item = productName
+        event.details = {
+          ...(event.details ?? {}), item: productName, slot: 'accessory', category: 'accessory',
+          wearable: true, pokemonAccessory: true, holdable: false, sourceMaterial: material.name,
+        }
+        equipTargetsProduct = true
+      } else if (kind === 'equip' && normalizeSearchText(eventItem) === normalizeSearchText(productName)) {
+        event.details = { ...(event.details ?? {}), slot: 'accessory', pokemonAccessory: true }
+        equipTargetsProduct = true
+      }
+    }
+    if (!hasProduct) {
+      rows.push({
+        id: `canon-crafted-accessory-${materialKey}-${rows.length}`,
+        kind: 'item_change', target: productName, quantity: 1, operation: 'craft', owner: 'player',
+        status: 'completed', confidence: 1, evidence: sentence.slice(0, 280),
+        details: { category: 'accessory', wearable: true, pokemonAccessory: true, holdable: false, sourceMaterial: material.name },
+      })
+    }
+    // equipTargetsProduct chỉ đánh dấu việc model đã nhận diện đeo; không tự
+    // đoán Pokémon đích nếu văn không cho event target đủ rõ.
+    void equipTargetsProduct
+  }
+  return rows
+}
+
 function focusKinds(focus) {
   const map = {
-    economy: ['money_change', 'item_change', 'equip', 'unequip', 'shop_enter', 'pokecenter_enter'],
+    economy: ['money_change', 'item_change', 'item_patch', 'equip', 'unequip', 'shop_enter', 'pokecenter_enter'],
     pokemon: ['pokemon_acquired', 'pokemon_removed', 'pokemon_level', 'pokemon_evolve', 'pokemon_friendship', 'pokemon_patch', 'hunger_change', 'ribbon_gain', 'mark_gain'],
     world: ['relationship_change', 'body_change', 'move', 'time_advance', 'time_of_day', 'training', 'npc_upsert', 'reputation_change', 'wanted_change'],
     progress: ['fact_upsert', 'badge_gain', 'quest_update', 'legendary_access', 'custom_state'],
@@ -622,7 +763,8 @@ ${repairedRaw}`
       }
     } catch { /* pass khác/auditor vẫn có thể cứu; không làm hỏng lượt */ }
   }
-  const enrichedEvents = enrichNarrativePokemonAppearance(parsedResponse.events, storyText, stateSnapshot)
+  const accessoryEnrichedEvents = enrichCraftedPokemonAccessories(parsedResponse.events, storyText)
+  const enrichedEvents = enrichNarrativePokemonAppearance(accessoryEnrichedEvents, storyText, stateSnapshot)
   const converted = semanticEventsToParsed(enrichedEvents)
   return {
     raw,

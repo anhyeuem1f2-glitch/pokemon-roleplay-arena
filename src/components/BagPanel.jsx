@@ -18,6 +18,7 @@ export const BAG_POCKETS = [
   { key: 'food', icon: '🍙', label: 'Đồ ăn người', desc: 'Độ no cho người chơi' },
   { key: 'human', icon: '🩹', label: 'Y tế cho người', desc: 'Băng gạc, cứu thương' },
   { key: 'held', icon: '◆', label: 'Trang bị Pokémon', desc: 'Vật phẩm Pokémon cầm trong trận' },
+  { key: 'accessory', icon: '✧', label: 'Trang sức / phụ kiện', desc: 'Đồ đeo riêng cho Pokémon, không chiếm held item' },
   { key: 'gimmick', icon: '💠', label: 'Thiết bị huấn luyện viên', desc: 'Key Stone, Z-Ring, Tera Orb…' },
   { key: 'misc', icon: '🎒', label: 'Linh tinh', desc: 'Vật phẩm khác' },
 ]

@@ -3,6 +3,7 @@ import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion, polishProse } from '../services/aiClient.js'
 import { extractSemanticStateEvents } from '../services/semanticStateEngine.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
+import { enrichItemDescription, itemDescriptionNeedsEnrichment, applyEnrichedItemMetadata, prepareItemForDescriptionEnrichment } from '../services/itemDescriptionEnricher.js'
 import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { buildScanText } from '../utils/lorebook.js'
@@ -11,7 +12,7 @@ import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
 import {
   applyPerksToMon, trainingExpMultiplier, battleExpMultiplier,
-  sharesBattleExpWithParty, syncTraitGrantedItems,
+  sharesBattleExpWithParty, syncTraitGrantedItems, canRewritePokemonAbility,
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractPresetUiVariables, extractStateTags, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
@@ -22,7 +23,7 @@ import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/cu
 import { detectMentionedArea, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
 import { detectTrainerBattle, detectDoubleBattle, detectPokecenter, detectInteractiveShop, inferInteractiveShop } from '../data/storyScenes.js'
-import { resolveItemByName, createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
+import { resolveItemByName, createCustomItemDescriptor, resolveInventoryItemByName, applyCustomItemStatePatch, isPokemonAccessoryItem, craftedPokemonAccessoryName } from '../data/shopItems.js'
 import { generateLootItems } from '../data/shopGenerator.js'
 import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 import ShopModal from './ShopModal.jsx'
@@ -414,6 +415,13 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
   const appliedRepTargets = new Set((applied?.reputations ?? []).map((entry) => monKey(entry.name)))
   const appliedEvolutions = new Set((applied?.evolutions ?? []).map((entry) => `${monKey(entry.from)}|${monKey(entry.to)}`))
   const appliedItems = new Set((applied?.items ?? []).map((entry) => `${itemKey(entry.name)}|${Number(entry.qty)}`))
+  const appliedItemPatchFields = new Map()
+  for (const entry of applied?.itemPatches ?? []) {
+    const key = itemKey(entry.target)
+    const fields = appliedItemPatchFields.get(key) ?? new Set()
+    for (const field of Object.keys(entry.fields ?? {})) fields.add(field)
+    appliedItemPatchFields.set(key, fields)
+  }
   const appliedSemanticItemTargets = new Set((applied?.items ?? []).filter((entry) => entry?.semantic || entry?.canon).map((entry) => itemKey(entry.name)))
   const appliedFriends = new Set((applied?.friendships ?? []).map((entry) => `${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`))
   const appliedEquipment = new Set((applied?.equipment ?? []).map((entry) => `${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`))
@@ -481,6 +489,11 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     levels: (extra?.levels ?? []).filter((entry) => !appliedLevelTargets.has(monKey(entry.target)) && !appliedLevels.has(`${monKey(entry.target)}|${entry.mode}|${entry.value}`)),
     evolutions: (extra?.evolutions ?? []).filter((entry) => !appliedEvolutions.has(`${monKey(entry.from)}|${monKey(entry.to)}`)),
     items: (extra?.items ?? []).filter((entry) => !appliedItems.has(`${itemKey(entry.name)}|${Number(entry.qty)}`) && !((entry?.semantic || entry?.canon) && appliedSemanticItemTargets.has(itemKey(entry.name)))),
+    itemPatches: (extra?.itemPatches ?? []).map((entry) => {
+      const used = appliedItemPatchFields.get(itemKey(entry.target)) ?? new Set()
+      const fields = Object.fromEntries(Object.entries(entry.fields ?? {}).filter(([field]) => !used.has(field)))
+      return { ...entry, fields }
+    }).filter((entry) => Object.keys(entry.fields ?? {}).length > 0),
     loots: (extra?.loots ?? []).filter((entry) => !appliedLoots.has(`${monKey(entry.type)}|${monKey(entry.size)}`)),
     friendships: (extra?.friendships ?? []).filter((entry) => !appliedFriendTargets.has(monKey(entry.target)) && !appliedFriends.has(`${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`)),
     pokemonPatches: (extra?.pokemonPatches ?? []).filter((entry) => !appliedPokemonPatchTargets.has(monKey(entry.target))),
@@ -543,7 +556,7 @@ function filterUiPreAppliedState(extra, preApplied) {
 
 const STATE_ARRAY_FIELDS = [
   'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'pokemonRemovals', 'levels', 'evolutions',
-  'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items', 'badges',
+  'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items', 'itemPatches', 'badges',
   'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards', 'customEvents', 'dynamicUpdates',
 ]
 
@@ -577,7 +590,7 @@ function mergeStateManifests(base, extra) {
 // không tồn tại, thiếu vật phẩm, cổng tiến hoá, v.v. Ledger chỉ được đánh dấu
 // cho operation đã áp hoặc đã ở trạng thái đích; nếu không Auditor sẽ tưởng
 // biến đã cập nhật và bỏ qua lỗi thật.
-const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'pokemonRemovals', 'items', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates']
+const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'pokemonRemovals', 'items', 'itemPatches', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates']
 function ledgerManifestFromApplyReport(parsed, report) {
   const manifest = compactStateManifest(parsed)
   for (const field of APPLY_GATED_FIELDS) {
@@ -665,6 +678,9 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
       const known = resolveItemByName(it.name)
       const label = known?.name ?? it.name
       out.push(`🎒 ${it.qty > 0 ? 'Yêu cầu nhận' : 'Yêu cầu mất'}: ${label} x${Math.abs(it.qty)}${known ? '' : ' · vật phẩm động'}${tag}`)
+    }
+    for (const patch of parsed.itemPatches ?? []) {
+      out.push(`🧰 Thuộc tính vật phẩm ${patch.target}: ${Object.keys(patch.fields ?? {}).join(', ') || 'cập nhật canon'}${tag}`)
     }
     for (const friend of parsed.friendships ?? []) {
       out.push(`💗 Yêu cầu đổi thân mật ${friend.target}: ${friend.delta > 0 ? '+' : ''}${friend.delta}${friend.note ? ` (${friend.note})` : ''}${tag}`)
@@ -791,6 +807,51 @@ export default function RoleplayChat() {
   const stateApiRoundRobinRef = useRef(0)
   const actionChoiceApiRoundRobinRef = useRef(0)
   const stateScanLocksRef = useRef(new Set())
+  // Đợt 114: các tác vụ AI phụ (state/action/item metadata) dùng chung một
+  // scheduler theo provider. Item description chỉ lấy API đang rảnh; nếu tất
+  // cả API phụ đều bận thì chờ slot được nhả rồi mới chạy, không chen ngang
+  // gameplay và không bắn nhiều request cùng một provider.
+  const apiLeaseRef = useRef({ busy: new Set(), waiters: new Set() })
+  const itemDescriptionQueuedRef = useRef(new Set())
+  const itemDescriptionFailureRef = useRef(new Map())
+
+  const apiLeaseKey = (cfg) => `${String(cfg?.baseUrl ?? '').replace(/\/+$/, '')}|${String(cfg?.model ?? '')}`
+  const uniqueApiConfigs = (configs) => {
+    const seen = new Set()
+    return (configs ?? []).filter((cfg) => {
+      if (!cfg?.baseUrl || !cfg?.model) return false
+      const key = apiLeaseKey(cfg)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+  const waitForApiLeaseChange = () => new Promise((resolve) => {
+    const wake = () => { apiLeaseRef.current.waiters.delete(wake); resolve() }
+    apiLeaseRef.current.waiters.add(wake)
+  })
+  const wakeApiLeaseWaiters = () => {
+    for (const wake of [...apiLeaseRef.current.waiters]) wake()
+  }
+  async function withApiLease(cfg, task) {
+    if (!cfg?.baseUrl || !cfg?.model) return task()
+    const key = apiLeaseKey(cfg)
+    while (apiLeaseRef.current.busy.has(key)) await waitForApiLeaseChange()
+    apiLeaseRef.current.busy.add(key)
+    try { return await task() } finally {
+      apiLeaseRef.current.busy.delete(key)
+      wakeApiLeaseWaiters()
+    }
+  }
+  async function runOnFirstFreeApi(configs, task) {
+    const pool = uniqueApiConfigs(configs)
+    if (!pool.length) throw new Error('Không có API rảnh/cấu hình hợp lệ cho tác vụ nền.')
+    while (true) {
+      const free = pool.find((cfg) => !apiLeaseRef.current.busy.has(apiLeaseKey(cfg)))
+      if (free) return withApiLease(free, () => task(free))
+      await waitForApiLeaseChange()
+    }
+  }
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
   useEffect(() => { latestPartyRef.current = party }, [party])
   useEffect(() => { latestPcBoxRef.current = pcBox }, [pcBox])
@@ -798,6 +859,74 @@ export default function RoleplayChat() {
   useEffect(() => { latestPlayerLocationRef.current = playerLocation }, [playerLocation])
   useEffect(() => { latestDynamicStateRef.current = dynamicState }, [dynamicState])
   useEffect(() => { latestMessagesRef.current = messages }, [messages])
+
+  function itemDescriptionApiPool() {
+    const auxiliary = uniqueApiConfigs([
+      stateApiConfig ? { ...apiConfig, ...stateApiConfig } : null,
+      stateApiConfig2 ? { ...apiConfig, ...stateApiConfig2 } : null,
+      outcomeApiConfig?.escaped ? { ...apiConfig, ...outcomeApiConfig.escaped } : null,
+      outcomeApiConfig?.lose ? { ...apiConfig, ...outcomeApiConfig.lose } : null,
+    ])
+    // Có API phụ thì KHÔNG chiếm API kể chuyện chính. Chỉ khi người dùng
+    // không cấu hình bất kỳ API phụ nào mới dùng API chính, và scheduler sẽ
+    // chờ provider đó rảnh trước khi enrich.
+    return auxiliary.length ? auxiliary : uniqueApiConfigs([apiConfig])
+  }
+
+  function findItemCanonContext(itemName) {
+    const name = String(itemName ?? '').trim().toLowerCase()
+    const assistantMessages = (latestMessagesRef.current ?? []).filter((message) => message?.role === 'assistant').slice().reverse()
+    const exact = name ? assistantMessages.find((message) => String(message.meta?.evidenceText || message.content || '').toLowerCase().includes(name)) : null
+    const source = exact ?? assistantMessages[0] ?? null
+    if (!source) return ''
+    const text = stripInlineTags(source.meta?.evidenceText || source.content || '')
+    if (!name) return text.slice(-2400)
+    const lower = text.toLowerCase()
+    const at = lower.indexOf(name)
+    if (at < 0) return text.slice(-2400)
+    const start = Math.max(0, at - 900)
+    const end = Math.min(text.length, at + name.length + 1400)
+    return text.slice(start, end)
+  }
+
+  // Đợt 114: item động được commit NGAY để gameplay không chờ AI, còn mô
+  // tả chạy nền qua API rảnh. Save cũ có mô tả sai từ heuristic -ite/-z cũng
+  // tự đi qua queue này và được sửa tại chỗ, không cần reset game.
+  useEffect(() => {
+    const now = Date.now()
+    const candidates = (inventory ?? []).filter((item) => itemDescriptionNeedsEnrichment(item))
+    if (candidates.some((item) => item.descriptionStatus !== 'pending' || item.descriptionSource !== 'pending' || /mega stone|z-crystal/i.test(String(item.desc ?? '')))) {
+      setInventory((cur) => (cur ?? []).map((item) => itemDescriptionNeedsEnrichment(item)
+        ? prepareItemForDescriptionEnrichment(item)
+        : item))
+    }
+    for (const item of candidates) {
+      const key = String(item.id ?? item.name)
+      if (!key || itemDescriptionQueuedRef.current.has(key)) continue
+      const lastFailure = itemDescriptionFailureRef.current.get(key) ?? 0
+      if (now - lastFailure < 60_000) continue
+      itemDescriptionQueuedRef.current.add(key)
+      Promise.resolve().then(async () => {
+        try {
+          const context = findItemCanonContext(item.name)
+          const meta = await runOnFirstFreeApi(itemDescriptionApiPool(), (cfg) => enrichItemDescription(cfg, {
+            item,
+            canonContext: context,
+            categoryHint: item.category,
+          }))
+          setInventory((cur) => (cur ?? []).map((owned) => (String(owned.id ?? owned.name) === key
+            ? applyEnrichedItemMetadata(owned, meta)
+            : owned)))
+          itemDescriptionFailureRef.current.delete(key)
+        } catch (descriptionError) {
+          itemDescriptionFailureRef.current.set(key, Date.now())
+          console.warn('[item-description] enrich lỗi, giữ mô tả bảo thủ:', descriptionError.message)
+        } finally {
+          itemDescriptionQueuedRef.current.delete(key)
+        }
+      })
+    }
+  }, [inventory, messages, stateApiConfig, stateApiConfig2, outcomeApiConfig, apiConfig, setInventory])
 
   // Đợt 102: pass chuyên môn không cần kéo theo toàn bộ snapshot không liên
   // quan. Tách snapshot theo focus giúp prompt ngắn và ổn định hơn khi save
@@ -810,12 +939,15 @@ export default function RoleplayChat() {
         name: playerName || playerProfile?.name || 'Người chơi',
         trainerId,
         mode: normalizeGameMode(storyTone),
+        abilityRewriteAllowed: canRewritePokemonAbility(playerTraits),
       },
     }
     if (!focusId || focusId === 'economy') {
       snapshot.money = Number(moneyValue) || 0
       snapshot.inventory = (latestInventoryRef.current ?? []).map((item) => ({
         id: item.id, name: item.name, qty: item.qty, infinite: Boolean(item.infinite),
+        category: item.category, holdable: Boolean(item.holdable), wearable: Boolean(item.wearable), pokemonAccessory: Boolean(item.pokemonAccessory), keyItem: Boolean(item.keyItem),
+        description: item.desc, custom: Boolean(item.custom), customAttributes: item.customAttributes ?? undefined,
       }))
     }
     if (!focusId || focusId === 'pokemon') {
@@ -825,6 +957,7 @@ export default function RoleplayChat() {
         shiny: Boolean(mon.shiny), nature: mon.nature, ability: mon.ability,
         teraType: mon.teraType, friendship: mon.friendship,
         heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+        accessories: (mon.accessories ?? []).map((item) => ({ id: item.id, name: item.name, category: item.category })),
         status: mon.status ?? null,
         customAttributes: mon.customAttributes ?? undefined,
       }))
@@ -834,6 +967,7 @@ export default function RoleplayChat() {
         shiny: Boolean(mon.shiny), nature: mon.nature, ability: mon.ability,
         teraType: mon.teraType, friendship: mon.friendship,
         heldItem: mon.heldItem?.name ?? mon.heldItem ?? null,
+        accessories: (mon.accessories ?? []).map((item) => ({ id: item.id, name: item.name, category: item.category })),
         status: mon.status ?? null,
         customAttributes: mon.customAttributes ?? undefined,
       }))
@@ -1706,7 +1840,14 @@ export default function RoleplayChat() {
             : `⚠ Không áp thuộc tính Pokémon “${patch.target}”: không tìm thấy cá thể`)
           continue
         }
-        const fields = patch.fields ?? {}
+        const fields = { ...(patch.fields ?? {}) }
+        const abilityChangeRequested = Boolean(fields.ability)
+        const abilityChangeAllowed = canRewritePokemonAbility(playerTraits)
+        if (abilityChangeRequested && !abilityChangeAllowed) {
+          report.lines.push(`⚠ Không đổi Ability ${targetMon.name} → ${fields.ability}: người chơi không có thiên phú cho phép thay Ability`)
+          delete fields.ability
+        }
+        if (Object.keys(fields).length === 0) continue
         const identity = { uid: targetMon.uid, name: targetMon.name }
         const transform = (mon) => {
           if (!mon) return mon
@@ -1715,7 +1856,13 @@ export default function RoleplayChat() {
           if (gender) next.gender = gender
           if (fields.shiny !== undefined) next.shiny = Boolean(fields.shiny)
           if (fields.nature) next.nature = String(fields.nature)
-          if (fields.ability) next.ability = String(fields.ability)
+          if (fields.ability) {
+            next.ability = String(fields.ability)
+            next.abilitySlot = null
+            next.abilityHidden = false
+            next.abilityOverride = true
+            next.abilitySource = 'custom-talent'
+          }
           if (fields.teraType) next.teraType = String(fields.teraType).toLowerCase()
           if (fields.nickname !== undefined) next.nickname = String(fields.nickname ?? '').trim() || undefined
           if (Number.isFinite(Number(fields.friendship))) next.friendship = Math.max(0, Math.min(255, Number(fields.friendship)))
@@ -1727,6 +1874,35 @@ export default function RoleplayChat() {
               const descriptor = knownHeld ?? createCustomItemDescriptor(rawHeld.name, { ...rawHeld, holdable: true })
               next.heldItem = descriptor ? normalizeHeldItem({ ...descriptor, holdable: true, custom: Boolean(descriptor.custom) }) : next.heldItem
             }
+          }
+          if (Array.isArray(fields.accessories)) {
+            next.accessories = fields.accessories
+              .map((rawAccessory) => {
+                const raw = typeof rawAccessory === 'object' && rawAccessory
+                  ? rawAccessory
+                  : { name: String(rawAccessory ?? '').trim() }
+                if (!raw.name && !raw.id) return null
+                const known = resolveInventoryItemByName(raw.name ?? raw.id, latestInventoryRef.current)
+                  ?? resolveItemByName(raw.name ?? raw.id)
+                const descriptor = known && isPokemonAccessoryItem(known)
+                  ? known
+                  : createCustomItemDescriptor(raw.name ?? raw.id, {
+                      ...raw,
+                      category: 'accessory',
+                      wearable: true,
+                      pokemonAccessory: true,
+                      holdable: false,
+                    })
+                return descriptor ? {
+                  ...descriptor,
+                  ...raw,
+                  category: 'accessory',
+                  wearable: true,
+                  pokemonAccessory: true,
+                  holdable: false,
+                } : null
+              })
+              .filter(Boolean)
           }
           const patchStats = (raw, max, previous) => {
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return previous
@@ -1746,7 +1922,7 @@ export default function RoleplayChat() {
           // Mọi thuộc tính fan-made không thuộc schema battle vẫn bám theo đúng
           // cá thể thay vì bị vứt. Chúng được gửi lại cho Semantic Engine ở các
           // lượt sau qua customAttributes.
-          const knownPatchKeys = new Set(['gender','shiny','nature','ability','teraType','nickname','form','friendship','heldItem','ivs','evs','status'])
+          const knownPatchKeys = new Set(['gender','shiny','nature','ability','teraType','nickname','form','friendship','heldItem','accessories','ivs','evs','status'])
           const extraAttributes = Object.fromEntries(Object.entries(fields).filter(([key]) => !knownPatchKeys.has(key)))
           if (Object.keys(extraAttributes).length) next.customAttributes = { ...(next.customAttributes ?? {}), ...extraAttributes }
           if (fields.form) {
@@ -1930,9 +2106,26 @@ export default function RoleplayChat() {
         }
         const at = previewInventory.findIndex((it) => it.id === entry.id)
         if (qty > 0) {
-          if (at === -1) previewInventory.push({ ...entry, qty, ...(raw.infinite ? { infinite: true } : {}) })
-          else previewInventory[at] = { ...previewInventory[at], qty: (previewInventory[at].qty ?? 0) + qty }
-          report.lines.push(`✅ Nhận vật phẩm: ${entry.name} x${qty}`)
+          const sourceIds = sourceMessageId ? [sourceMessageId] : []
+          if (at === -1) {
+            previewInventory.push({
+              ...entry, qty, ...(raw.infinite ? { infinite: true } : {}),
+              ...(sourceIds.length ? { acquisitionSourceIds: sourceIds } : {}),
+              ...(raw.evidence ? { lastCanonEvidence: raw.evidence } : {}),
+              ...(raw.semanticEventId ? { lastSemanticEventId: raw.semanticEventId } : {}),
+            })
+          } else {
+            const current = previewInventory[at]
+            const mergedAttrs = { ...(current.customAttributes ?? {}), ...(entry.customAttributes ?? {}) }
+            previewInventory[at] = {
+              ...entry, ...current, qty: (current.qty ?? 0) + qty,
+              ...(Object.keys(mergedAttrs).length ? { customAttributes: mergedAttrs } : {}),
+              acquisitionSourceIds: [...new Set([...(current.acquisitionSourceIds ?? []), ...sourceIds])],
+              ...(raw.evidence ? { lastCanonEvidence: raw.evidence } : {}),
+              ...(raw.semanticEventId ? { lastSemanticEventId: raw.semanticEventId } : {}),
+            }
+          }
+          report.lines.push(`✅ Nhận vật phẩm: ${entry.name} x${qty}${entry.custom ? ' · entity động' : ''}`)
           markLedger('items', raw)
         } else if (at === -1) {
           report.lines.push(`⚠ Không thể trừ ${entry.name}: trong túi không có vật phẩm này`)
@@ -1950,6 +2143,33 @@ export default function RoleplayChat() {
         }
       }
 
+      // Đợt 115: custom item là một entity state sống, không chỉ name+qty.
+      // Canon có thể bổ sung công dụng/trạng thái/độ bền/quyền truy cập ở lượt
+      // sau mà quantity không đổi. item_patch cập nhật trực tiếp entity trong
+      // inventory; nếu item vừa được nhận trong cùng lượt thì patch vẫn thấy
+      // nó vì chạy sau vòng item_change phía trên.
+      let itemPatchChanged = false
+      for (const patch of parsed.itemPatches ?? []) {
+        const owned = resolveInventoryItemByName(patch.target, previewInventory)
+        if (!owned) {
+          if (patch.semantic || patch.canon) {
+            deferSemanticState(patch, `Vật phẩm ${patch.target}`, patch.fields ?? {}, 'inventory-item')
+            report.lines.push(`ℹ Chưa thấy “${patch.target}” trong túi; đã giữ patch vật phẩm trong state động để không mất canon`)
+          } else {
+            report.lines.push(`⚠ Không áp thuộc tính vật phẩm “${patch.target}”: vật phẩm chưa có trong túi`)
+          }
+          continue
+        }
+        const at = previewInventory.findIndex((it) => it.id === owned.id)
+        if (at < 0) continue
+        previewInventory[at] = applyCustomItemStatePatch(previewInventory[at], patch.fields ?? {}, {
+          sourceMessageId, evidence: patch.evidence, semanticEventId: patch.semanticEventId,
+        })
+        itemPatchChanged = true
+        report.lines.push(`✅ Cập nhật vật phẩm: ${previewInventory[at].name} · ${Object.keys(patch.fields ?? {}).join(', ') || 'thuộc tính canon'}`)
+        markLedger('itemPatches', patch)
+      }
+
       const validItemChanges = itemChanges.filter((x) => x.entry && (x.qty !== 0 || x.absorbedByEquip > 0 || x.absorbedByEvolution > 0))
 
       // Đợt 109: commit phần TÚI ngay sau khi tính xong item/loot/evolution.
@@ -1958,7 +2178,7 @@ export default function RoleplayChat() {
       // audit vẫn báo ĐÃ ÁP trong khi React/localStorage chưa nhận inventory.
       // Commit checkpoint này làm report và state thật không còn lệch nhau;
       // EQUIP nếu có sẽ tiếp tục từ chính snapshot vừa commit rồi commit lần 2.
-      const baseInventoryChanged = validItemChanges.length > 0 || evolutionDebits.size > 0 || lootChanged
+      const baseInventoryChanged = validItemChanges.length > 0 || itemPatchChanged || evolutionDebits.size > 0 || lootChanged
       if (baseInventoryChanged) {
         const committedInventory = syncTraitGrantedItems(previewInventory, playerTraits)
         setInventory(committedInventory)
@@ -1971,7 +2191,7 @@ export default function RoleplayChat() {
       const addPreviewItem = (entry) => {
         const at = previewInventory.findIndex((it) => it.id === entry.id)
         if (at >= 0) previewInventory[at] = { ...previewInventory[at], qty: (previewInventory[at].qty ?? 1) + 1 }
-        else previewInventory.push({ id: entry.id, name: entry.name, qty: 1 })
+        else previewInventory.push({ ...entry, id: entry.id, name: entry.name, qty: 1, fromInfinite: undefined })
       }
 
       // Trang bị được áp SAU ITEM để một lượt “nhận rồi đeo” hoạt động
@@ -1988,6 +2208,29 @@ export default function RoleplayChat() {
         }
         const identity = { uid: targetMon.uid, name: targetMon.name }
         const oldItem = resolveHeldItemByName(targetMon.heldItem)
+        const accessoryList = Array.isArray(targetMon.accessories) ? targetMon.accessories : []
+        const accessoryTargetKey = normalizeMonTarget(directive.item ?? '')
+        const accessoryIndex = accessoryList.findIndex((item) => {
+          if (!directive.item) return directive.equipmentKind === 'accessory' && accessoryList.length === 1
+          return [item?.id, item?.name].filter(Boolean).some((value) => normalizeMonTarget(value) === accessoryTargetKey)
+        })
+
+        if (directive.mode === 'unequip' && (directive.equipmentKind === 'accessory' || accessoryIndex >= 0)) {
+          if (accessoryIndex < 0) {
+            report.lines.push(`ℹ ${targetMon.name} không có phụ kiện phù hợp để tháo`)
+            markLedger('equipment', directive)
+            continue
+          }
+          const accessory = accessoryList[accessoryIndex]
+          if (!accessory.fromInfinite) addPreviewItem({ ...accessory, fromInfinite: undefined })
+          replacePreviewMon(identity, (mon) => ({ ...mon, accessories: (mon.accessories ?? []).filter((_, index) => index !== accessoryIndex) }))
+          equipmentChanged = true
+          report.lines.push(accessory.fromInfinite
+            ? `✅ Tháo phụ kiện: ${targetMon.name} bỏ ${accessory.name}; bản vô hạn vẫn ở trong túi`
+            : `✅ Tháo phụ kiện: ${targetMon.name} → ${accessory.name} được cất lại vào túi`)
+          markLedger('equipment', directive)
+          continue
+        }
 
         if (directive.mode === 'unequip') {
           if (!oldItem) {
@@ -2005,16 +2248,73 @@ export default function RoleplayChat() {
           continue
         }
 
-        let entry = resolveHeldItemByName(directive.item) ?? resolveInventoryItemByName(directive.item, previewInventory) ?? resolveItemByName(directive.item)
-        if (!entry && (directive.semantic || directive.canon)) {
-          entry = createCustomItemDescriptor(directive.item, { holdable: true, description: 'Trang bị do cốt truyện xác lập.' })
-        }
+        let entry = resolveInventoryItemByName(directive.item, previewInventory) ?? resolveHeldItemByName(directive.item) ?? resolveItemByName(directive.item)
         const canonEquip = Boolean(directive.semantic || directive.canon)
-        if (!entry || (!canonEquip && !isHoldableItem(entry))) {
-          report.lines.push(`⚠ Không áp trang bị “${directive.item}”: không resolve được held item`)
+        const wantsAccessory = directive.equipmentKind === 'accessory' || isPokemonAccessoryItem(entry)
+        if (!entry && canonEquip) {
+          entry = createCustomItemDescriptor(directive.item, wantsAccessory
+            ? { category: 'accessory', wearable: true, pokemonAccessory: true, holdable: false }
+            : { holdable: true, description: 'Trang bị do cốt truyện xác lập.' })
+        }
+        // Leaf Stone/Fire Stone/... vẫn là Evolution Item canon. Nếu canon
+        // nói rõ nó đã được CHẾ thành phụ kiện nhưng model vẫn trỏ vào nguyên
+        // liệu, tự dựng một tên THÀNH PHẨM khác và dùng slot accessory.
+        if (entry && !entry.custom && !isHoldableItem(entry) && !isPokemonAccessoryItem(entry)) {
+          const craftCue = /(?:chế|che|làm|lam|tạo|tao|gia\s*công|craft|made|make)[\s\S]{0,160}(?:phụ\s*kiện|phu\s*kien|trang\s*sức|trang\s*suc|bông\s*tai|vòng\s*cổ|mặt\s*dây|vòng\s*tay|earring|necklace|pendant|bracelet|accessor)/i.test(storyText)
+            || /(?:phụ\s*kiện|phu\s*kien|trang\s*sức|trang\s*suc|bông\s*tai|vòng\s*cổ|mặt\s*dây|vòng\s*tay|earring|necklace|pendant|bracelet|accessor)[\s\S]{0,160}(?:chế|che|làm|lam|tạo|tao|gia\s*công|craft|made|make)/i.test(storyText)
+          if (craftCue) {
+            const productName = craftedPokemonAccessoryName(entry, storyText)
+            let product = resolveInventoryItemByName(productName, previewInventory)
+            if (!product) {
+              product = createCustomItemDescriptor(productName, {
+                category: 'accessory', wearable: true, pokemonAccessory: true, holdable: false, sourceMaterial: entry.name,
+              })
+              addPreviewItem(product)
+            }
+            entry = product
+            directive.equipmentKind = 'accessory'
+          } else {
+            report.lines.push(`⚠ Không thể đeo trực tiếp ${entry.name}: đây là vật phẩm canon; phụ kiện chế từ nó phải có tên thành phẩm riêng`)
+            continue
+          }
+        }
+        if (!entry || (!canonEquip && !isHoldableItem(entry) && !isPokemonAccessoryItem(entry))) {
+          report.lines.push(`⚠ Không áp trang bị “${directive.item}”: không resolve được held item/phụ kiện`)
           continue
         }
-        if (canonEquip && !isHoldableItem(entry)) entry = { ...entry, holdable: true, custom: Boolean(entry.custom) }
+        // Một held item fan-made đã được chính văn xác lập vẫn có thể là đồ cầm
+        // hợp lệ, nhưng KHÔNG được dùng ngoại lệ này cho vật phẩm canon như
+        // Leaf Stone. Canon material phải được chế thành một accessory có tên
+        // thành phẩm riêng ở nhánh phía trên.
+        if (canonEquip && entry.custom && !isPokemonAccessoryItem(entry) && !isHoldableItem(entry)) {
+          entry = { ...entry, category: 'held', holdable: true }
+        }
+        if (isPokemonAccessoryItem(entry) || directive.equipmentKind === 'accessory') {
+          const accessories = Array.isArray(targetMon.accessories) ? targetMon.accessories : []
+          if (accessories.some((item) => item?.id === entry.id)) {
+            report.lines.push(`ℹ ${targetMon.name} đã đeo ${entry.name}`)
+            markLedger('equipment', directive)
+            continue
+          }
+          const at = previewInventory.findIndex((it) => it.id === entry.id)
+          if (at < 0 || (!previewInventory[at].infinite && (previewInventory[at].qty ?? 0) <= 0)) {
+            report.lines.push(`⚠ Không thể cho ${targetMon.name} đeo ${entry.name}: phụ kiện không có trong túi`)
+            continue
+          }
+          const fromInfinite = Boolean(previewInventory[at]?.infinite)
+          if (!fromInfinite) {
+            const left = (previewInventory[at].qty ?? 1) - 1
+            if (left > 0) previewInventory[at] = { ...previewInventory[at], qty: left }
+            else previewInventory.splice(at, 1)
+          }
+          const accessory = { ...entry, category: 'accessory', wearable: true, pokemonAccessory: true, fromInfinite }
+          replacePreviewMon(identity, (mon) => ({ ...mon, accessories: [...(mon.accessories ?? []), accessory] }))
+          equipmentChanged = true
+          report.lines.push(`✅ Phụ kiện: ${targetMon.name} đeo ${entry.name} · không chiếm held item`)
+          markLedger('equipment', directive)
+          continue
+        }
+
         if (oldItem?.id === entry.id) {
           report.lines.push(`ℹ ${targetMon.name} đã cầm ${entry.name}`)
           markLedger('equipment', directive)
@@ -2365,7 +2665,7 @@ export default function RoleplayChat() {
         assistantPrefill: assistantPrefill?.trim() || null,
       })
 
-      let reply = await chatCompletion(configOverride || apiConfig, apiMessages, callOptions)
+      let reply = await withApiLease(configOverride || apiConfig, () => chatCompletion(configOverride || apiConfig, apiMessages, callOptions))
       let cleaned = cleanAiOutput(reply, regexScripts)
       // Prompt không phải chốt an toàn đủ mạnh: một số model vẫn biến “đi
       // tìm Ditto” thành gặp Ditto ngay. Nếu bản nháp phá cổng tìm kiếm của
@@ -2374,11 +2674,11 @@ export default function RoleplayChat() {
       // không có BATTLE/POKEMON hay cuộc gặp được canon hoá.
       if (responseViolatesSearchGate(cleaned, inputAdjudication)) {
         try {
-          const revised = await chatCompletion(configOverride || apiConfig, [
+          const revised = await withApiLease(configOverride || apiConfig, () => chatCompletion(configOverride || apiConfig, [
             ...apiMessages,
             { role: 'assistant', content: reply },
             { role: 'user', content: buildSearchGateCorrection(inputAdjudication) },
-          ], { ...callOptions, assistantPrefill: '' })
+          ], { ...callOptions, assistantPrefill: '' }))
           const revisedCleaned = cleanAiOutput(revised, regexScripts)
           if (revisedCleaned && !responseViolatesSearchGate(revisedCleaned, inputAdjudication)) {
             reply = revised
@@ -2513,14 +2813,14 @@ export default function RoleplayChat() {
       const resolvedSemanticCfg = semanticPrimaryCfg ? { ...apiConfig, ...semanticPrimaryCfg } : apiConfig
       if (resolvedSemanticCfg?.baseUrl && resolvedSemanticCfg?.model) {
         try {
-          const semantic = await extractSemanticStateEvents(resolvedSemanticCfg, {
+          const semantic = await withApiLease(resolvedSemanticCfg, () => extractSemanticStateEvents(resolvedSemanticCfg, {
             storyText: displayText,
             userText: stateUserText,
             stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
             appliedState: preAppliedState,
             mode: normalizeGameMode(storyTone),
             scanMode: 'extractor',
-          })
+          }))
           semanticPrimarySucceeded = true
           let semanticParsed = filterUiPreAppliedState(semantic.parsed, preAppliedState)
           semanticParsed = gateSemanticOwnership(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -2548,14 +2848,14 @@ export default function RoleplayChat() {
               const auditorCfg = dedicatedAuditorRaw
                 ? { ...apiConfig, ...dedicatedAuditorRaw }
                 : resolvedSemanticCfg
-              const auditor = await extractSemanticStateEvents(auditorCfg, {
+              const auditor = await withApiLease(auditorCfg, () => extractSemanticStateEvents(auditorCfg, {
                 storyText: displayText,
                 userText: stateUserText,
                 stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
                 appliedState: mergeStateManifests(preAppliedState ?? {}, stateParsed),
                 mode: normalizeGameMode(storyTone),
                 scanMode: 'auditor',
-              })
+              }))
               let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
               auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -2593,7 +2893,7 @@ export default function RoleplayChat() {
             const focusedResults = await Promise.all(focusSpecs.map(async (spec, index) => {
               const focusCfg = focusCfgPool[index % focusCfgPool.length]
               try {
-                const result = await extractSemanticStateEvents(focusCfg, {
+                const result = await withApiLease(focusCfg, () => extractSemanticStateEvents(focusCfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   stateSnapshot: buildStateScanSnapshot(spec.focus, Number(playerProfile?.money) || 0),
@@ -2601,7 +2901,7 @@ export default function RoleplayChat() {
                   mode: normalizeGameMode(storyTone),
                   scanMode: 'auditor',
                   focus: spec.focus,
-                })
+                }))
                 return { spec, result }
               } catch (error) {
                 return { spec, error }
@@ -2796,12 +3096,12 @@ export default function RoleplayChat() {
           .join('\n\n')
 
         scheduleIdleStateTask(() => {
-          generateActionChoices(actionCfg, {
+          withApiLease(actionCfg, () => generateActionChoices(actionCfg, {
             recentContext,
             storyText: displayText,
             userText: stateUserText,
             playerName: playerName || playerProfile?.name || '',
-          })
+          }))
             .then((generated) => {
               setMessages((msgs) => {
                 const at = msgs.findIndex((message) => message.id === turnMessageId)
@@ -2862,7 +3162,7 @@ export default function RoleplayChat() {
               let parsedExtra = null
               let passAuditBase = null
               try {
-                scanResult = await extractSemanticStateEvents(stateCfg, {
+                scanResult = await withApiLease(stateCfg, () => extractSemanticStateEvents(stateCfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   appliedState: scanLedger,
@@ -2873,7 +3173,7 @@ export default function RoleplayChat() {
                   mode: normalizeGameMode(storyTone),
                   scanMode: passSpec.role,
                   focus: passSpec.focus,
-                })
+                }))
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
                 parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
                 parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -3059,7 +3359,7 @@ export default function RoleplayChat() {
         let scanResult = null
         let parsed = null
         try {
-          scanResult = await extractSemanticStateEvents(cfg, {
+          scanResult = await withApiLease(cfg, () => extractSemanticStateEvents(cfg, {
             storyText,
             userText,
             appliedState: applied,
@@ -3067,7 +3367,7 @@ export default function RoleplayChat() {
             mode: normalizeGameMode(storyTone),
             scanMode: passSpec.role,
             focus: passSpec.focus,
-          })
+          }))
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
           parsed = gateSemanticOwnership(parsed, storyText)
           parsed = gatePokecenterInteraction(parsed, storyText)
@@ -3315,12 +3615,13 @@ export default function RoleplayChat() {
         .map((message) => `${message.role === 'user' ? 'Người chơi' : 'AI'}: ${message.content}`)
         .join('\n\n')
       const userText = [...previous].reverse().find((message) => message.role === 'user')?.content ?? ''
-      const generated = await generateActionChoices(nextActionChoiceConfig(), {
+      const actionCfg = nextActionChoiceConfig()
+      const generated = await withApiLease(actionCfg, () => generateActionChoices(actionCfg, {
         recentContext,
         storyText,
         userText,
         playerName: playerName || playerProfile?.name || '',
-      })
+      }))
       setMessages((current) => current.map((message) => (
         message.id === messageId && message.content === storyText
           ? { ...message, actionChoices: generated, actionChoicesPending: false }

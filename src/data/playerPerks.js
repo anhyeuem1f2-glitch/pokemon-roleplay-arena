@@ -128,6 +128,15 @@ export function parseCustomMechanicEffects(source) {
   }
   customCatchBonus = Math.max(0, Math.min(92, customCatchBonus))
 
+  // Đợt 116: đổi Ability không phải quyền mặc định. Chỉ khi người chơi
+  // chủ động mô tả một thiên phú cho phép thay/chọn/xóa Ability của Pokémon
+  // thì Semantic Engine mới được persist thay đổi này. Dùng cửa sổ ngữ nghĩa
+  // đủ rộng để bắt cả tiếng Việt lẫn cách viết "ability" phổ biến.
+  const abilityRewriteAllowed = Boolean(text && (
+    /(?:ability|dac tinh|nang luc)[\s\S]{0,100}(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove)/.test(text)
+    || /(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove)[\s\S]{0,100}(?:ability|dac tinh|nang luc)/.test(text)
+  ))
+
   const genericExp = exp.generic
   return {
     maxIvEv,
@@ -136,6 +145,7 @@ export function parseCustomMechanicEffects(source) {
     allPartyBattleExp,
     infiniteRareCandy,
     catchRateBonus: customCatchBonus,
+    abilityRewriteAllowed,
   }
 }
 
@@ -151,8 +161,18 @@ export function resolveMechanicEffects(source) {
     allPartyBattleExp: custom.allPartyBattleExp,
     infiniteRareCandy: custom.infiniteRareCandy,
     catchRateBonus: custom.catchRateBonus,
+    abilityRewriteAllowed: custom.abilityRewriteAllowed,
     custom,
   }
+}
+
+/**
+ * Quyền thay Ability vĩnh viễn của Pokémon. Không có thiên phú tự mô tả rõ
+ * ràng thì trả false — Sandbox cũng KHÔNG được đổi Ability miễn phí sau khi
+ * đã bắt đầu chơi. Ability chọn ở Pokémon Builder lúc khởi tạo là luồng khác.
+ */
+export function canRewritePokemonAbility(source) {
+  return Boolean(parseCustomMechanicEffects(source).abilityRewriteAllowed)
 }
 
 /** Chuỗi ngắn để HUD/bảng sửa cho người chơi thấy app đã nhận diện gì. */
@@ -165,6 +185,7 @@ export function describeCustomMechanicEffects(source) {
   if (effects.allPartyBattleExp) out.push('Cả đội cùng nhận EXP sau trận')
   if (effects.infiniteRareCandy) out.push('Kẹo Hiếm vô hạn')
   if (effects.catchRateBonus > 0) out.push(`Tỉ lệ bắt +${effects.catchRateBonus}%`)
+  if (effects.abilityRewriteAllowed) out.push('Có thể thay đổi Ability Pokémon và ghi vào state thật')
   return out
 }
 

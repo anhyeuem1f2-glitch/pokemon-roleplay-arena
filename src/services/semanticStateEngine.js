@@ -740,7 +740,7 @@ export async function extractSemanticStateEvents(config, {
     { role: 'system', content: `${SEMANTIC_SYSTEM}${auditNote}${focusNote}` },
     { role: 'user', content: `CHẾ ĐỘ GAME: ${mode}\n\nSTATE HIỆN TẠI:\n${JSON.stringify(stateSnapshot ?? {}, null, 2)}\n\nLEDGER ĐÃ ÁP TRONG LƯỢT:\n${JSON.stringify(appliedState ?? {}, null, 2)}\n\nINPUT NGƯỜI CHƠI (chỉ để phân biệt ý định, KHÔNG dùng làm canon):\n${userText}\n\nCHÍNH VĂN CANON CẦN ĐỌC:\n${storyText}` },
   ]
-  let raw = await chatCompletion(config, messages, { temperature: 0.12, maxTokens: 6000 })
+  let raw = await chatCompletion(config, messages, { temperature: 0.12, maxTokens: 6000, debugLabel: `Semantic ${scanMode}${focus?.id ? ` · ${focus.id}` : ''}`, debugRole: scanMode })
   let parsedResponse = parseSemanticStateResponse(raw)
   let repairAttempted = false
   // Provider đôi khi bọc JSON sai, cắt schema hoặc trả lời bằng văn xuôi.
@@ -752,7 +752,7 @@ export async function extractSemanticStateEvents(config, {
       const repairedRaw = await chatCompletion(config, [
         { role: 'system', content: 'Bạn là bộ sửa định dạng. Hãy chuyển nội dung dưới đây thành <STATE_EVENTS> với MỖI event là một JSON object độc lập trên một dòng. Giữ nguyên ý nghĩa, không thêm sự kiện mới. Nếu nội dung nói không có thay đổi thì trả {"events":[]} trong khối. Không giải thích.' },
         { role: 'user', content: String(raw) },
-      ], { temperature: 0, maxTokens: 3500 })
+      ], { temperature: 0, maxTokens: 3500, debugLabel: 'Semantic · format repair', debugRole: 'repair' })
       const repaired = parseSemanticStateResponse(repairedRaw)
       if (repaired.events.length || !repaired.malformed) {
         raw = `${raw}

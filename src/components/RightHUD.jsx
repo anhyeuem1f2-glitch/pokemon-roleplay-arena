@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import SaveModal from './SaveModal.jsx'
 import { useGame } from '../context/GameContext.jsx'
@@ -14,6 +14,8 @@ import PokemonLifeModal from './PokemonLifeModal.jsx'
 import TradeModal from './TradeModal.jsx'
 import { modeAllowsTrading } from '../data/gameModes.js'
 import StoryTagsModal from './StoryTagsModal.jsx'
+import LlmDebugModal from './LlmDebugModal.jsx'
+import { isLlmDebugEnabled, subscribeLlmDebug } from '../services/llmDebug.js'
 
 // ============ CỘT HUD BÊN PHẢI (đợt 26) ============
 // Theo yêu cầu chuyển Cài đặt / Màn hình chính / Bản đồ sang PHẢI (bố cục
@@ -31,6 +33,9 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const [lifeOpen, setLifeOpen] = useState(false)
   const [tradeOpen, setTradeOpen] = useState(false)
   const [storyTagsOpen, setStoryTagsOpen] = useState(false)
+  const [llmDebugOpen, setLlmDebugOpen] = useState(false)
+  const [llmDebugEnabled, setLlmDebugEnabledState] = useState(() => isLlmDebugEnabled())
+  useEffect(() => subscribeLlmDebug(() => setLlmDebugEnabledState(isLlmDebugEnabled())), [])
 
   const region = playerLocation ? getRegion(playerLocation.regionKey) : null
   const area = playerLocation ? getArea(playerLocation.regionKey, playerLocation.areaKey) : null
@@ -150,6 +155,9 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       <div style={{ flex: 1 }} />
 
       {/* Nút hệ thống */}
+      {llmDebugEnabled && <button className="btn" style={{ width: '100%', borderColor: '#c66cff' }} onClick={() => setLlmDebugOpen(true)} title="Xem payload gửi/nhận của các request LLM trong phiên debug">
+        🐞 LLM Debug
+      </button>}
       <button className="btn" style={{ width: '100%' }} onClick={onOpenSettings}>
         ⚙ Cài đặt
       </button>
@@ -173,6 +181,7 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
       {lifeOpen && <PokemonLifeModal onClose={() => setLifeOpen(false)} />}
       {tradeOpen && <TradeModal onClose={() => setTradeOpen(false)} />}
       {storyTagsOpen && <StoryTagsModal onClose={() => setStoryTagsOpen(false)} />}
+      {llmDebugOpen && <LlmDebugModal onClose={() => setLlmDebugOpen(false)} />}
 
       {/* Modal bản đồ đầy đủ */}
       {mapOpen && (

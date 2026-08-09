@@ -2665,7 +2665,7 @@ export default function RoleplayChat() {
         assistantPrefill: assistantPrefill?.trim() || null,
       })
 
-      let reply = await withApiLease(configOverride || apiConfig, () => chatCompletion(configOverride || apiConfig, apiMessages, callOptions))
+      let reply = await withApiLease(configOverride || apiConfig, () => chatCompletion(configOverride || apiConfig, apiMessages, { ...callOptions, debugLabel: 'Main Story', debugRole: 'main-story' }))
       let cleaned = cleanAiOutput(reply, regexScripts)
       // Prompt không phải chốt an toàn đủ mạnh: một số model vẫn biến “đi
       // tìm Ditto” thành gặp Ditto ngay. Nếu bản nháp phá cổng tìm kiếm của
@@ -2678,7 +2678,7 @@ export default function RoleplayChat() {
             ...apiMessages,
             { role: 'assistant', content: reply },
             { role: 'user', content: buildSearchGateCorrection(inputAdjudication) },
-          ], { ...callOptions, assistantPrefill: '' }))
+          ], { ...callOptions, assistantPrefill: '', debugLabel: 'Main Story · search-gate repair', debugRole: 'main-repair' }))
           const revisedCleaned = cleanAiOutput(revised, regexScripts)
           if (revisedCleaned && !responseViolatesSearchGate(revisedCleaned, inputAdjudication)) {
             reply = revised

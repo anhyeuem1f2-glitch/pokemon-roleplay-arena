@@ -1,3 +1,4 @@
+import { startLlmDebugRecord, finishLlmDebugRecord, failLlmDebugRecord } from './llmDebug.js'
 // Client gọi bất kỳ API nào tương thích chuẩn OpenAI /chat/completions
 // (OpenAI, OpenRouter, Groq, local server như LM Studio / text-generation-webui,
 // hoặc các proxy Gemini/Claude giả lập format OpenAI như trong ảnh bạn gửi).
@@ -163,7 +164,7 @@ async function readSseText(res) {
 
 const RETRY_MIN_TOKENS = 16384
 
-export async function chatCompletion(config, messages, options = {}) {
+async function chatCompletionCore(config, messages, options = {}) {
   const { baseUrl, apiKey, model } = config
   if (!baseUrl || !model) {
     throw new Error('Thiếu Base URL hoặc Model. Hãy vào mục Cài đặt API trước.')
@@ -194,7 +195,7 @@ export async function chatCompletion(config, messages, options = {}) {
   // Chỉ bật stream khi ĐI QUA CẦU NỐI (nơi có giới hạn 40s). Gọi trực tiếp
   // giữ nguyên cách cũ để không đụng vào những proxy không hỗ trợ stream.
   const willUseBridge = bridgeNeeded.has(baseUrl) && bridgeAvailable()
-  const { res } = await fetchWithEndpointFallback(baseUrl, 'chat/completions', {
+  const { res, url } = await fetchWithEndpointFallback(baseUrl, 'chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -209,6 +210,12 @@ export async function chatCompletion(config, messages, options = {}) {
     }),
     signal: options.signal,
   })
+  if (options._debugCapture) {
+    options._debugCapture.endpoint = url
+    options._debugCapture.httpStatus = res.status
+    options._debugCapture.responseType = res.headers?.get?.('content-type') ?? ''
+    options._debugCapture.usedBridge = willUseBridge
+  }
 
   if (!res.ok) {
     // Đợt 68: 524 là Cloudflare cắt kết nối vì chờ quá 100 giây — không phải
@@ -224,9 +231,11 @@ export async function chatCompletion(config, messages, options = {}) {
     let detail = ''
     try {
       const errJson = await res.json()
+      if (options._debugCapture) options._debugCapture.rawResponse = errJson
       detail = errJson?.error?.message || JSON.stringify(errJson)
     } catch {
       detail = await res.text()
+      if (options._debugCapture) options._debugCapture.rawResponse = detail
     }
     throw new Error(`Lỗi API (${res.status}): ${detail || res.statusText}`)
   }
@@ -235,6 +244,7 @@ export async function chatCompletion(config, messages, options = {}) {
   const respType = res.headers?.get?.('content-type') ?? ''
   if (respType.includes('text/event-stream')) {
     const streamed = await readSseText(res)
+    if (options._debugCapture) options._debugCapture.rawResponse = streamed
     if (streamed && streamed.trim()) {
       const t = streamed.trim()
       if (prefill && t.startsWith(prefill)) return `${prefill}${t.slice(prefill.length)}`
@@ -242,7 +252,7 @@ export async function chatCompletion(config, messages, options = {}) {
     }
     // Stream rỗng: rơi về nhánh xử lý rỗng bên dưới (có cơ chế thử lại).
     if (!options._retried) {
-      return chatCompletion(config, messages, {
+      return chatCompletionCore(config, messages, {
         ...options,
         maxTokens: Math.max(RETRY_MIN_TOKENS, maxTokens * 4),
         _retried: true,
@@ -252,6 +262,11 @@ export async function chatCompletion(config, messages, options = {}) {
   }
 
   const data = await res.json()
+  if (options._debugCapture) {
+    options._debugCapture.rawResponse = data
+    options._debugCapture.finishReason = data?.choices?.[0]?.finish_reason ?? null
+    options._debugCapture.usage = data?.usage ?? null
+  }
   const choice = data?.choices?.[0]
 
   // Chuẩn hoá nội dung trả về: đa số API trả string ở message.content, nhưng
@@ -278,7 +293,7 @@ export async function chatCompletion(config, messages, options = {}) {
     const canRetry = !options._retried && (finish === 'length' || finish === 'MAX_TOKENS' || hadReasoningOnly)
     if (canRetry) {
       const bumped = Math.max(RETRY_MIN_TOKENS, maxTokens * 4)
-      return chatCompletion(config, messages, { ...options, maxTokens: bumped, _retried: true })
+      return chatCompletionCore(config, messages, { ...options, maxTokens: bumped, _retried: true })
     }
     const reason = finish ? ` (finish_reason: ${finish})` : ''
     const modelHint = /search/i.test(model)
@@ -299,6 +314,61 @@ export async function chatCompletion(config, messages, options = {}) {
     finalText = finalText.slice(prefill.length)
   }
   return prefill ? `${prefill}${finalText}` : finalText
+}
+
+export async function chatCompletion(config, messages, options = {}) {
+  const temperature = options.temperature ?? config?.temperature ?? 0.9
+  const maxTokens = options.maxTokens ?? config?.maxTokens ?? 8192
+  const prefill = options.assistantPrefill?.trim() || ''
+  const debugCapture = {}
+  const debugId = startLlmDebugRecord({
+    config,
+    label: options.debugLabel || (options._retried ? 'LLM retry' : 'LLM request'),
+    request: {
+      model: config?.model ?? '',
+      messages: prefill ? [...(messages ?? []), { role: 'assistant', content: prefill }] : (messages ?? []),
+      temperature,
+      max_tokens: maxTokens,
+      assistantPrefill: prefill || null,
+    },
+    meta: {
+      retried: Boolean(options._retried),
+      debugRole: options.debugRole ?? null,
+    },
+  })
+  try {
+    const response = await chatCompletionCore(config, messages, { ...options, _debugCapture: debugCapture })
+    finishLlmDebugRecord(debugId, {
+      response,
+      rawResponse: debugCapture.rawResponse ?? response,
+      meta: {
+        retried: Boolean(options._retried),
+        debugRole: options.debugRole ?? null,
+        endpoint: debugCapture.endpoint ?? null,
+        httpStatus: debugCapture.httpStatus ?? null,
+        responseType: debugCapture.responseType ?? null,
+        usedBridge: Boolean(debugCapture.usedBridge),
+        finishReason: debugCapture.finishReason ?? null,
+        usage: debugCapture.usage ?? null,
+      },
+    })
+    return response
+  } catch (error) {
+    failLlmDebugRecord(debugId, error, {
+      rawResponse: debugCapture.rawResponse ?? null,
+      meta: {
+        retried: Boolean(options._retried),
+        debugRole: options.debugRole ?? null,
+        endpoint: debugCapture.endpoint ?? null,
+        httpStatus: debugCapture.httpStatus ?? null,
+        responseType: debugCapture.responseType ?? null,
+        usedBridge: Boolean(debugCapture.usedBridge),
+        finishReason: debugCapture.finishReason ?? null,
+        usage: debugCapture.usage ?? null,
+      },
+    })
+    throw error
+  }
 }
 
 /**

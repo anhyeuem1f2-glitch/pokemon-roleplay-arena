@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import ApiSetup from './ApiSetup.jsx'
 import OutcomeApiSection from './OutcomeApiSection.jsx'
@@ -11,6 +11,7 @@ import WikiSection from './WikiSection.jsx'
 import StateApiSection from './StateApiSection.jsx'
 import WorldbookSection from './WorldbookSection.jsx'
 import PokemonToggle from './PokemonToggle.jsx'
+import { isLlmDebugEnabled, setLlmDebugEnabled, subscribeLlmDebug } from '../services/llmDebug.js'
 
 const PRESET_PAGE_SIZE = 8
 
@@ -292,6 +293,9 @@ function CheckAllApis({ apiConfig, outcomeApiConfig, animeApiConfig }) {
 }
 
 export default function SettingsPage({ onBack }) {
+  const [llmDebugEnabled, setLlmDebugEnabledState] = useState(() => isLlmDebugEnabled())
+  useEffect(() => subscribeLlmDebug(() => setLlmDebugEnabledState(isLlmDebugEnabled())), [])
+
   const {
     apiConfig,
     stylePreset,
@@ -342,6 +346,22 @@ export default function SettingsPage({ onBack }) {
             </p>
           </div>
         </div>
+      </div>
+
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h2 className="page-title">Developer · Debug model</h2>
+        <p className="page-subtitle">
+          Dùng khi tester báo lỗi khó tái hiện. Khi bật, HUD có nút 🐞 để xem payload gửi tới LLM, raw response, model/endpoint, thời gian, retry và lỗi. API key không bao giờ được ghi vào log.
+        </p>
+        <PokemonToggle
+          checked={llmDebugEnabled}
+          onChange={(checked) => setLlmDebugEnabled(checked)}
+          label="Bật LLM Debug Modal"
+        />
+        <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '7px 0 0' }}>
+          Log chỉ phục vụ phiên debug hiện tại và tự giới hạn số request để tránh phình bộ nhớ. Tắt debug sẽ xoá log đang giữ.
+        </p>
       </div>
 
       <ApiSetup />

@@ -61,7 +61,7 @@ export async function enrichItemDescription(config, {
   const raw = await chatCompletion(config, [
     { role: 'system', content: system },
     { role: 'user', content: user },
-  ], { temperature: 0.15, maxTokens: 500 })
+  ], { temperature: 0.15, maxTokens: 500, debugLabel: `Item Description · ${name}`, debugRole: 'item-description' })
   return parseMeta(raw)
 }
 

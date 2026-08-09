@@ -30,7 +30,7 @@ async function generateOnce(cfg, args, retry = false) {
   const reply = await chatCompletion(cfg, [
     { role: 'system', content: SYSTEM },
     { role: 'user', content: buildPrompt({ ...args, retry }) },
-  ], { temperature: retry ? 0.55 : 0.75, maxTokens: 550 })
+  ], { temperature: retry ? 0.55 : 0.75, maxTokens: 550, debugLabel: retry ? 'Action Choices · retry' : 'Action Choices', debugRole: 'action-choice' })
   return extractActionChoices(reply)
 }
 

@@ -243,7 +243,7 @@ export async function extractMissingStateTags(cfg, { storyText, appliedTags, has
   const reply = await chatCompletion(cfg, [
     { role: 'system', content: buildSystem(scanMode, focus) },
     { role: 'user', content: user },
-  ], { temperature: 0, maxTokens: 8192 })
+  ], { temperature: 0, maxTokens: 8192, debugLabel: `Legacy State ${scanMode}${focus?.id ? ` · ${focus.id}` : ''}`, debugRole: scanMode })
 
   const result = parseStatePatchResponse(reply, storyText)
   return returnDetails ? result : result.tagsText

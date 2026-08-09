@@ -22,6 +22,7 @@ import { ensurePokemonGender, inferPokemonGenderForMonFromStory } from '../data/
 import { startingMoneyForIdentity } from '../data/identities.js'
 import { normalizeDynamicState } from '../data/dynamicState.js'
 import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
+import { completeSandboxBootstrap, loadSandboxBootstrap } from '../utils/sandboxBootstrap.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -627,6 +628,38 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [trainerId])
+
+  // Đợt 117: Sandbox bootstrap là transaction riêng, không phụ thuộc AI mở đầu.
+  // Nếu UI/React batch/provider lỗi làm party vừa chốt bị hụt trước khi vào
+  // game, manifest pending sẽ bù lại đúng UID/source một lần rồi tự đóng.
+  useEffect(() => {
+    if (!gameStarted || normalizeGameMode(storyTone) !== 'sandbox') return
+    const manifest = loadSandboxBootstrap()
+    if (!manifest || manifest.status !== 'pending' || manifest.trainerId !== trainerId) return
+    const currentParty = [...(party ?? [])]
+    const currentPc = [...(pcBox ?? [])]
+    const hasMon = (mon) => [...currentParty, ...currentPc].some((owned) =>
+      (mon?.uid && owned?.uid === mon.uid)
+      || (mon?.acquisitionSourceId && owned?.acquisitionSourceId === mon.acquisitionSourceId),
+    )
+    let repaired = false
+    for (const expected of [...(manifest.party ?? []), ...(manifest.pc ?? [])]) {
+      if (!expected || hasMon(expected)) continue
+      const wantedInParty = (manifest.party ?? []).some((mon) => mon?.uid === expected.uid || (mon?.acquisitionSourceId && mon.acquisitionSourceId === expected.acquisitionSourceId))
+      if (wantedInParty && currentParty.length < 6) currentParty.push(expected)
+      else currentPc.push(expected)
+      repaired = true
+    }
+    if (repaired) {
+      setParty(currentParty)
+      setPcBox(currentPc)
+      if (!playerMon && currentParty[0]) setPlayerMon(currentParty[0])
+      console.warn('[sandbox-bootstrap] đã phục hồi starter bị hụt trước opening')
+    }
+    completeSandboxBootstrap(trainerId)
+  // manifest chỉ sống ở localStorage; effect cần chạy đúng lúc game bắt đầu hoặc ownership thay đổi.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameStarted, storyTone?.difficulty, trainerId, party, pcBox])
 
   // Ghim chiêu là thuộc tính của đúng cá thể Pokémon và phải đồng bộ ở cả
   // active slot, party lẫn PC để không mất sau khi đổi đội hình hoặc tải lại.

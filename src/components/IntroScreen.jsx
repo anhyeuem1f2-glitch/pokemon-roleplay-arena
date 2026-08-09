@@ -39,6 +39,7 @@ import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyDynamicStateUpdates } from '../data/dynamicState.js'
+import { saveSandboxBootstrap } from '../utils/sandboxBootstrap.js'
 
 // ============ MÀN TẠO NHÂN VẬT v3 — WIZARD 4 TRANG (đợt 34) ============
 // Thiết kế lại toàn bộ theo yêu cầu "bớt phèn": wizard nhiều trang, mọi lựa
@@ -433,11 +434,11 @@ export default function IntroScreen({ onOpenSettings }) {
     if (!keepLevel) setSandboxStarterLevel('5')
   }
 
-  function addSandboxStarter() {
+  function buildSandboxStarterDraft({ quiet = false } = {}) {
     const species = sandboxEffectiveStarterEntry
     if (!species) {
-      setError('Không tìm thấy Pokémon/form này trong Pokédex đã tải. Hãy chọn đúng tên trong danh sách gợi ý.')
-      return
+      if (!quiet) setError('Không tìm thấy Pokémon/form này trong Pokédex đã tải. Hãy chọn đúng tên trong danh sách gợi ý.')
+      return null
     }
     const level = Math.max(1, Math.min(100, Math.floor(Number(sandboxStarterLevel) || 1)))
     const allowedGenders = new Set(sandboxStarterGenderOptions.map((option) => option.value))
@@ -455,7 +456,7 @@ export default function IntroScreen({ onOpenSettings }) {
     const friendshipNumber = sandboxStarterFriendship === ''
       ? null
       : Math.max(0, Math.min(255, Math.floor(Number(sandboxStarterFriendship) || 0)))
-    const starter = {
+    return {
       species: species.name,
       speciesKey: species.species,
       level,
@@ -477,6 +478,26 @@ export default function IntroScreen({ onOpenSettings }) {
       evMode: sandboxStarterEvMode,
       evs,
     }
+  }
+
+  function effectiveSandboxStarterConfigs() {
+    const current = [...sandboxStarters]
+    // UX đợt 117: chọn Pokémon trong builder được coi là một lựa chọn thật.
+    // Nếu người chơi quên nút "+ Thêm Pokémon" rồi bấm Bắt đầu, không được
+    // im lặng bỏ draft và cho vào game tay trắng.
+    if (!sandboxStarterSpecies.trim()) return current
+    const draft = buildSandboxStarterDraft({ quiet: true })
+    if (!draft) return current
+    if (Number.isInteger(editingSandboxStarterIndex) && editingSandboxStarterIndex >= 0 && editingSandboxStarterIndex < current.length) {
+      current[editingSandboxStarterIndex] = draft
+      return current
+    }
+    return [...current, draft]
+  }
+
+  function addSandboxStarter() {
+    const starter = buildSandboxStarterDraft()
+    if (!starter) return
     setSandboxStarters((current) => {
       if (Number.isInteger(editingSandboxStarterIndex) && editingSandboxStarterIndex >= 0 && editingSandboxStarterIndex < current.length) {
         return current.map((entry, index) => index === editingSandboxStarterIndex ? starter : entry)
@@ -484,7 +505,7 @@ export default function IntroScreen({ onOpenSettings }) {
       return [...current, starter]
     })
     resetSandboxStarterDraft({ keepLevel: true })
-    setSandboxStarterLevel(String(level))
+    setSandboxStarterLevel(String(starter.level))
     setError(null)
   }
 
@@ -584,10 +605,15 @@ export default function IntroScreen({ onOpenSettings }) {
     const traits = sanitizeTraitsForMode({ personality, superpower, customPower, perks: [] }, storyTone)
     setPlayerTraits(traits)
     const journeyTrainerId = resetTrainerIdentity()
-    const sandboxOwned = sandboxMode ? sandboxStarters.flatMap((starter, index) => {
+    const committedSandboxStarters = sandboxMode ? effectiveSandboxStarterConfigs() : []
+    const unresolvedSandboxStarters = []
+    const sandboxOwned = sandboxMode ? committedSandboxStarters.flatMap((starter, index) => {
       const entry = pokedexSpecies.find((species) => String(species.species) === String(starter.speciesKey))
         ?? pokedexSpecies.find((species) => species.name.toLowerCase() === String(starter.species).toLowerCase())
-      if (!entry) return []
+      if (!entry) {
+        unresolvedSandboxStarters.push(starter.species || starter.speciesKey || `starter ${index + 1}`)
+        return []
+      }
       const level = Math.max(1, Math.min(100, Math.floor(Number(starter.level) || 1)))
       const built = normalizeAcquiredMon(buildWildMon(entry, level, movesDb))
       const abilities = (() => {
@@ -635,8 +661,17 @@ export default function IntroScreen({ onOpenSettings }) {
         acquisitionSourceId: `sandbox-${journeyTrainerId}:starter:${index}:${entry.species ?? entry.name.toLowerCase()}`,
       }, journeyTrainerId)]
     }) : []
+    if (sandboxMode && unresolvedSandboxStarters.length) {
+      setError(`Không thể dựng Pokémon Sandbox: ${unresolvedSandboxStarters.join(', ')}. Pokédex chưa tải đủ hoặc form đã đổi ID; hãy quay lại trang Sandbox và chọn lại đúng tên.`)
+      return
+    }
+    if (sandboxMode && committedSandboxStarters.length > 0 && sandboxOwned.length !== committedSandboxStarters.length) {
+      setError(`Sandbox starter commit không toàn vẹn (${sandboxOwned.length}/${committedSandboxStarters.length}). Game đã dừng trước opening để không làm mất Pokémon đã chọn.`)
+      return
+    }
     const openingParty = sandboxOwned.slice(0, 6)
     const openingPc = sandboxOwned.slice(6)
+    if (sandboxMode) saveSandboxBootstrap({ trainerId: journeyTrainerId, party: openingParty, pc: openingPc })
     setPlayerMon(openingParty[0] ?? null)
     setParty(openingParty)
     // Sandbox cho phép bao nhiêu starter cũng được; slot 7+ vào PC thay vì
@@ -751,7 +786,7 @@ export default function IntroScreen({ onOpenSettings }) {
       })
       callOptions.assistantPrefill = assistantPrefill
 
-      const reply = await chatCompletion(apiConfig, apiMessages, callOptions)
+      const reply = await chatCompletion(apiConfig, apiMessages, { ...callOptions, debugLabel: 'Main Story · Opening', debugRole: 'main-opening' })
       let actionChoices = extractActionChoices(reply)
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
@@ -1550,6 +1585,9 @@ export default function IntroScreen({ onOpenSettings }) {
                         <button className="btn btn--primary" type="button" onClick={addSandboxStarter}>
                           {editingSandboxStarterIndex !== null ? '✓ Lưu Pokémon' : '+ Thêm Pokémon'}
                         </button>
+                      </div>
+                      <div style={{ fontSize: 9.8, color: 'var(--text-dim)', textAlign: 'right' }}>
+                        Nếu đã chọn Pokémon nhưng quên bấm “+ Thêm Pokémon”, nút Bắt đầu vẫn tự chốt Pokémon đang nằm trên builder.
                       </div>
                     </div>
                   </div>

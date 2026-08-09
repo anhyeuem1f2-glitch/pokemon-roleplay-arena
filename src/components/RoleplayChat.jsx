@@ -646,6 +646,7 @@ export default function RoleplayChat() {
     setWorldProgress,
     dynamicState,
     setDynamicState,
+    chatPreferences,
     trainerId,
   } = useGame()
   const originRegion = getRegion(playerCharacter?.originRegionKey)
@@ -837,6 +838,35 @@ export default function RoleplayChat() {
     return messageIndex
   }
 
+
+  // Đợt 108: MỌI đường xóa transcript đều phải đi qua đây. Trước đó menu
+  // trên ô nhập có một lối tắt chỉ filter() message, khiến state/Pokémon vẫn
+  // sống sau khi chữ đã biến mất và reroll lần sau tạo bản sao.
+  async function rollbackAndCutBranch(triggerIndex, { keepTrigger = false } = {}) {
+    if (triggerIndex < 0 || triggerIndex >= messages.length) return false
+    const trigger = messages[triggerIndex]
+    const branchMessages = messages.slice(triggerIndex)
+    const restoredMessages = keepTrigger ? messages.slice(0, triggerIndex + 1) : messages.slice(0, triggerIndex)
+    latestMessagesRef.current = restoredMessages
+    stateScanLocksRef.current.clear()
+
+    let restored = null
+    if (trigger?.id) restored = await restoreBranchStateCheckpoint(trainerId, trigger.id, restoredMessages)
+    if (!restored) rollbackLegacyBranch(branchMessages)
+
+    setMessages(restoredMessages)
+    const removedStart = keepTrigger ? triggerIndex + 1 : triggerIndex
+    const removedIndexes = [...Array(Math.max(0, messages.length - removedStart))].map((_, offset) => removedStart + offset)
+    await cleanupMemoryFor(removedIndexes, restoredMessages.length)
+    closeIndexBoundUi()
+    if (restored) {
+      // Reload bảo đảm mọi persisted React state đọc lại đúng snapshot, đồng
+      // thời orphan-sweeper ở GameContext dọn những cá thể từ bug đời cũ.
+      window.location.reload()
+    }
+    return true
+  }
+
   // Fallback cho save/tin quá cũ chưa có branch checkpoint. Không thể phục
   // hồi chính xác evolution/level tuyệt đối của lịch sử đời cũ, nhưng ít nhất
   // mọi entity có source id + delta cộng dồn phải được gỡ để không sinh Pokémon
@@ -924,40 +954,15 @@ export default function RoleplayChat() {
     const triggerIndex = findTurnTriggerIndex(i)
     if (triggerIndex < 0) return
     const trigger = messages[triggerIndex]
-    const checkpointId = target.role === 'assistant'
-      ? (target.meta?.branchCheckpointId ?? trigger?.id)
-      : trigger?.id
-    // Xoá output: giữ input để người chơi có thể bấm gửi/reroll lại. Xoá input:
-    // cắt luôn cả lượt. Mọi tin phía sau đều phụ thuộc canon vừa bị cắt nên phải
-    // bỏ cùng nhánh; giữ chúng sẽ tạo một timeline không thể rollback đúng.
     const keepTrigger = target.role === 'assistant' && trigger?.role === 'user'
-    const restoredMessages = keepTrigger ? messages.slice(0, triggerIndex + 1) : messages.slice(0, triggerIndex)
-    const branchMessages = messages.slice(triggerIndex)
-    const removedAssistantCount = branchMessages.filter((message) => message?.role === 'assistant').length
+    const cutCount = messages.length - (keepTrigger ? triggerIndex + 1 : triggerIndex)
+    const removedAssistantCount = messages.slice(triggerIndex).filter((message) => message?.role === 'assistant').length
     const ok = window.confirm(
-      `Xoá ${target.role === 'assistant' ? 'phản hồi này' : 'lượt này'} và cắt ${Math.max(0, messages.length - restoredMessages.length)} tin thuộc nhánh phía sau?\n\n` +
+      `Xoá ${target.role === 'assistant' ? 'phản hồi này' : 'lượt này'} và cắt ${Math.max(0, cutCount)} tin thuộc nhánh phía sau?\n\n` +
       `State của nhánh bị xoá (Pokémon, tiền, vật phẩm, level, vị trí, biến động...) sẽ được hoàn tác. ${removedAssistantCount ? `Có ${removedAssistantCount} phản hồi AI bị loại khỏi canon.` : ''}`,
     )
     if (!ok) return
-
-    // Chặn callback State API đang bay của nhánh cũ trước khi đụng storage.
-    // Mọi callback đều kiểm latestMessagesRef theo source id; đổi ref trước sẽ
-    // khiến kết quả trễ tự bị bỏ thay vì ghi state trở lại sau rollback.
-    latestMessagesRef.current = restoredMessages
-    let restored = null
-    if (checkpointId) restored = await restoreBranchStateCheckpoint(trainerId, checkpointId, restoredMessages)
-    if (!restored) {
-      // Tin đời cũ trước đợt 107: rollback tốt nhất theo source/ledger rồi cắt
-      // nhánh. Không giả vờ rằng xoá chữ là đủ.
-      rollbackLegacyBranch(branchMessages)
-    }
-    // Cập nhật React state ngay, không chỉ localStorage. Action-choice/API nền
-    // đang bay dùng setMessages callback; nếu UI còn giữ transcript cũ vài ms
-    // trước reload, callback đó có thể vô tình ghi lại tin vừa xoá.
-    setMessages(restoredMessages)
-    await cleanupMemoryFor([...Array(messages.length - triggerIndex)].map((_, offset) => triggerIndex + offset), restoredMessages.length)
-    closeIndexBoundUi()
-    if (restored) window.location.reload()
+    await rollbackAndCutBranch(triggerIndex, { keepTrigger })
   }
 
   function openCtxMenuAt(clientX, clientY, i) {
@@ -1014,10 +1019,63 @@ export default function RoleplayChat() {
   const [activeBattleMsgIndex, setActiveBattleMsgIndex] = useState(null)
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
+  const stickToBottomRef = useRef(true)
+  const initialScrollDoneRef = useRef(false)
+  const scrollRafRef = useRef(null)
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false)
+  const [hasNewBelow, setHasNewBelow] = useState(false)
+
+  function chatDistanceFromBottom(el = scrollRef.current) {
+    if (!el) return 0
+    return Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight)
+  }
+
+  function jumpToChatBottom({ behavior = 'smooth', force = true } = {}) {
+    const el = scrollRef.current
+    if (!el) return
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+    scrollRafRef.current = requestAnimationFrame(() => {
+      if (!scrollRef.current) return
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior })
+      if (force) stickToBottomRef.current = true
+      setShowJumpToBottom(false)
+      setHasNewBelow(false)
+      scrollRafRef.current = null
+    })
+  }
+
+  function handleChatScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = chatDistanceFromBottom(el) <= 96
+    stickToBottomRef.current = nearBottom
+    setShowJumpToBottom(!nearBottom)
+    if (nearBottom) setHasNewBelow(false)
+  }
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-  }, [messages, loading])
+    const el = scrollRef.current
+    if (!el) return undefined
+    // Mount/load: đặt xuống cuối đúng MỘT lần, không smooth để tránh hiệu ứng
+    // nhảy 3-4 lần khi các callback nền lần lượt hydrate UI.
+    if (!initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
+      if (chatPreferences?.autoScroll !== false) jumpToChatBottom({ behavior: 'auto' })
+      return undefined
+    }
+    if (chatPreferences?.autoScroll !== false && stickToBottomRef.current) {
+      if (chatDistanceFromBottom(el) > 6) jumpToChatBottom({ behavior: loading ? 'auto' : 'smooth' })
+      else { setShowJumpToBottom(false); setHasNewBelow(false) }
+    } else if (chatDistanceFromBottom(el) > 24) {
+      setShowJumpToBottom(true)
+      setHasNewBelow(true)
+    }
+    return undefined
+  }, [messages, loading, chatPreferences?.autoScroll])
+
+  useEffect(() => () => {
+    if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+  }, [])
 
   function updateCharField(key, val) {
     setCharacter((c) => ({ ...c, [key]: val }))
@@ -3115,7 +3173,18 @@ export default function RoleplayChat() {
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key !== 'Enter' || e.isComposing) return
+    const newlineMode = chatPreferences?.enterBehavior === 'newline'
+    if (newlineMode) {
+      // Mobile-friendly: Enter thực sự xuống dòng. Ctrl/⌘+Enter vẫn gửi nhanh.
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        handleSend()
+      }
+      return
+    }
+    // Desktop mặc định: Enter gửi, Shift+Enter xuống dòng.
+    if (!e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
@@ -3369,10 +3438,12 @@ export default function RoleplayChat() {
       <div className="panel" style={{ marginTop: 16 }}>
         <div
           ref={scrollRef}
+          onScroll={handleChatScroll}
           style={{
             maxHeight: '62vh',
             overflowY: 'auto',
             paddingRight: 6,
+            scrollBehavior: 'smooth',
           }}
         >
           {messages.length === 0 && (
@@ -3686,6 +3757,18 @@ ${m.content}`
             )
           })}
           {loading && <p style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>Đang viết tiếp câu chuyện...</p>}
+          {showJumpToBottom && (
+            <div style={{ position: 'sticky', bottom: 8, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 12 }}>
+              <button
+                className="btn"
+                onClick={() => jumpToChatBottom({ behavior: 'smooth' })}
+                style={{ pointerEvents: 'auto', boxShadow: '0 4px 18px rgba(0,0,0,.35)', borderRadius: 999, padding: '6px 14px' }}
+                title="Quay về tin mới nhất"
+              >
+                ↓ {hasNewBelow ? 'Tin mới' : 'Xuống cuối'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Menu chuột phải trên tin nhắn (đợt 48 — học card PNTT). */}
@@ -3764,16 +3847,12 @@ ${m.content}`
                   label: '↩ Xoá lượt trả lời gần nhất',
                   disabled: loading || lastAiIndex < 0,
                   onClick: () => {
-                    // Xoá cặp cuối: tin người chơi mới nhất + AI trả lời.
                     const ai = lastAiIndex
                     if (ai < 0) return
-                    const idxs = [ai]
-                    if (messages[ai - 1]?.role === 'user') idxs.push(ai - 1)
-                    if (!window.confirm('Xoá lượt gần nhất (bạn + AI)? Ký ức/tóm tắt liên quan cũng được dọn.')) return
-                    const next = messages.filter((_, idx) => !idxs.includes(idx))
-                    setMessages(next)
-                    void cleanupMemoryFor(idxs, next.length)
-                    closeIndexBoundUi()
+                    const triggerIndex = findTurnTriggerIndex(ai)
+                    if (triggerIndex < 0) return
+                    if (!window.confirm('Xoá lượt gần nhất (bạn + AI) và hoàn tác toàn bộ state của lượt đó?')) return
+                    void rollbackAndCutBranch(triggerIndex, { keepTrigger: false })
                   },
                 },
                 {
@@ -3906,7 +3985,9 @@ ${m.content}`
                 y: Math.max(8, Math.min(e.clientY, window.innerHeight - MENU_H - 8)),
               })
             }}
-            placeholder="Bạn làm gì / nói gì tiếp theo? (Enter để gửi, Shift+Enter xuống dòng — chuột phải để xoá nhanh)"
+            placeholder={chatPreferences?.enterBehavior === 'newline'
+              ? 'Bạn làm gì / nói gì tiếp theo? (Enter xuống dòng · Ctrl/⌘+Enter gửi)'
+              : 'Bạn làm gì / nói gì tiếp theo? (Enter gửi · Shift+Enter xuống dòng)'}
             style={{
               flex: 1,
               minHeight: 44,

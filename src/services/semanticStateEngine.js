@@ -7,6 +7,7 @@
 import { chatCompletion } from './aiClient.js'
 import { normalizePokemonGender } from '../data/pokemonGender.js'
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
+import { proseSupportsPokemonAcquisition } from '../utils/stateEvidence.js'
 
 const KIND_ALIASES = {
   money: 'money_change', money_change: 'money_change', payment: 'money_change', income: 'money_change', expense: 'money_change',
@@ -499,6 +500,30 @@ export function enrichNarrativePokemonAppearance(events, storyText, stateSnapsho
     for (const label of [mon.nickname, mon.name, mon.species, mon.pokemonId, mon.uid]) {
       if (label) candidates.set(normalizeSearchText(label), { label: String(label), uid: mon.uid ?? null })
     }
+  }
+
+  // Đợt 108: model semantic đôi khi vừa thấy một Charmander đã có trong
+  // snapshot vừa trả pokemon_acquired chỉ vì câu mới mô tả "Charmander Shiny".
+  // Nếu canon KHÔNG hề có hành vi nhận/bắt/gia nhập mà cá thể cùng loài đã sở
+  // hữu, reinterpret event thành PATCH cho cá thể cũ. Trường hợp thật sự bắt
+  // thêm con thứ hai vẫn qua vì proseSupportsPokemonAcquisition() xác nhận.
+  for (const event of rows) {
+    if (normalizeKind(event.kind ?? event.type) !== 'pokemon_acquired') continue
+    const label = String(event.species ?? event.target ?? event.name ?? '').trim()
+    if (!label || proseSupportsPokemonAcquisition(storyText, label)) continue
+    const key = normalizeSearchText(label)
+    const existing = owned.find((mon) => [mon.nickname, mon.name, mon.species, mon.pokemonId, mon.uid]
+      .filter(Boolean).some((value) => normalizeSearchText(value) === key))
+    if (!existing) continue
+    const details = { ...(event.details ?? {}) }
+    for (const field of ['gender', 'shiny', 'nature', 'ability', 'teraType', 'nickname', 'form', 'friendship']) {
+      if (event[field] != null && details[field] == null) details[field] = event[field]
+    }
+    event.kind = 'pokemon_patch'
+    event.uid = existing.uid ?? event.uid
+    event.target = existing.uid ? undefined : (existing.nickname || existing.name || label)
+    event.details = details
+    event.evidence = event.evidence || `Cập nhật thuộc tính cá thể ${label} đã sở hữu; canon không có hành vi nhận thêm Pokémon.`
   }
 
   for (const candidate of candidates.values()) {

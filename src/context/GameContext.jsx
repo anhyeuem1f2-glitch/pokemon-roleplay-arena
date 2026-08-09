@@ -43,6 +43,23 @@ function dedupePokemonRecords(list) {
   })
 }
 
+function assistantSourceMessageId(mon) {
+  const source = String(mon?.acquisitionSourceId ?? '')
+  if (!source.startsWith('assistant-')) return null
+  const marker = ':pokemon:'
+  const at = source.indexOf(marker)
+  return at > 0 ? source.slice(0, at) : null
+}
+
+const DEFAULT_CHAT_PREFERENCES = Object.freeze({ autoScroll: true, enterBehavior: 'send' })
+function normalizeChatPreferences(value) {
+  const raw = value && typeof value === 'object' ? value : {}
+  return {
+    autoScroll: raw.autoScroll !== false,
+    enterBehavior: raw.enterBehavior === 'newline' ? 'newline' : 'send',
+  }
+}
+
 export function GameProvider({ children }) {
   // Admin Mode chỉ sống trong SESSION hiện tại: không chèn vào save, không
   // theo người chơi sang máy khác và không có URL/query công khai để bật.
@@ -86,6 +103,19 @@ export function GameProvider({ children }) {
     } catch {
       /* localStorage có thể bị chặn (chế độ ẩn danh...) — bỏ qua an toàn */
     }
+  }, [])
+
+
+  // --- Trải nghiệm chat (đợt 108) ---
+  const [chatPreferences, setChatPreferencesState] = useState(() => {
+    try { return normalizeChatPreferences(JSON.parse(localStorage.getItem('trainer-arena:chat-preferences') || 'null')) } catch { return { ...DEFAULT_CHAT_PREFERENCES } }
+  })
+  const setChatPreferences = useCallback((next) => {
+    setChatPreferencesState((cur) => {
+      const resolved = normalizeChatPreferences(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem('trainer-arena:chat-preferences', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
   }, [])
 
   // --- Character card (roleplay) ---
@@ -622,6 +652,30 @@ export function GameProvider({ children }) {
     })
   }, [party, setPcBox])
 
+
+  // Đợt 108: tự dọn Pokémon "ma" từ timeline đã bị xóa ở các bản cũ.
+  // Source starter/intro/trade không có prefix assistant- nên không bị đụng.
+  // Effect chỉ chạy theo transcript để tránh xóa nhầm cá thể trong vài ms giữa
+  // lúc semantic state commit và message assistant được gắn vào mảng chat.
+  useEffect(() => {
+    if (!gameStarted) return
+    const liveMessageIds = new Set((messages ?? []).map((message) => message?.id).filter(Boolean))
+    const isOrphan = (mon) => {
+      const sourceMessageId = assistantSourceMessageId(mon)
+      return Boolean(sourceMessageId && !liveMessageIds.has(sourceMessageId))
+    }
+    const currentParty = party ?? []
+    const currentPc = pcBox ?? []
+    if (!currentParty.some(isOrphan) && !currentPc.some(isOrphan) && !isOrphan(playerMon)) return
+    const nextParty = currentParty.filter((mon) => !isOrphan(mon))
+    const nextPc = currentPc.filter((mon) => !isOrphan(mon))
+    setParty(nextParty)
+    setPcBox(nextPc)
+    if (isOrphan(playerMon)) setPlayerMon(nextParty[0] ?? null)
+    console.warn('[branch-repair] đã loại Pokémon mồ côi không còn source message canon')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, gameStarted])
+
   // --- Tiến trình thế giới có cấu trúc (đợt 87): huy hiệu, nhiệm vụ, phe
   // phái/danh tiếng, luật pháp và truy nã. ---
   const [worldProgress, setWorldProgressState] = useState(() => {
@@ -649,6 +703,23 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+
+  useEffect(() => {
+    if (!gameStarted) return
+    const liveMessageIds = new Set((messages ?? []).map((message) => message?.id).filter(Boolean))
+    setDynamicState((cur) => {
+      const values = cur?.values ?? {}
+      let changed = false
+      const nextValues = {}
+      for (const [key, entry] of Object.entries(values)) {
+        const source = entry?.sourceMessageId
+        if (source && String(source).startsWith('assistant-') && !liveMessageIds.has(source)) { changed = true; continue }
+        nextValues[key] = entry
+      }
+      return changed ? { ...cur, values: nextValues } : cur
+    })
+  }, [messages, gameStarted, setDynamicState])
 
   // Trứng/cắm trại/Contest là state riêng để không nhồi dữ liệu cá thể vào
   // nhật ký nhiệm vụ. Ribbon/Mark vẫn nằm trên chính Pokémon.
@@ -1018,6 +1089,8 @@ export function GameProvider({ children }) {
     lockAdmin,
     apiConfig,
     setApiConfig,
+    chatPreferences,
+    setChatPreferences,
     character,
     setCharacter,
     worldbook,

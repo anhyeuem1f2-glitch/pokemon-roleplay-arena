@@ -306,6 +306,8 @@ export default function SettingsPage({ onBack }) {
     setOutcomeApiConfig,
     memoryApiConfig,
     setMemoryApiConfig,
+    chatPreferences,
+    setChatPreferences,
   } = useGame()
 
   return (
@@ -313,6 +315,34 @@ export default function SettingsPage({ onBack }) {
       <button className="btn" style={{ marginBottom: 16 }} onClick={onBack}>
         ← Quay lại
       </button>
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h2 className="page-title">Trò chuyện & bàn phím</h2>
+        <p className="page-subtitle">
+          Tùy chỉnh cách khung truyện cuộn và phím Enter. Các lựa chọn này thuộc thiết bị, không bị thay khi nạp save khác.
+        </p>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <PokemonToggle
+            checked={chatPreferences?.autoScroll !== false}
+            onChange={(checked) => setChatPreferences((cur) => ({ ...cur, autoScroll: checked }))}
+            label="Tự bám xuống cuối khi đang đọc ở cuối chat"
+          />
+          <div>
+            <label style={{ display: 'block', marginBottom: 6 }}>Phím Enter trong ô nhập</label>
+            <select
+              value={chatPreferences?.enterBehavior === 'newline' ? 'newline' : 'send'}
+              onChange={(e) => setChatPreferences((cur) => ({ ...cur, enterBehavior: e.target.value }))}
+              style={{ width: '100%' }}
+            >
+              <option value="send">Enter = Gửi · Shift+Enter = xuống dòng</option>
+              <option value="newline">Enter = Xuống dòng · Ctrl/⌘+Enter = Gửi</option>
+            </select>
+            <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '6px 0 0' }}>
+              Chế độ xuống dòng phù hợp điện thoại: bấm nút Gửi khi hoàn tất. Trên máy tính vẫn có Ctrl/⌘+Enter để gửi nhanh.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <ApiSetup />
 

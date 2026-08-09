@@ -1,4 +1,4 @@
-import { readLargeCache, writeLargeCache } from './browserCache.js'
+import { deleteLargeCache, readLargeCache, writeLargeCache } from './browserCache.js'
 import { exportArchiveEntries, importArchiveEntries } from './storyArchive.js'
 
 // ============ LƯU / TẢI GAME (đợt 69) ============
@@ -14,6 +14,9 @@ const PREFIX = 'trainer-arena:'
 const SLOT_KEY = 'trainer-arena-saves:v1'
 const SLOT_DB_KEY = 'save-slots:v2'
 const TURN_CHECKPOINT_KEY = 'turn-checkpoint:v1'
+const BRANCH_CHECKPOINT_KEY = 'branch-checkpoint:v1'
+const BRANCH_CHECKPOINT_INDEX_KEY = 'branch-checkpoint-index:v1'
+const MAX_BRANCH_CHECKPOINTS = 96
 export const MAX_SLOTS = 3
 
 // Khoá KHÔNG thuộc ván chơi → không lưu vào save, không ghi đè khi tải.
@@ -57,7 +60,7 @@ export function snapshotGame() {
  * được phép ở lượt cuối nên không cần giữ 2.000 bản sao state. Lưu IndexedDB để
  * party/worldbook lớn không ăn quota localStorage.
  */
-export async function saveTurnCheckpoint(trainerId, baseMessages, userText) {
+export async function saveTurnCheckpoint(trainerId, baseMessages, userText, userMessageId = '') {
   const data = snapshotGame()
   delete data['trainer-arena:messages']
   const payload = {
@@ -66,6 +69,7 @@ export async function saveTurnCheckpoint(trainerId, baseMessages, userText) {
     data,
     baseMessages: Array.isArray(baseMessages) ? baseMessages : [],
     userText: String(userText ?? ''),
+    userMessageId: String(userMessageId ?? ''),
   }
   if (!await writeLargeCache(`${TURN_CHECKPOINT_KEY}:${payload.trainerId}`, payload)) {
     throw new Error('Không tạo được checkpoint an toàn cho lượt mới; hãy giải phóng bộ nhớ trình duyệt rồi thử lại.')
@@ -80,9 +84,69 @@ export async function restoreTurnCheckpoint(trainerId, replacementUserText = nul
   if (Number.isInteger(expectedUserIndex) && (checkpoint.baseMessages?.length ?? 0) !== expectedUserIndex) return null
   applySnapshot(checkpoint.data)
   const userText = replacementUserText === null ? checkpoint.userText : String(replacementUserText)
-  const restoredMessages = [...(checkpoint.baseMessages ?? []), { role: 'user', content: userText }]
+  const restoredMessages = [...(checkpoint.baseMessages ?? []), { ...(checkpoint.userMessageId ? { id: checkpoint.userMessageId } : {}), role: 'user', content: userText }]
   try { localStorage.setItem('trainer-arena:messages', JSON.stringify(restoredMessages)) } catch { /* storageOptimizer sẽ xử lý lại sau reload */ }
   return { ...checkpoint, userText, restoredMessages }
+}
+
+/**
+ * Checkpoint lịch sử cho từng NHÁNH chat. Khác TURN_CHECKPOINT (chỉ giữ lượt
+ * cuối để reroll), checkpoint này chỉ chụp STATE game trước khi gửi một input
+ * và KHÔNG nhân bản transcript. Nhờ vậy xoá/reroll một nhánh có thể hoàn tác
+ * Pokémon/tiền/item/world state thay vì chỉ xoá chữ khỏi màn hình.
+ *
+ * Để IndexedDB không phình vô hạn, chỉ giữ 96 checkpoint gần nhất mỗi trainer.
+ * Save cũ hơn vẫn có fallback source-ledger, nhưng mọi lượt mới đều rollback
+ * chính xác trong cửa sổ này.
+ */
+export async function saveBranchStateCheckpoint(trainerId, turnId) {
+  const trainer = String(trainerId ?? '')
+  const id = String(turnId ?? '').trim()
+  if (!trainer || !id) return false
+  const data = snapshotGame()
+  delete data['trainer-arena:messages']
+  const key = `${BRANCH_CHECKPOINT_KEY}:${trainer}:${id}`
+  const payload = { trainerId: trainer, turnId: id, savedAt: Date.now(), data }
+  if (!await writeLargeCache(key, payload)) return false
+
+  const indexKey = `${BRANCH_CHECKPOINT_INDEX_KEY}:${trainer}`
+  const existing = await readLargeCache(indexKey)
+  const rows = Array.isArray(existing) ? existing.filter((row) => row?.turnId !== id) : []
+  rows.push({ turnId: id, savedAt: payload.savedAt })
+  rows.sort((a, b) => Number(a.savedAt) - Number(b.savedAt))
+  while (rows.length > MAX_BRANCH_CHECKPOINTS) {
+    const old = rows.shift()
+    if (old?.turnId) await deleteLargeCache(`${BRANCH_CHECKPOINT_KEY}:${trainer}:${old.turnId}`)
+  }
+  await writeLargeCache(indexKey, rows)
+  return true
+}
+
+/** Khôi phục state trước một input nhưng để caller quyết định transcript giữ lại. */
+export async function restoreBranchStateCheckpoint(trainerId, turnId, restoredMessages = null) {
+  const trainer = String(trainerId ?? '')
+  const id = String(turnId ?? '').trim()
+  if (!trainer || !id) return null
+  const checkpoint = await readLargeCache(`${BRANCH_CHECKPOINT_KEY}:${trainer}:${id}`)
+  if (!checkpoint || checkpoint.trainerId !== trainer || checkpoint.turnId !== id) return null
+  applySnapshot(checkpoint.data)
+  if (Array.isArray(restoredMessages)) {
+    try { localStorage.setItem('trainer-arena:messages', JSON.stringify(restoredMessages)) } catch { /* reload sẽ đọc bản đã persist được */ }
+  }
+  return checkpoint
+}
+
+export async function deleteBranchStateCheckpoint(trainerId, turnId) {
+  const trainer = String(trainerId ?? '')
+  const id = String(turnId ?? '').trim()
+  if (!trainer || !id) return false
+  const ok = await deleteLargeCache(`${BRANCH_CHECKPOINT_KEY}:${trainer}:${id}`)
+  const indexKey = `${BRANCH_CHECKPOINT_INDEX_KEY}:${trainer}`
+  const existing = await readLargeCache(indexKey)
+  if (Array.isArray(existing)) {
+    await writeLargeCache(indexKey, existing.filter((row) => row?.turnId !== id))
+  }
+  return ok
 }
 
 /** Thông tin tóm tắt để hiển thị trên ô save (như màn hình save game gốc). */

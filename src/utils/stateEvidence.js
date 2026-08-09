@@ -345,8 +345,8 @@ const TIME_PASS = ['ngày trôi qua', 'đêm trôi qua', 'sáng hôm sau', 'qua 
 const TIME_TRANSITION = ['đã sang', 'chuyển sang', 'trời đã', 'khi trời', 'lúc này là', 'bây giờ là', 'sáng hôm sau']
 const TRAINING = ['luyện tập', 'huấn luyện', 'tập luyện', 'tập chiêu', 'đối luyện', 'chạy bền', 'khổ luyện', 'tập thể lực']
 const CENTER_INSIDE = ['bước vào trung tâm pokemon', 'đi vào trung tâm pokemon', 'bên trong trung tâm pokemon', 'đứng trước quầy y tá', 'y tá joy chào']
-const MONEY_CONTEXT = ['tiền', 'tiền mặt', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng', 'tổng cộng', 'tổng tiền', 'hóa đơn', 'hoá đơn', 'thành tiền', 'số tiền', 'số dư', 'thanh toán', 'trả tiền', 'chi tiền', 'tiền thưởng', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'máy pos', 'pos', 'thẻ', 'ghi có', 'ghi nợ']
-const MONEY_GAIN = ['nhận tiền', 'nhận khoản', 'nhận được', 'được nhận', 'gửi khoản hỗ trợ', 'gửi tiền vào', 'gửi vào tài khoản', 'được thưởng', 'thưởng cho', 'kiếm được', 'được trả công', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển vào', 'chuyển đến', 'tiền vào', 'chuyển tiền vào', 'chuyển khoản vào', 'gia tộc gửi', 'gia đình gửi', 'được gửi', 'ứng tiền', 'giải ngân cho', 'ghi có', 'cộng vào', 'số dư tăng', 'tài khoản tăng']
+const MONEY_CONTEXT = ['tiền', 'tiền mặt', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng', 'tổng cộng', 'tổng tiền', 'hóa đơn', 'hoá đơn', 'thành tiền', 'số tiền', 'số dư', 'thanh toán', 'trả tiền', 'chi tiền', 'tiền thưởng', 'phần thưởng', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'máy pos', 'pos', 'thẻ', 'ghi có', 'ghi nợ']
+const MONEY_GAIN = ['nhận tiền', 'nhận khoản', 'nhận được', 'được nhận', 'gửi khoản hỗ trợ', 'gửi tiền vào', 'gửi vào tài khoản', 'được thưởng', 'thưởng cho', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'nhận thưởng', 'nhận phần thưởng', 'phần thưởng được trao', 'tiền thưởng được trao', 'được trao', 'đã trao', 'kiếm được', 'được trả công', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển vào', 'chuyển đến', 'tiền vào', 'chuyển tiền vào', 'chuyển khoản vào', 'gia tộc gửi', 'gia đình gửi', 'được gửi', 'ứng tiền', 'giải ngân cho', 'ghi có', 'cộng vào', 'số dư tăng', 'tài khoản tăng']
 const MONEY_LOSS = ['trả', 'đã trả', 'chuyển tiền cho', 'chuyển khoản đi', 'thanh toán', 'đã thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'đưa cho', 'đặt tiền', 'đặt lên quầy', 'khấu trừ', 'bị trừ', 'trừ đi', 'trừ khỏi', 'quẹt thẻ', 'quẹt', 'thẻ bị trừ', 'ghi nợ', 'số dư giảm', 'tài khoản giảm']
 const SHOP_SELECT_ITEM = ['mua', 'lấy', 'lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'đơn hàng', 'giỏ hàng', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe']
 const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'giao dịch thành công', 'giao dịch hoàn tất', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'trừ khỏi', 'thẻ bị trừ', 'máy pos xác nhận', 'máy pos báo', 'nhận hóa đơn', 'xuất hóa đơn']
@@ -520,7 +520,7 @@ function completedMoneyClauseAmount(text, direction) {
     const total = anchoredMoneyAmount(clause, MONEY_TOTAL_MARKERS, amounts)
     if (total) return total
     const actionMarkers = direction > 0
-      ? ['nhận tiền', 'nhận khoản', 'được thưởng', 'trả công', 'hoàn tiền', 'thu về', 'chuyển vào', 'ghi có', 'cộng vào']
+      ? ['nhận tiền', 'nhận khoản', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'trả công', 'hoàn tiền', 'thu về', 'chuyển vào', 'ghi có', 'cộng vào']
       : ['trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền', 'bị trừ', 'khấu trừ', 'quẹt thẻ', 'chuyển khoản']
     const actionAnchor = anchoredMoneyAmount(clause, actionMarkers, amounts)
     if (actionAnchor) return actionAnchor
@@ -530,7 +530,7 @@ function completedMoneyClauseAmount(text, direction) {
     if (explicit.length === 1) return explicit[0]
     if (!explicit.length && amounts.length === 1 && hasAny(clause, [
       'trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền',
-      'bị trừ', 'khấu trừ', 'chuyển khoản', 'nhận tiền', 'được thưởng', 'ghi có',
+      'bị trừ', 'khấu trừ', 'chuyển khoản', 'nhận tiền', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'ghi có',
     ])) return amounts[0]
   }
   return null
@@ -1042,6 +1042,7 @@ export function validateStateAgainstProse(parsed, storyText, options = {}) {
     return ok
   })
   next.badges = (parsed?.badges ?? []).filter((entry) => {
+    if (entry?.semantic || entry?.canon) return true
     const ok = linkedSentenceEvidence(prose, entry.name, ['huy hiệu', 'badge', 'trao', 'nhận được', 'được tặng'])
     if (!ok) reject(rejected, 'badge', entry, `chính văn chưa xác nhận đã được trao huy hiệu ${entry.name}`)
     return ok

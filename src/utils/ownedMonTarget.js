@@ -45,8 +45,9 @@ function monTargetScore(mon, target, activeMon = null) {
   const names = [mon.name, mon.species, mon.nickname, mon.displayName]
     .map(normalizeMonTarget)
     .filter(Boolean)
+  const ids = [mon.uid, mon.pokemonId].map(normalizeMonTarget).filter(Boolean)
 
-  let best = -1
+  let best = ids.includes(wanted) ? 1200 : -1
   for (const name of names) {
     if (wanted === name) best = Math.max(best, 900)
     else if (wanted.includes(name)) best = Math.max(best, 700 + Math.min(100, name.length))

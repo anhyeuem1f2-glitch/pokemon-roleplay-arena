@@ -1,3 +1,19 @@
+## Đợt 117 — LLM Debug Modal + Sandbox Starter Transaction
+
+- Thêm **Developer · LLM Debug Modal** (mặc định tắt): bật trong Cài đặt, sau đó HUD xuất hiện nút `🐞 LLM Debug`. Modal ghi lại theo thời gian thực model/endpoint, loại tác vụ, payload messages gửi đi, output app dùng, raw response, finish reason/usage, thời gian, bridge và lỗi. **Không ghi API key**. Log chỉ sống trong phiên debug và giới hạn 80 request.
+- `chatCompletion` trở thành điểm trace trung tâm nên Main Story, Semantic Extractor/Auditor/focus pass, legacy state compatibility, Action Choices và Item Description đều đi qua cùng debug pipeline. Các request quan trọng có label riêng để tester nhìn là biết model nào đang làm việc gì.
+- Sửa Sandbox chọn Pokémon nhưng vào game tay trắng: Pokémon hợp lệ đang nằm trên builder được **tự chốt khi bấm Bắt đầu**, kể cả người chơi quên `+ Thêm Pokémon`. Khi sửa một starter mà quên `✓ Lưu Pokémon`, cấu hình đang mở cũng được dùng làm bản cuối.
+- Không còn `flatMap -> []` im lặng nếu starter/form không resolve được. Màn tạo nhân vật dừng trước opening và báo chính xác Pokémon lỗi thay vì cho người chơi vào game mất đội hình.
+- Thêm **Sandbox bootstrap manifest** lưu đúng UID/provenance của starter trước khi gọi LLM mở đầu. Khi game mount, GameContext kiểm tra manifest pending và tự phục hồi starter bị hụt vào Party/PC đúng một lần, rồi đánh dấu complete để không hồi sinh Pokémon mà người chơi chủ động thả/trao đổi về sau.
+- Bổ sung `test-dot117.mjs`: **10/10 PASS**. Toàn bộ regression đợt 73 → 117 PASS.
+
+### File cần cập nhật lên GitHub sau đợt 117
+
+- `src/` (toàn bộ — có file mới `components/LlmDebugModal.jsx`, `services/llmDebug.js`, `utils/sandboxBootstrap.js`)
+- `README.md`
+
+Không cần cập nhật `public/`, `package.json`, `package-lock.json`, deploy config hay các file `test-dot*.mjs`.
+
 # Trainer Arena — Roleplay × Battle Engine
 
 

@@ -17,7 +17,7 @@ import { cleanAiOutput, extractPresetUiVariables, extractStateTags, extractThink
 import { extractActionChoices } from '../utils/actionChoices.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
-import { buildMonSmart, buildWildMon, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, normalizeAcquiredMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements, recomputeMonStats } from '../data/pokemonSpecies.js'
+import { buildMonSmart, buildWildMon, detectBattleOpponentSpecies, detectBattleOpponentSpeciesList, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, normalizeAcquiredMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements, recomputeMonStats } from '../data/pokemonSpecies.js'
 import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { detectMentionedArea, randomWildLevel } from '../data/regions.js'
 import { wildLevel, receivedMonLevel, trainerBattleLevel } from '../data/levelLogic.js'
@@ -1020,6 +1020,11 @@ export default function RoleplayChat() {
   const scrollRef = useRef(null)
   const fileInputRef = useRef(null)
   const stickToBottomRef = useRef(true)
+  // Đợt 110: một khi người chơi chủ động kéo LÊN đọc lịch sử, khóa auto-follow
+  // cho tới khi họ tự trở lại sát đáy hoặc bấm nút ↓. Điều này chặn action
+  // choices/state audit/background callbacks kéo màn hình xuống vài giây/lần.
+  const manualScrollLockRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
   const initialScrollDoneRef = useRef(false)
   const scrollRafRef = useRef(null)
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
@@ -1036,21 +1041,41 @@ export default function RoleplayChat() {
     if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
     scrollRafRef.current = requestAnimationFrame(() => {
       if (!scrollRef.current) return
+      if (force) {
+        manualScrollLockRef.current = false
+        stickToBottomRef.current = true
+      }
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior })
-      if (force) stickToBottomRef.current = true
+      lastScrollTopRef.current = scrollRef.current.scrollTop
       setShowJumpToBottom(false)
       setHasNewBelow(false)
       scrollRafRef.current = null
     })
   }
 
+  function detachChatAutoScroll() {
+    manualScrollLockRef.current = true
+    stickToBottomRef.current = false
+    setShowJumpToBottom(true)
+  }
+
   function handleChatScroll() {
     const el = scrollRef.current
     if (!el) return
+    const currentTop = el.scrollTop
+    const movedUp = currentTop < lastScrollTopRef.current - 2
     const nearBottom = chatDistanceFromBottom(el) <= 96
-    stickToBottomRef.current = nearBottom
-    setShowJumpToBottom(!nearBottom)
-    if (nearBottom) setHasNewBelow(false)
+    const trulyAtBottom = chatDistanceFromBottom(el) <= 12
+
+    // Bất kỳ chuyển động lên nào cũng được coi là ý định đọc lịch sử. Không
+    // auto-unlock chỉ vì người dùng vẫn còn nằm trong vùng 96px gần đáy.
+    if (movedUp) manualScrollLockRef.current = true
+    if (trulyAtBottom && !movedUp) manualScrollLockRef.current = false
+
+    stickToBottomRef.current = nearBottom && !manualScrollLockRef.current
+    lastScrollTopRef.current = currentTop
+    setShowJumpToBottom(!trulyAtBottom || manualScrollLockRef.current)
+    if (trulyAtBottom && !manualScrollLockRef.current) setHasNewBelow(false)
   }
 
   useEffect(() => {
@@ -1063,10 +1088,12 @@ export default function RoleplayChat() {
       if (chatPreferences?.autoScroll !== false) jumpToChatBottom({ behavior: 'auto' })
       return undefined
     }
-    if (chatPreferences?.autoScroll !== false && stickToBottomRef.current) {
-      if (chatDistanceFromBottom(el) > 6) jumpToChatBottom({ behavior: loading ? 'auto' : 'smooth' })
+    if (chatPreferences?.autoScroll !== false && stickToBottomRef.current && !manualScrollLockRef.current) {
+      // Background callbacks (action choices/state audit) dùng auto thay vì smooth:
+      // không tạo cảm giác thanh cuộn tự chạy nhiều lần. Nút ↓ vẫn smooth.
+      if (chatDistanceFromBottom(el) > 6) jumpToChatBottom({ behavior: 'auto' })
       else { setShowJumpToBottom(false); setHasNewBelow(false) }
-    } else if (chatDistanceFromBottom(el) > 24) {
+    } else if (chatDistanceFromBottom(el) > 24 || manualScrollLockRef.current) {
       setShowJumpToBottom(true)
       setHasNewBelow(true)
     }
@@ -1826,6 +1853,21 @@ export default function RoleplayChat() {
       }
 
       const validItemChanges = itemChanges.filter((x) => x.entry && (x.qty !== 0 || x.absorbedByEquip > 0 || x.absorbedByEvolution > 0))
+
+      // Đợt 109: commit phần TÚI ngay sau khi tính xong item/loot/evolution.
+      // Trước đây report đã ghi “✅ Nhận vật phẩm” nhưng setInventory nằm tận
+      // sau vòng EQUIP/DATE. Chỉ cần một directive phía sau ném exception là
+      // audit vẫn báo ĐÃ ÁP trong khi React/localStorage chưa nhận inventory.
+      // Commit checkpoint này làm report và state thật không còn lệch nhau;
+      // EQUIP nếu có sẽ tiếp tục từ chính snapshot vừa commit rồi commit lần 2.
+      const baseInventoryChanged = validItemChanges.length > 0 || evolutionDebits.size > 0 || lootChanged
+      if (baseInventoryChanged) {
+        const committedInventory = syncTraitGrantedItems(previewInventory, playerTraits)
+        setInventory(committedInventory)
+        latestInventoryRef.current = committedInventory
+        previewInventory = [...committedInventory]
+      }
+
       let equipmentChanged = false
 
       const addPreviewItem = (entry) => {
@@ -1834,9 +1876,9 @@ export default function RoleplayChat() {
         else previewInventory.push({ id: entry.id, name: entry.name, qty: 1 })
       }
 
-      // Trang bị được áp SAU [[ITEM]] để một lượt “nhận rồi đeo” hoạt động
-      // đúng. Toàn bộ túi + đội được tính trước rồi set một lần, tránh updater
-      // bất đồng bộ làm nhân đôi vật phẩm hoặc đeo xong nhưng túi không trừ.
+      // Trang bị được áp SAU ITEM để một lượt “nhận rồi đeo” hoạt động
+      // đúng. Inventory nền đã commit ở checkpoint phía trên; EQUIP tiếp tục
+      // trên snapshot đó và chỉ commit phần chênh lệch trang bị lần hai.
       for (const directive of parsed.equipment ?? []) {
         const targetMon = resolveOwned(directive.target)
         if (!targetMon) {
@@ -1899,7 +1941,7 @@ export default function RoleplayChat() {
         markLedger('equipment', directive)
       }
 
-      if (validItemChanges.length > 0 || equipmentChanged || evolutionDebits.size > 0 || lootChanged) {
+      if (equipmentChanged) {
         const finalInventory = syncTraitGrantedItems(previewInventory, playerTraits)
         setInventory(finalInventory)
         setParty(previewParty)
@@ -3439,11 +3481,19 @@ export default function RoleplayChat() {
         <div
           ref={scrollRef}
           onScroll={handleChatScroll}
+          onWheel={(e) => { if (e.deltaY < 0) detachChatAutoScroll() }}
+          onTouchMove={() => {
+            // Scroll event phía sau sẽ xác định hướng; đánh dấu sớm để callback
+            // nền cùng frame không giật màn hình trên mobile.
+            if (chatDistanceFromBottom() > 12) detachChatAutoScroll()
+          }}
           style={{
             maxHeight: '62vh',
             overflowY: 'auto',
             paddingRight: 6,
-            scrollBehavior: 'smooth',
+            // Không dùng CSS smooth toàn cục: các state callback trước đây khiến
+            // browser nối nhiều animation và nhìn như thanh trượt tự chạy.
+            overflowAnchor: 'none',
           }}
         >
           {messages.length === 0 && (
@@ -3532,7 +3582,15 @@ ${m.content}`
                   if (!m.battleStarted) {
                     const ownNames = [...(party ?? []).map((pm) => pm?.name), playerMon?.name].filter(Boolean)
                     const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
-                    const mentioned = detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
+                    const activeMentionedList = detectBattleOpponentSpeciesList(m.content, pokedexSpecies, { excludeNames: ownNames })
+                      .concat(detectBattleOpponentSpeciesList(previousUserText, pokedexSpecies, { excludeNames: ownNames }))
+                      .filter((entry, index, list) => list.findIndex((other) => other.name === entry.name) === index)
+                    // Đợt 111: ưu tiên Pokémon có cue “xuất trận/ra sân/đối thủ”;
+                    // Pokémon đứng xem/khán đài không được biến thành combatant chỉ
+                    // vì tên của nó xuất hiện muộn hơn trong chính văn.
+                    const battleOpponent = detectBattleOpponentSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
+                      || detectBattleOpponentSpecies(battleSource, pokedexSpecies, { excludeNames: ownNames })
+                    const mentioned = battleOpponent || detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
                     const ecologyOptions = {
                       pokedex: pokedexSpecies,
                       location: playerLocation,
@@ -3598,7 +3656,7 @@ ${m.content}`
                       // sinh thêm đối thủ khác, nhưng không dùng Pokémon phe mình.
                       const picked = persistentRoster.length
                         ? [0, 1].map((offset) => persistentRoster[(persistentStart + offset) % persistentRoster.length]?.entry).filter(Boolean)
-                        : mentionedList.slice(-2)
+                        : (activeMentionedList.length ? activeMentionedList.slice(0, 2) : mentionedList.slice(-2))
                       const lockedEntry = picked.find((entry) => !legendaryAccess(entry, worldProgress, storyTone, adminMode).allowed)
                       if (lockedEntry) {
                         const locked = legendaryAccess(lockedEntry, worldProgress, storyTone, adminMode)

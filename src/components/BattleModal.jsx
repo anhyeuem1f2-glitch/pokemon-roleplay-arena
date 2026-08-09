@@ -2,15 +2,14 @@ import React, { useState, useRef, useMemo, useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
-import { getEffectivenessMulti } from '../data/pokemonTypes.js'
+import { ALL_TYPES, getEffectivenessMulti, TYPE_COLORS, TYPE_ICONS, TYPE_LABELS } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
-import { buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, sortMovesForDisplay, syncMonInParty } from '../data/pokemonSpecies.js'
+import { pokemonDisplayName, buildWildMon, describeNatureBehavior, isSameMon, normalizeAcquiredMon, recomputeMonStats, sortMovesForDisplay, syncMonInParty } from '../data/pokemonSpecies.js'
 import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import { getBossTier } from '../data/bossTiers.js'
 import { applyPerksToMon, catchRateBonus } from '../data/playerPerks.js'
 import { musicManager } from '../utils/musicManager.js'
 import { resolveBattleTrackKeys, resolveLowHpTrackKeys, LOW_HP_RATIO } from '../data/musicTracks.js'
-import { TYPE_COLORS } from '../data/pokemonTypes.js'
 import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
 import HealthBar from './HealthBar.jsx'
 import TypeBadge from './TypeBadge.jsx'
@@ -168,7 +167,7 @@ function StatusCard({ mon, align, stages }) {
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-        <strong style={{ fontSize: 13 }}>{mon.shiny ? '✨ ' : ''}{mon.name}</strong>
+        <strong style={{ fontSize: 13 }}>{mon.shiny ? '✨ ' : ''}{pokemonDisplayName(mon)}</strong>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--text-mid)' }}>
           Lv.{mon.level}
         </span>
@@ -431,6 +430,9 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
   const [zArmed, setZArmed] = useState(false) // đã bấm Z → chọn 1 trong 4 chiêu để phóng bản Z
   const [dynaTurnsLeft, setDynaTurnsLeft] = useState(initialBattleState?.dynaTurnsLeft ?? 0)
   const [megaPickOpen, setMegaPickOpen] = useState(false) // loài có 2 mega (X/Y) → hỏi chọn
+  // Đợt 110: Tera Orb chỉ mở quyền Terastalize; HỆ TERA của trận do chính
+  // người chơi chọn lúc bấm Tera, không auto dùng teraType/default của Showdown.
+  const [teraPickOpen, setTeraPickOpen] = useState(false)
   const preGimmickRef = useRef(initialBattleState?.preGimmick ? { ...initialBattleState.preGimmick } : null) // bản gốc playerMon trước khi biến hình — để trả về khi hết trận
 
   // Khi Ẩn giữa Mega/Dynamax/Tera, context đã được trả về dạng gốc để HUD
@@ -623,15 +625,18 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     if (left <= 0) endDynamax()
   }
 
-  // TERASTAL: kết tinh về HỆ CHÍNH của loài (đúng cơ chế: STAB hệ tera trùng
-  // hệ gốc = x2.0, hệ gốc còn lại vẫn 1.5) — cả phòng thủ cũng đổi theo hệ mới.
-  function doTera() {
+  // TERASTAL đợt 110: Tera Orb KHÔNG tự quyết định hệ. Người chơi chọn
+  // một trong 18 hệ ngay lúc kích hoạt. `playerMon.teraType` vẫn là thuộc tính
+  // cá thể/canon để hiển thị ngoài trận, nhưng không ép lựa chọn battle này.
+  function doTera(chosenType) {
+    const teraType = String(chosenType ?? '').toLowerCase()
+    if (!ALL_TYPES.includes(teraType)) return
     backupOnce()
-    const teraType = playerMon.teraType || playerMon.types[0]
-    setPlayerMon((m) => ({ ...m, tera: teraType, origTypes: m.types, types: teraType === 'stellar' ? m.types : [teraType] }))
+    setPlayerMon((m) => ({ ...m, tera: teraType, origTypes: m.types, types: [teraType] }))
     setGimmickUsed('tera')
+    setTeraPickOpen(false)
     setGimmickOpen(false)
-    pushLog(`✦ ${playerMon.name} TERASTAL — kết tinh hệ ${teraType.toUpperCase()}! (STAB hệ này x2)`)
+    pushLog(`✦ ${playerMon.name} TERASTAL — bạn chọn hệ ${TYPE_LABELS[teraType] ?? teraType.toUpperCase()}!`)
   }
 
   // Trả mọi biến hình về bản gốc khi rời trận (Mega/Dyna/Tera đều chỉ tồn tại
@@ -1758,7 +1763,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, minHeight: 38, paddingLeft: 46 }}>
               <GimmickFan
                 open={gimmickOpen}
-                onToggle={() => { setGimmickOpen((o) => !o); setMegaPickOpen(false) }}
+                onToggle={() => { setGimmickOpen((o) => !o); setMegaPickOpen(false); setTeraPickOpen(false) }}
                 used={gimmickUsed}
                 busy={busy || battleOver}
                 options={{
@@ -1789,9 +1794,13 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                   },
                   tera: {
                     available: devUnlockGimmicks || trainerHasGear(inventory, 'tera'),
-                    reason: 'cần Tera Orb (chỉ có ở Paldea) — chưa có trong túi',
-                    color: TYPE_COLORS[playerMon.teraType ?? playerMon.types[0]] ?? '#5fd7e8',
-                    onPick: doTera,
+                    reason: 'cần Tera Orb — chưa có trong túi',
+                    color: '#5fd7e8',
+                    onPick: () => {
+                      setTeraPickOpen(true)
+                      setMegaPickOpen(false)
+                      setGimmickOpen(false)
+                    },
                   },
                 }}
               />
@@ -1819,6 +1828,54 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                   )
                 })}
                 <button className="btn" style={{ fontSize: 11 }} onClick={() => setMegaPickOpen(false)}>✕</button>
+              </div>
+            )}
+            {teraPickOpen && !gimmickUsed && (
+              <div
+                className="panel"
+                style={{
+                  position: 'absolute', top: 40, left: 0, zIndex: 8, padding: 10,
+                  width: 'min(430px, calc(100vw - 42px))', maxHeight: '55vh', overflowY: 'auto',
+                  boxShadow: '0 12px 36px rgba(0,0,0,.55)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11, color: 'var(--mint)' }}>💎 CHỌN HỆ TERA</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 2 }}>Tera Orb cho phép bạn tự chọn 1 trong 18 hệ cho lần Terastalize này.</div>
+                  </div>
+                  <button className="btn" style={{ fontSize: 11, padding: '4px 8px' }} onClick={() => setTeraPickOpen(false)}>✕</button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(88px, 1fr))', gap: 6 }}>
+                  {ALL_TYPES.map((type) => {
+                    const color = TYPE_COLORS[type] ?? '#888'
+                    return (
+                      <button
+                        key={type}
+                        className="btn"
+                        onClick={() => doTera(type)}
+                        title={`Terastalize thành hệ ${TYPE_LABELS[type] ?? type}`}
+                        style={{
+                          minHeight: 44, padding: '6px 8px', borderColor: color,
+                          boxShadow: `inset 0 0 0 1px ${color}44`,
+                          display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start',
+                        }}
+                      >
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            width: 25, height: 25, borderRadius: '50%', background: color, color: '#fff',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: '0 0 auto',
+                            fontSize: 13, textShadow: '0 1px 2px rgba(0,0,0,.45)',
+                          }}
+                        >
+                          {TYPE_ICONS[type] ?? '◆'}
+                        </span>
+                        <span style={{ fontSize: 10.5, fontWeight: 700 }}>{TYPE_LABELS[type] ?? type}</span>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8, maxHeight: '38vh', overflowY: 'auto', paddingRight: 3 }}>
@@ -1948,13 +2005,13 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
           <div>
             {mustSwitch && (
               <div className="status-pill status-pill--error" style={{ display: 'block', marginBottom: 8 }}>
-                {playerMon.name} đã gục — hãy chọn Pokémon khác ra trận (không tốn lượt).
+                {pokemonDisplayName(playerMon)} đã gục — hãy chọn Pokémon khác ra trận (không tốn lượt).
               </div>
             )}
             {/* Đợt 68: đổi Pokémon THẬT (trước đây chỉ báo "đang phát triển"). */}
             {(party ?? []).filter((pm) => !isSameMon(pm, playerMon)).length === 0 ? (
               <p style={{ fontSize: 12.5, color: 'var(--text-dim)', margin: '4px 0 12px' }}>
-                {playerMon.name} là Pokémon duy nhất trong đội — chưa có ai để đổi.
+                {pokemonDisplayName(playerMon)} là Pokémon duy nhất trong đội — chưa có ai để đổi.
               </p>
             ) : (
               <div style={{ margin: '4px 0 12px' }}>

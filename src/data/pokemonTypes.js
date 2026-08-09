@@ -26,6 +26,35 @@ export const TYPE_COLORS = {
 
 export const ALL_TYPES = Object.keys(TYPE_COLORS)
 
+// Biểu tượng gọn cho UI chọn hệ. Không can thiệp logic battle; chỉ giúp
+// người chơi phân biệt nhanh 18 hệ bằng màu + ký hiệu trên desktop/mobile.
+export const TYPE_ICONS = {
+  normal: '●',
+  fire: '🔥',
+  water: '💧',
+  electric: '⚡',
+  grass: '🍃',
+  ice: '❄️',
+  fighting: '✊',
+  poison: '☠️',
+  ground: '⛰️',
+  flying: '🪽',
+  psychic: '🔮',
+  bug: '🐞',
+  rock: '🪨',
+  ghost: '👻',
+  dragon: '🐉',
+  dark: '🌑',
+  steel: '⚙️',
+  fairy: '✨',
+}
+
+export const TYPE_LABELS = {
+  normal: 'Normal', fire: 'Fire', water: 'Water', electric: 'Electric', grass: 'Grass', ice: 'Ice',
+  fighting: 'Fighting', poison: 'Poison', ground: 'Ground', flying: 'Flying', psychic: 'Psychic', bug: 'Bug',
+  rock: 'Rock', ghost: 'Ghost', dragon: 'Dragon', dark: 'Dark', steel: 'Steel', fairy: 'Fairy',
+}
+
 // effectiveness[attackType][defendType] = hệ số nhân sát thương
 const chart = {
   normal:   { rock: 0.5, ghost: 0, steel: 0.5 },

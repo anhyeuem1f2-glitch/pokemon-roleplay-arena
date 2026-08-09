@@ -164,7 +164,7 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                   <div style={{ maxWidth: 520 }}>
                     <div style={{ color: 'var(--text-hi)', fontSize: 13, fontWeight: 750 }}>Kết quả đồng bộ state</div>
                     <div style={{ color: 'var(--text-dim)', fontSize: 10.5, lineHeight: 1.65, marginTop: 4 }}>
-                      Đợt 106 dùng Semantic State Engine v7: chính văn hiển thị là nguồn sự thật. [[TAG]] chỉ còn fallback khi Semantic API lỗi; catalog/Pokédex legacy không được quyền phủ quyết một sự kiện canon. Entity, vật phẩm, địa điểm và Pokémon tự sáng tạo có thể được resolve động hoặc lưu dynamic state.
+                      Đợt 111 dùng Semantic State Engine v8: chính văn hiển thị là nguồn sự thật. [[TAG]] chỉ còn fallback khi Semantic API lỗi; catalog/Pokédex legacy không được quyền phủ quyết một sự kiện canon. Entity, vật phẩm, địa điểm và Pokémon tự sáng tạo có thể được resolve động hoặc lưu dynamic state.
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

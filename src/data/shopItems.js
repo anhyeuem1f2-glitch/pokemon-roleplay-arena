@@ -20,6 +20,21 @@ export const SHOP_ITEMS = [
   { id: 'hyperpotion', name: 'Hyper Potion', price: 1500, category: 'heal', desc: 'Hồi 120 HP cho Pokémon.' },
   { id: 'fullrestore', name: 'Full Restore', price: 3000, category: 'heal', desc: 'Hồi đầy HP + chữa mọi trạng thái.' },
   { id: 'revive', name: 'Revive', price: 2000, category: 'heal', desc: 'Hồi sinh Pokémon gục ngã với nửa HP.' },
+  // Thuốc PP + vitamin không nhất thiết bán ở mọi shop, nhưng vẫn phải có
+  // metadata chuẩn để vật phẩm semantic hiện đúng trong Túi đồ thay vì rơi
+  // vào một category động mà HUD không render.
+  { id: 'ether', name: 'Ether', price: 0, category: 'heal', noShop: true, desc: 'Hồi 10 PP cho một chiêu.' },
+  { id: 'maxether', name: 'Max Ether', price: 0, category: 'heal', noShop: true, desc: 'Hồi đầy PP cho một chiêu.' },
+  { id: 'elixir', name: 'Elixir', price: 0, category: 'heal', noShop: true, desc: 'Hồi 10 PP cho toàn bộ chiêu.' },
+  { id: 'maxelixir', name: 'Max Elixir', price: 0, category: 'heal', noShop: true, desc: 'Hồi đầy PP cho toàn bộ chiêu.' },
+  { id: 'hpup', name: 'HP Up', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện HP của Pokémon.' },
+  { id: 'protein', name: 'Protein', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện Attack của Pokémon.' },
+  { id: 'iron', name: 'Iron', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện Defense của Pokémon.' },
+  { id: 'calcium', name: 'Calcium', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện Sp. Atk của Pokémon.' },
+  { id: 'zinc', name: 'Zinc', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện Sp. Def của Pokémon.' },
+  { id: 'carbos', name: 'Carbos', price: 0, category: 'special', noShop: true, desc: 'Vitamin tăng huấn luyện Speed của Pokémon.' },
+  { id: 'ppup', name: 'PP Up', price: 0, category: 'special', noShop: true, desc: 'Tăng PP tối đa của một chiêu.' },
+  { id: 'ppmax', name: 'PP Max', price: 0, category: 'special', noShop: true, desc: 'Tăng PP tối đa của một chiêu lên mức tối đa.' },
   // --- Chữa trạng thái ---
   { id: 'antidote', name: 'Antidote', price: 200, category: 'status', desc: 'Chữa trúng độc.' },
   { id: 'paralyzeheal', name: 'Paralyze Heal', price: 300, category: 'status', desc: 'Chữa tê liệt.' },
@@ -115,6 +130,19 @@ export const SHOP_CATEGORY_LABELS = {
 }
 
 
+/**
+ * Category dùng để HIỂN THỊ inventory. Inventory semantic là open-world nên
+ * save cũ hoặc item fan-made có thể mang category chưa từng có trong catalog.
+ * Không được để category lạ tạo ra item vô hình trên HUD.
+ */
+export function displayInventoryCategory(item) {
+  if (!item) return 'misc'
+  const catalogItem = SHOP_ITEMS.find((entry) => entry.id === item.id)
+  const raw = catalogItem?.category ?? resolveHeldItemByName(item)?.category ?? item.category ?? 'misc'
+  return Object.prototype.hasOwnProperty.call(SHOP_CATEGORY_LABELS, raw) ? raw : 'misc'
+}
+
+
 // ============ TRA CỨU VẬT PHẨM THEO TÊN (đợt 72) ============
 // AI trao đồ bằng TÊN tiếng Việt/tiếng Anh trong tag [[ITEM ...]], phải khớp
 // về đúng id trong danh mục. Khớp lỏng: bỏ dấu, bỏ khoảng trắng thừa, không
@@ -204,7 +232,10 @@ export function createCustomItemDescriptor(rawName, meta = {}) {
     id: `custom-${slug}`,
     name,
     price: Number.isFinite(Number(meta.price)) ? Number(meta.price) : 0,
-    category: String(meta.category ?? (meta.keyItem ? 'special' : 'custom')).trim() || 'custom',
+    // `misc` là pocket hiển thị được ở mọi UI. Trước đợt 109 item động
+    // mặc định dùng category `custom` nhưng PlayerHUD không có tab tương ứng,
+    // khiến state đã commit mà người chơi tưởng vật phẩm bị mất.
+    category: String(meta.category ?? (meta.keyItem ? 'special' : 'misc')).trim() || 'misc',
     desc: String(meta.description ?? meta.desc ?? 'Vật phẩm do cốt truyện tạo ra.').trim(),
     noShop: true,
     custom: true,

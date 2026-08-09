@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { getEffectivenessMulti } from '../data/pokemonTypes.js'
 import { applyEnvToDamage, getBattleEnv } from '../data/battleEnvironments.js'
-import { isSameMon, repairEncounterMonMoves, sortMovesForDisplay } from '../data/pokemonSpecies.js'
+import { pokemonDisplayName, isSameMon, repairEncounterMonMoves, sortMovesForDisplay } from '../data/pokemonSpecies.js'
 import { computeDamage, STAGE_ZERO } from './BattleModal.jsx'
 import HealthBar from './HealthBar.jsx'
 import MonAvatar from './MonAvatar.jsx'
@@ -168,7 +168,7 @@ function BattleCard({ mon, label, active, onClick, stages }) {
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 8.5, color: label === 'PHE ĐỊCH' ? 'var(--coral)' : 'var(--mint)', fontWeight: 800, letterSpacing: '.1em' }}>{label}</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, margin: '2px 0 4px' }}>
-          <strong style={{ fontSize: 12 }}>{mon.shiny ? '✨ ' : ''}{mon.name}</strong>
+          <strong style={{ fontSize: 12 }}>{mon.shiny ? '✨ ' : ''}{pokemonDisplayName(mon)}</strong>
           <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-dim)', fontSize: 10 }}>Lv.{mon.level}</span>
         </div>
         <div style={{ display: 'flex', gap: 3, marginBottom: 5, flexWrap: 'wrap' }}>

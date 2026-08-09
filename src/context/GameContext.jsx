@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { SAMPLE_CHARACTER, SAMPLE_PLAYER_MON, SAMPLE_ENEMY_MON } from '../data/sampleData.js'
-import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, isSameMon, repairEncounterMonMoves, repairOwnedMonMoves, setMoveStar } from '../data/pokemonSpecies.js'
+import { POKEMON_SPECIES, guardMonRegression, guardPartyRegression, isSameMon, repairEncounterMonMoves, repairOwnedMonMoves, recomputeMonStats, setMoveStar } from '../data/pokemonSpecies.js'
 import { applyPerksToMon, normalizeLegacyPerkBoost, resolveMechanicEffects, syncTraitGrantedItems } from '../data/playerPerks.js'
 import { loadFullPokedex } from '../utils/pokedexFetch.js'
 import { loadMovesData, loadLearnsets } from '../utils/movesFetch.js'
@@ -636,6 +636,15 @@ export function GameProvider({ children }) {
     setPcBox((cur) => (cur ?? []).map(update))
   }, [setParty, setPcBox, setPlayerMon])
 
+  // Nickname là thuộc tính cá thể, khả dụng ở MỌI chế độ. Để trống = dùng tên loài.
+  const setPokemonNickname = useCallback((target, nickname) => {
+    const clean = String(nickname ?? '').trim().slice(0, 40)
+    const update = (mon) => isSameMon(mon, target) ? { ...mon, nickname: clean || undefined } : mon
+    setPlayerMon((cur) => update(cur))
+    setParty((cur) => (cur ?? []).map(update))
+    setPcBox((cur) => (cur ?? []).map(update))
+  }, [setParty, setPcBox, setPlayerMon])
+
   // Party và PC là hai kho sở hữu khác nhau. Save lỗi cũ hoặc hai callback
   // gần nhau có thể từng ghi cùng một cá thể vào cả hai khóa localStorage;
   // dedupe riêng từng mảng không bắt được trường hợp chéo này. Party là nguồn
@@ -955,13 +964,24 @@ export function GameProvider({ children }) {
         }
         : mon, entry)
       const normalized = ensureMonAbility(normalizeFriendship(withGender, entry?.baseFriendship), pokedexSpecies)
-      return {
+      // Đợt 111: save rất cũ có thể chỉ có HP mà thiếu stats/baseStats/IV/EV.
+      // Hydrate deterministic từ Pokédex, không random lại cá thể khi F5.
+      const hydrated = {
         ...normalized,
+        species: normalized.species ?? entry?.species ?? normalized.name,
+        spriteId: normalized.spriteId ?? entry?.spriteId ?? entry?.species ?? normalized.species,
+        types: normalized.types?.length ? normalized.types : (entry?.types ?? []),
+        baseStats: normalized.baseStats ?? entry?.baseStats ?? null,
+        ivs: normalized.ivs ?? { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+        evs: normalized.evs ?? { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+        nature: normalized.nature ?? 'Hardy',
         heldItem: normalizeHeldItem(normalized.heldItem),
         hasEvo: entry?.hasEvo ?? normalized.hasEvo ?? false,
         hasPrevo: entry?.hasPrevo ?? normalized.hasPrevo ?? false,
         baseSpeciesId: normalized.baseSpeciesId ?? entry?.baseSpeciesId ?? null,
       }
+      const missingStats = !hydrated.stats || ['hp','atk','def','spa','spd','spe'].some((key) => !Number.isFinite(Number(hydrated.stats?.[key])))
+      return missingStats && hydrated.baseStats ? recomputeMonStats(hydrated) : hydrated
     }
     setPlayerMon((cur) => upgrade(cur))
     setParty((cur) => (cur ?? []).map(upgrade))
@@ -1144,6 +1164,7 @@ export function GameProvider({ children }) {
     pcBox,
     setPcBox,
     setPokemonMoveStar,
+    setPokemonNickname,
     worldProgress,
     setWorldProgress,
     dynamicState,

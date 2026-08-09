@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
-import { describeNature, expProgress, isSameMon, MAX_LEVEL, sortMovesForDisplay } from '../data/pokemonSpecies.js'
+import { describeNature, expProgress, isSameMon, MAX_LEVEL, pokemonDisplayName, sortMovesForDisplay } from '../data/pokemonSpecies.js'
 import { abilityLabel } from '../data/pokemonAbilities.js'
 import { describeFriendship, friendshipTier, normalizeFriendship } from '../data/pokemonFriendship.js'
 import { heldItemDescription, heldItemLabel } from '../data/pokemonHeldItems.js'
@@ -34,7 +34,7 @@ function PartyEntry({ mon, selected, onClick }) {
     <button className={`summary-party__entry ${selected ? 'is-selected' : ''}`} onClick={onClick} type="button">
       <span className="summary-party__sprite"><MonAvatar mon={mon} side="enemy" /></span>
       <span className="summary-party__copy">
-        <strong>{mon.name} {mon.shiny && <span title="Shiny" aria-label="Shiny">✨</span>} <span aria-label={genderLabel(mon.gender)}>{genderSymbol(mon.gender)}</span></strong>
+        <strong>{pokemonDisplayName(mon)} {mon.shiny && <span title="Shiny" aria-label="Shiny">✨</span>} <span aria-label={genderLabel(mon.gender)}>{genderSymbol(mon.gender)}</span></strong>
         <span>Lv.{mon.level}{mon.status ? ` · ${mon.status}` : ''}</span>
         <span className="summary-party__hp"><i style={{ width: `${pct(mon.hp, mon.maxHp)}%` }} /></span>
         <small>{mon.hp}/{mon.maxHp}</small>
@@ -70,12 +70,14 @@ function MoveRow({ move, index, onToggleStar }) {
 }
 
 export default function PokemonInfoModal({ mon, party = [], activeMon = null, hunger = null, onSelect, onClose }) {
-  const { setPokemonMoveStar } = useGame()
+  const { setPokemonMoveStar, setPokemonNickname } = useGame()
   const [tab, setTab] = useState('summary')
+  const [nicknameDraft, setNicknameDraft] = useState(String(mon?.nickname ?? ''))
   const current = useMemo(() => {
     if (!mon) return null
     return party.find((candidate) => isSameMon(candidate, mon)) ?? mon
   }, [mon, party])
+  useEffect(() => { setNicknameDraft(String(current?.nickname ?? '')) }, [current?.uid, current?.nickname])
   if (!current) return null
 
   const bonded = normalizeFriendship(current)
@@ -83,7 +85,9 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
   const exp = expProgress(current)
   const maxed = (current.level ?? 1) >= MAX_LEVEL
   const currentHunger = activeMon && isSameMon(activeMon, current) ? hunger : null
-  const maxStat = Math.max(1, ...Object.values(current.stats ?? {}).map(Number))
+  const statValues = Object.keys(STAT_LABELS).map((key) => Number(key === 'hp' ? current.maxHp : current.stats?.[key])).filter(Number.isFinite)
+  const maxDisplayedStat = Math.max(1, ...statValues)
+  const evTotal = Object.keys(STAT_LABELS).reduce((sum, key) => sum + Math.max(0, Number(current.evs?.[key]) || 0), 0)
 
   return (
     <div className="pokemon-summary" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="pokemon-summary-title">
@@ -107,7 +111,8 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
           <header className="pokemon-summary__header">
             <div>
               <div className="pokemon-summary__eyebrow">POKÉMON SUMMARY</div>
-              <h2 id="pokemon-summary-title">{current.name} {current.shiny && <em className="summary-shiny-badge" title="Pokémon Shiny">✨ SHINY</em>} <b title={genderLabel(current.gender)}>{genderSymbol(current.gender)}</b> <span>Lv.{current.level}</span></h2>
+              <h2 id="pokemon-summary-title">{pokemonDisplayName(current)} {current.shiny && <em className="summary-shiny-badge" title="Pokémon Shiny">✨ SHINY</em>} <b title={genderLabel(current.gender)}>{genderSymbol(current.gender)}</b> <span>Lv.{current.level}</span></h2>
+              {current.nickname && <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 3 }}>Loài: {current.name}</div>}
               <div className="pokemon-summary__types">{(current.types ?? []).map((type) => <TypeBadge key={type} type={type} />)}</div>
             </div>
             <button className="pokemon-summary__close" onClick={onClose} type="button">Đóng</button>
@@ -138,6 +143,22 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
               </div>
 
               <div className="summary-info-grid">
+                <div className="summary-info-card" style={{ gridColumn: '1 / -1' }}>
+                  <span>BIỆT DANH / NICKNAME</span>
+                  <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap', marginTop: 4 }}>
+                    <input
+                      value={nicknameDraft}
+                      maxLength={40}
+                      placeholder={`Để trống = ${current.name}`}
+                      onChange={(event) => setNicknameDraft(event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); setPokemonNickname(current, nicknameDraft) } }}
+                      style={{ flex: '1 1 180px', minWidth: 0 }}
+                    />
+                    <button className="btn" type="button" onClick={() => setPokemonNickname(current, nicknameDraft)}>Lưu nickname</button>
+                    {current.nickname && <button className="btn" type="button" onClick={() => { setNicknameDraft(''); setPokemonNickname(current, '') }}>Dùng tên loài</button>}
+                  </div>
+                  <small>Áp dụng cho mọi chế độ; đồng bộ cùng cá thể ở active, party và PC.</small>
+                </div>
                 <div className="summary-info-card">
                   <span>MÃ CÁ THỂ</span><strong>{current.pokemonId ?? current.uid ?? '—'}</strong><small>{current.shiny ? '✨ Shiny' : 'Màu thường'} · {current.sizeClass ?? 'average'}</small>
                 </div>
@@ -178,31 +199,63 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
 
           {tab === 'stats' && (
             <div className="summary-page summary-page--stats">
-              <div className="summary-stat-list">
-                {Object.entries(STAT_LABELS).map(([key, label]) => {
-                  const value = key === 'hp' ? current.maxHp : current.stats?.[key]
-                  return (
-                    <div className="summary-stat" key={key}>
-                      <span>{label}</span>
-                      <strong>{value ?? '—'}</strong>
-                      <div><i style={{ width: `${pct(value ?? 0, maxStat)}%` }} /></div>
-                    </div>
-                  )
-                })}
+              <div className="summary-stat-panel">
+                <div className="summary-build__title">CHỈ SỐ THỰC TẾ</div>
+                <div className="summary-stat-list">
+                  {Object.entries(STAT_LABELS).map(([key, label]) => {
+                    const value = key === 'hp' ? current.maxHp : current.stats?.[key]
+                    const numeric = Number(value)
+                    return (
+                      <div className="summary-stat" key={key}>
+                        <span>{label}</span>
+                        <strong>{Number.isFinite(numeric) ? numeric : '—'}</strong>
+                        <div aria-hidden="true"><i style={{ width: `${Number.isFinite(numeric) ? pct(numeric, maxDisplayedStat) : 0}%` }} /></div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="summary-stat-note">Đây là chỉ số cuối cùng dùng trong chiến đấu sau Level, Base Stat, IV, EV và Nature. Thanh chỉ để so sánh trực quan giữa 6 chỉ số của chính Pokémon này.</p>
               </div>
 
-              <div className="summary-build">
-                <div className="summary-build__title">IV / EV CÁ THỂ</div>
-                <div className="summary-build__grid">
-                  {['hp', 'atk', 'def', 'spa', 'spd', 'spe'].map((key) => (
-                    <div key={key}>
-                      <span>{STAT_SHORT[key]}</span>
-                      <strong>{current.ivs?.[key] ?? '—'}</strong>
-                      <small>EV +{current.evs?.[key] ?? 0}</small>
-                    </div>
-                  ))}
+              <div className="summary-build-stack">
+                <div className="summary-build summary-build--ivs">
+                  <div className="summary-build__title">IV — CHỈ SỐ BẨM SINH</div>
+                  <div className="summary-build__grid">
+                    {Object.keys(STAT_LABELS).map((key) => {
+                      const iv = Number(current.ivs?.[key])
+                      return (
+                        <div key={key}>
+                          <span>{STAT_SHORT[key]}</span>
+                          <strong>{Number.isFinite(iv) ? iv : '—'}</strong>
+                          <small>{Number.isFinite(iv) ? `${iv}/31` : 'Chưa rõ'}</small>
+                          <div className="summary-build__meter" aria-hidden="true"><i style={{ width: `${Number.isFinite(iv) ? pct(iv, 31) : 0}%` }} /></div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p>IV là tiềm năng bẩm sinh của từng chỉ số, chuẩn từ 0–31 và không phải EV.</p>
                 </div>
-                <p>IV là chỉ số bẩm sinh 0–31. EV nhận qua rèn luyện, tối đa 252 mỗi chỉ số và 510 tổng.</p>
+
+                <div className="summary-build summary-build--evs">
+                  <div className="summary-build__heading">
+                    <div className="summary-build__title">EV — ĐIỂM RÈN LUYỆN</div>
+                    <b>Tổng {evTotal}</b>
+                  </div>
+                  <div className="summary-build__grid">
+                    {Object.keys(STAT_LABELS).map((key) => {
+                      const ev = Math.max(0, Number(current.evs?.[key]) || 0)
+                      return (
+                        <div key={key}>
+                          <span>{STAT_SHORT[key]}</span>
+                          <strong>{ev}</strong>
+                          <small>{ev}/252</small>
+                          <div className="summary-build__meter summary-build__meter--ev" aria-hidden="true"><i style={{ width: `${pct(ev, 252)}%` }} /></div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <p>EV tăng qua rèn luyện/vật phẩm. Luật chuẩn: tối đa 252 mỗi chỉ số và 510 tổng; Sandbox có thể vượt tổng nếu người chơi đã chọn cấu hình tự do.</p>
+                </div>
               </div>
             </div>
           )}

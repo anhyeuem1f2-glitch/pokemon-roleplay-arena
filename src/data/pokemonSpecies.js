@@ -1042,6 +1042,92 @@ export function detectMentionedSpecies(text, speciesList, options = {}) {
 }
 
 
+export function pokemonDisplayName(mon, withSpecies = false) {
+  if (!mon) return 'Pokémon'
+  const species = String(mon.name ?? mon.species ?? 'Pokémon')
+  const nickname = String(mon.nickname ?? '').trim()
+  if (!nickname) return species
+  return withSpecies ? `${nickname} (${species})` : nickname
+}
+
+// Đợt 111: chọn Pokémon THỰC SỰ đang ra sân, không lấy mù tên được nhắc
+// cuối cùng. Một Pokémon ở khán đài/trong tay NPC có thể được kể sau đối thủ
+// active; resolver chấm điểm ngữ cảnh chiến đấu và phạt ngữ cảnh spectator.
+const BATTLE_ACTIVE_CUES = [
+  'xuất trận', 'ra sân', 'vào sân', 'được tung ra', 'tung ra', 'gọi ra', 'phóng ra',
+  'bước ra sân', 'lao ra sân', 'đối thủ', 'đối phương', 'pokemon đối phương',
+  'pokémon đối phương', 'sẽ dùng', 'chọn dùng', 'cử ra', 'triệu hồi', 'battle begins',
+  'xuất hiện giữa sân', 'xuất hiện trên sân', 'hiện ra giữa sân', 'hiện ra trên sân', 'sent out', 'sends out', 'entered the field',
+]
+const BATTLE_SPECTATOR_CUES = [
+  'khán đài', 'khán giả', 'đứng xem', 'ngồi xem', 'xem trận', 'cổ vũ', 'đứng ngoài',
+  'ngoài sân', 'bên ngoài sân', 'trong tay', 'trên vai', 'ôm trong lòng', 'theo dõi trận',
+  'spectator', 'watching from', 'in the stands',
+]
+
+function battleMentionScore(lower, at, nameLen) {
+  const separators = /[.!?;\n]/
+  let start = at
+  while (start > 0 && !separators.test(lower[start - 1])) start -= 1
+  let end = at + nameLen
+  while (end < lower.length && !separators.test(lower[end])) end += 1
+  const clause = lower.slice(start, end)
+  let score = 0
+  for (const cue of BATTLE_ACTIVE_CUES) if (clause.includes(cue)) score += 12
+  for (const cue of BATTLE_SPECTATOR_CUES) if (clause.includes(cue)) score -= 18
+  // Cụm ngay sát tên hỗ trợ văn không có dấu câu, nhưng không cho cue của
+  // câu spectator kế tiếp làm bẩn mention active trước đó.
+  const tight = lower.slice(Math.max(start, at - 55), Math.min(end, at + nameLen + 75))
+  if (/\b(?:vs\.?|versus)\b|đánh với|đấu với|giao đấu với|đối đầu với/.test(tight)) score += 8
+  score += Math.min(5, (at / Math.max(1, lower.length)) * 5)
+  return score
+}
+
+export function detectBattleOpponentSpecies(text, speciesList, options = {}) {
+  if (!text || !speciesList?.length) return null
+  const lower = String(text).toLowerCase()
+  const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
+  let best = null
+  for (const entry of speciesList) {
+    const names = [entry.name, entry.species].filter(Boolean).map((v) => String(v).toLowerCase())
+    for (const name of new Set(names)) {
+      if (exclude.has(name)) continue
+      let at = lower.indexOf(name)
+      while (at !== -1) {
+        const score = battleMentionScore(lower, at, name.length)
+        if (!best || score > best.score || (score === best.score && at > best.at)) best = { entry, score, at }
+        at = lower.indexOf(name, at + Math.max(1, name.length))
+      }
+    }
+  }
+  // Nếu tất cả mention đều mang ngữ cảnh spectator rất rõ thì đừng chọn bừa.
+  return best && best.score > -8 ? best.entry : null
+}
+
+export function detectBattleOpponentSpeciesList(text, speciesList, options = {}) {
+  if (!text || !speciesList?.length) return []
+  const lower = String(text).toLowerCase()
+  const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
+  const bestByEntry = new Map()
+  for (const entry of speciesList) {
+    const names = [entry.name, entry.species].filter(Boolean).map((v) => String(v).toLowerCase())
+    for (const name of new Set(names)) {
+      if (exclude.has(name)) continue
+      let at = lower.indexOf(name)
+      while (at !== -1) {
+        const score = battleMentionScore(lower, at, name.length)
+        const old = bestByEntry.get(entry)
+        if (!old || score > old.score || (score === old.score && at > old.at)) bestByEntry.set(entry, { score, at })
+        at = lower.indexOf(name, at + Math.max(1, name.length))
+      }
+    }
+  }
+  return [...bestByEntry.entries()]
+    .filter(([, hit]) => hit.score > 5)
+    .sort((a, b) => b[1].score - a[1].score || b[1].at - a[1].at)
+    .map(([entry]) => entry)
+}
+
 /** Trả về nhiều loài được nhắc, theo thứ tự xuất hiện từ sớm tới muộn. */
 export function detectMentionedSpeciesList(text, speciesList, options = {}) {
   if (!text || !speciesList?.length) return []

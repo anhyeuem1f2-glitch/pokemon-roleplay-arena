@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useGame } from '../context/GameContext.jsx'
-import { SHOP_ITEMS, SHOP_CATEGORY_LABELS } from '../data/shopItems.js'
+import { SHOP_ITEMS, SHOP_CATEGORY_LABELS, displayInventoryCategory } from '../data/shopItems.js'
 import BodyFigure, { BODY_PARTS } from './BodyFigure.jsx'
 import PokemonInfoModal from './PokemonInfoModal.jsx'
 import MonAvatar from './MonAvatar.jsx'
@@ -9,7 +9,7 @@ import { genderLabel, genderSymbol } from '../data/pokemonGender.js'
 import AvatarPicker from './AvatarPicker.jsx'
 import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { describeCustomMechanicEffects } from '../data/playerPerks.js'
-import { levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
+import { pokemonDisplayName, levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
 import { heldItemDescription, heldItemLabel, isHoldableItem, isTrainerGear, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
@@ -219,7 +219,7 @@ export default function PlayerHUD({ mobile = false }) {
             <button
               key={i}
               onClick={() => mon && setInfoMon(mon)}
-              title={mon ? `${mon.name} ${genderSymbol(mon.gender)} ${genderLabel(mon.gender)} · Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${(mon.hp ?? 0) <= 0 ? ' (đã gục — cần Trung tâm Pokémon)' : ''}${mon.status ? ` [${mon.status}]` : ''} — bấm xem chi tiết` : 'Ô trống'}
+              title={mon ? `${pokemonDisplayName(mon)} ${genderSymbol(mon.gender)} ${genderLabel(mon.gender)} · Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${(mon.hp ?? 0) <= 0 ? ' (đã gục — cần Trung tâm Pokémon)' : ''}${mon.status ? ` [${mon.status}]` : ''} — bấm xem chi tiết` : 'Ô trống'}
               style={{
                 aspectRatio: '1',
                 border: mon ? '1px solid var(--line)' : '1px dashed var(--line)',
@@ -237,7 +237,10 @@ export default function PlayerHUD({ mobile = false }) {
               {mon ? (
                 <>
                   <MonAvatar mon={mon} side="enemy" size={44} />
-                  <span style={{ fontSize: 8.5, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
+                  <span style={{ maxWidth: '92%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 8.5, fontFamily: 'var(--font-mono)', color: 'var(--text-hi)' }}>
+                    {pokemonDisplayName(mon)}
+                  </span>
+                  <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)' }}>
                     {mon.shiny ? '✨ · ' : ''}{genderSymbol(mon.gender)} · Lv{mon.level}
                   </span>
                   {/* Đợt 71: máu KHÔNG còn tự hồi sau trận nữa, nên đội hình
@@ -355,7 +358,8 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
   const grouped = useMemo(() => {
     const g = {}
     for (const it of (inventory ?? [])) {
-      const cat = catalog[it.id]?.category ?? resolveHeldItemByName(it)?.category ?? it.category ?? 'misc'
+      // Open-world item không được phép biến mất khỏi UI chỉ vì category lạ.
+      const cat = displayInventoryCategory(it)
       ;(g[cat] ??= []).push(it)
     }
     return g
@@ -550,7 +554,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {party.map((mon, i) => mon.heldItem && (
               <div key={mon.uid ?? i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', fontSize: 10.5 }}>
-                <span title={heldItemDescription(mon.heldItem)}>{mon.name} — {heldItemLabel(mon)}</span>
+                <span title={heldItemDescription(mon.heldItem)}>{pokemonDisplayName(mon)} — {heldItemLabel(mon)}</span>
                 <button className="btn" style={{ fontSize: 9.5, padding: '2px 7px' }} onClick={() => unequipHeldItem(i)}>Tháo</button>
               </div>
             ))}
@@ -618,7 +622,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {party.map((mon, i) => (
                             <button key={i} className="btn" style={{ fontSize: 10, padding: '2px 8px', borderColor: 'var(--amber)', color: 'var(--amber)' }} onClick={() => feedRareCandy(info, i)}>
-                              {mon.name} (Lv.{mon.level})
+                              {pokemonDisplayName(mon)} (Lv.{mon.level})
                             </button>
                           ))}
                           {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}
@@ -631,7 +635,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {party.map((mon, i) => (
                             <button key={i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => healPartyMon(info, i)}>
-                              {mon.name} ({mon.hp}/{mon.maxHp})
+                              {pokemonDisplayName(mon)} ({mon.hp}/{mon.maxHp})
                             </button>
                           ))}
                           {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}
@@ -644,7 +648,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {party.map((mon, i) => (
                             <button key={mon.uid ?? i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => curePartyMon(info, i)}>
-                              {mon.name} {mon.status ? `[${mon.status.toUpperCase()}]` : '· bình thường'}
+                              {pokemonDisplayName(mon)} {mon.status ? `[${mon.status.toUpperCase()}]` : '· bình thường'}
                             </button>
                           ))}
                         </div>
@@ -671,7 +675,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                       <div>
                         <div style={{ marginBottom: 4 }}>Cho Pokémon dùng:</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {party.map((mon, index) => <button key={mon.uid ?? index} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => feedPokemon(info, index)}>{mon.name}</button>)}
+                          {party.map((mon, index) => <button key={mon.uid ?? index} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => feedPokemon(info, index)}>{pokemonDisplayName(mon)}</button>)}
                         </div>
                       </div>
                     )}
@@ -681,7 +685,7 @@ function InventoryPanel({ inventory, setInventory, party, setParty, playerMon, s
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                           {party.map((mon, i) => (
                             <button key={mon.uid ?? i} className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => equipHeldItem(it, i)}>
-                              {mon.name} · đang cầm: {heldItemLabel(mon)}
+                              {pokemonDisplayName(mon)} · đang cầm: {heldItemLabel(mon)}
                             </button>
                           ))}
                           {party.length === 0 && <span style={{ color: 'var(--text-dim)' }}>Đội hình trống.</span>}

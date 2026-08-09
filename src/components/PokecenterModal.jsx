@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { POKECENTER_TRACK_KEYS } from '../data/musicTracks.js'
-import { isSameMon } from '../data/pokemonSpecies.js'
+import { pokemonDisplayName, isSameMon } from '../data/pokemonSpecies.js'
 import MonAvatar from './MonAvatar.jsx'
 
 // ============ TRUNG TÂM POKÉMON (đợt 71) ============
@@ -65,7 +65,7 @@ function MonSlot({ mon, from, index, onDragStart, onDrop, selected, onClick, emp
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => { e.preventDefault(); onDrop?.(from, index) }}
       onClick={() => onClick?.(from, index)}
-      title={`${mon.name} Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${fainted ? ' (đã gục)' : ''}`}
+      title={`${pokemonDisplayName(mon)} Lv${mon.level} — ${mon.hp}/${mon.maxHp} HP${fainted ? ' (đã gục)' : ''}`}
       style={{
         aspectRatio: '1', borderRadius: 8, padding: 3, cursor: 'grab',
         border: `1px solid ${selected ? 'var(--amber)' : 'var(--line)'}`,
@@ -79,7 +79,7 @@ function MonSlot({ mon, from, index, onDragStart, onDrop, selected, onClick, emp
         mon={mon}
         side="enemy"
         size={54}
-        title={`${mon.name}${mon.shiny ? ' · Shiny' : ''}`}
+        title={`${pokemonDisplayName(mon)}${mon.shiny ? ' · Shiny' : ''}`}
         style={{ maxWidth: '72%', maxHeight: '56%', filter: fainted ? 'grayscale(1)' : 'none' }}
       />
       <span style={{ fontSize: 8, fontFamily: 'var(--font-mono)', color: 'var(--text-mid)', lineHeight: 1.3 }}>

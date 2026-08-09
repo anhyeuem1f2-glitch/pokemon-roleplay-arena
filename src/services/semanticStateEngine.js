@@ -377,13 +377,13 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       }
       case 'fact_upsert': parsed.facts.push(customFact(event)); break
       case 'badge_gain': {
-        if (target) parsed.badges.push(parseBadgeDirective(target, `region=${details.region ?? event.region ?? ''}|gym=${details.gym ?? ''}|leader=${details.leader ?? ''}`)); else accepted = false
+        if (target) parsed.badges.push({ ...parseBadgeDirective(target, `region=${details.region ?? event.region ?? ''}|gym=${details.gym ?? ''}|leader=${details.leader ?? ''}`), semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence }); else accepted = false
         break
       }
       case 'quest_update': {
         const q = { ...details, ...(event.fields ?? {}) }
         const id = String(q.id ?? target ?? q.title ?? 'quest').trim()
-        parsed.quests.push(parseQuestDirective(id, `status=${q.status ?? event.status ?? 'active'}|title=${q.title ?? target ?? id}|giver=${q.giver ?? ''}|objective=${q.objective ?? ''}|reward=${q.reward ?? ''}|region=${q.region ?? ''}`))
+        parsed.quests.push({ ...parseQuestDirective(id, `status=${q.status ?? event.status ?? 'active'}|title=${q.title ?? target ?? id}|giver=${q.giver ?? ''}|objective=${q.objective ?? ''}|reward=${q.reward ?? ''}|region=${q.region ?? ''}`), semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence })
         break
       }
       case 'reputation_change': {

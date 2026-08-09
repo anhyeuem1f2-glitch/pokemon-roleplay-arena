@@ -1,6 +1,27 @@
 # Trainer Arena — Roleplay × Battle Engine
 
 
+## Đợt 113 — Reroll side-effect firewall + nút Xuống cuối không tự mắc kẹt
+
+- Sửa nút `↓ Xuống cuối` trên mobile: nút được đưa ra ngoài luồng cuộn thành overlay tuyệt đối, nên bản thân nút không còn làm tăng `scrollHeight` rồi tự khiến hệ thống tưởng vẫn chưa tới đáy.
+- `detectPokecenter()` không còn mở `Chữa trị` + `Máy PC` chỉ vì chính văn nhắc tới Trung tâm Pokémon/Nurse Joy. Phải có bằng chứng nhân vật thực sự đang vào/ở khu tương tác của trung tâm; rời trung tâm thì controls đóng.
+- Semantic PokéCenter từ Primary/Auditor/focus/background đều phải qua cùng cổng scene thật, không còn callback nền tự bật hai nút sau vài giây.
+- Pokémon mới do Semantic Engine đề xuất phải có bằng chứng sở hữu/thu phục thật trong chính văn cuối. Mention đơn thuần không còn tạo Pokémon.
+- Trong reroll, Pokémon mới còn phải có anchor trong nhánh trước/current input; model không được tự bịa một loài hoàn toàn mới rồi hợp thức hóa bằng chính câu nó vừa viết.
+- Dedupe acquisition semantic giữa Primary/Auditor/focus theo species trong cùng lượt để một sự kiện không sinh hai cá thể chỉ vì các pass đoán nickname/level khác nhau.
+- `[[BATTLE]]` không còn đủ để tự mở trận. Marker phải có setup chiến đấu thật; riêng reroll còn bắt buộc nhánh trước/current input đã có mầm battle, chặn biến thể reroll tự phát sinh encounter.
+- Reroll có system guard rõ ràng: không tự thêm battle/PokéCenter/shop/Pokémon/vật phẩm/quyền nếu input và diễn biến trước không dẫn tới side-effect đó.
+- Bổ sung regression đợt 113 cho PokéCenter mention-vs-inside, acquisition evidence, battle marker, reroll hard-side-effect gate và scroll overlay.
+
+### File cần cập nhật lên GitHub sau đợt 113
+
+Chỉ upload/ghi đè:
+
+- toàn bộ thư mục `src/`;
+- file `README.md`.
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình deploy hay `test-dot*.mjs`.
+
 ## Đợt 112 — Tách rõ Chỉ số thực tế / IV / EV
 
 - Khôi phục thanh trực quan ở mục Chỉ số. Đây là **chỉ số thực tế dùng trong battle** sau Level + Base Stat + IV + EV + Nature, không phải thanh EV.

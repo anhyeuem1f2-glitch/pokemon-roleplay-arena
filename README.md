@@ -1,3 +1,22 @@
+## Đợt 118 — MONEY Canonical Arbitration + sửa ledger tiền cũ
+
+- Sửa bug nghiêm trọng trong Money Reconciler: câu kiểu **“tài khoản bị trừ 600 Poké, số dư còn lại 99.400 Poké … trước khi …”** từng có thể bị hiểu nhầm thành hai mốc số dư `600 → 99.400` và sinh delta `-98.800`. Balance parser giờ chỉ tính chênh lệch khi **cả BEFORE và AFTER đều có neo số dư/tài khoản/ví rõ ràng**; chữ “trước khi/sau đó” thuộc diễn biến truyện không còn được dùng làm mốc số dư.
+- Bổ sung nhận diện đơn vị tiền `Poké` đứng độc lập nhưng vẫn phân biệt với `Poké Ball`, nên `trừ 600 Poké` được hiểu là tiền còn `600 Poké Ball` không bị coi là tiền.
+- MONEY từ Semantic Extractor/Auditor/focus pass không còn được quyền “bù residual” theo phỏng đoán. Mọi delta semantic phải có **một giao dịch canon độc lập** mà deterministic evidence chứng minh được. Nếu app đã chốt `-600` mà AI đoán `-98.800`, candidate sai bị loại hoàn toàn thay vì biến thành `-98.200` rồi commit.
+- Thêm `filterMoneyEntriesAgainstCanon()` làm cổng MONEY chung cho Primary Semantic, Auditor, focus shard, background scan và `Quét lại biến thật`.
+- `Quét lại biến thật` giờ có thể **sửa ledger MONEY đã hỏng từ bản cũ**: nếu message từng commit `-98.800` nhưng chính văn hiện tại chứng minh transaction thật là `-600`, app thay ledger bằng `-600` và bù lại `+98.200` vào số dư. Chỉ repair khi canon có giao dịch deterministic rõ; nếu văn không đủ chắc thì không tự hoàn/xóa tiền.
+- Bổ sung `test-dot118.mjs`: **10/10 PASS**, bao phủ đúng bug `600 Poké + 99.400 Poké`, “trước khi”, semantic money sai, chống double-apply và repair ledger lịch sử. Toàn bộ regression đợt 73 → 118 PASS.
+
+### File cần cập nhật lên GitHub sau đợt 118
+
+Chỉ cần ghi đè:
+
+- `src/utils/stateEvidence.js`
+- `src/components/RoleplayChat.jsx`
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot118.mjs`.
+
 ## Đợt 117 — LLM Debug Modal + Sandbox Starter Transaction
 
 - Thêm **Developer · LLM Debug Modal** (mặc định tắt): bật trong Cài đặt, sau đó HUD xuất hiện nút `🐞 LLM Debug`. Modal ghi lại theo thời gian thực model/endpoint, loại tác vụ, payload messages gửi đi, output app dùng, raw response, finish reason/usage, thời gian, bridge và lỗi. **Không ghi API key**. Log chỉ sống trong phiên debug và giới hạn 80 request.

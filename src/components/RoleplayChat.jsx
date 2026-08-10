@@ -29,7 +29,7 @@ import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../dat
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
-import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseSupportsPokemonAcquisition, reconcileMoneyDirectives } from '../utils/stateEvidence.js'
+import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseSupportsPokemonAcquisition, reconcileMoneyDirectives, filterMoneyEntriesAgainstCanon, reconcileAppliedMoneyLedger } from '../utils/stateEvidence.js'
 import { buildStateScanPlan } from '../utils/stateScanPlan.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
@@ -399,7 +399,7 @@ function LorebookEditor({ lorebook, onChange }) {
 // API phụ chỉ được BỔ SUNG tag bị thiếu. Model vẫn có thể lặp lại tag chính
 // dù đã được gửi danh sách đã áp; với LEVEL +1 thì lặp một lần = tăng sai hai
 // cấp, ITEM cũng có thể cộng/trừ hai lần. Chặn exact duplicate ở phía app.
-function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = false } = {}) {
+function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = false, moneyText = '' } = {}) {
   const monKey = (value) => normalizeMonTarget(value)
   const itemKey = (value) => resolveItemByName(value)?.id ?? monKey(value)
   const appliedLevels = new Set((applied?.levels ?? []).map((entry) => `${monKey(entry.target)}|${entry.mode}|${entry.value}`))
@@ -465,22 +465,16 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     appliedMoneyCounts.set(Number(value), count - 1)
     return false
   })
-  // Semantic model đôi khi gộp nhiều giao dịch thành một net delta trong khi
-  // deterministic reconciler đã commit một phần. Nếu giữ nguyên aggregate sẽ
-  // trừ/cộng lặp. Chỉ tách phần dư khi response semantic có đúng MỘT delta và
-  // delta đó bao trùm net đã áp cùng chiều; các event riêng lẻ vẫn giữ nguyên.
-  if (consumeExactMoney && extraMoneyEntries.length === 1 && filteredMoneyEntries.length === 1) {
-    const appliedMoney = applied?.moneyEntries?.length ? applied.moneyEntries.map(Number) : (applied?.money ? [Number(applied.money)] : [])
-    const appliedNet = appliedMoney.reduce((sum, value) => sum + (Number(value) || 0), 0)
-    const candidate = Number(filteredMoneyEntries[0]) || 0
-    if (appliedNet && candidate && Math.sign(appliedNet) === Math.sign(candidate)) {
-      if (Math.abs(candidate) > Math.abs(appliedNet)) {
-        const residual = candidate - appliedNet
-        filteredMoneyEntries = residual ? [residual] : []
-      } else {
-        filteredMoneyEntries = []
-      }
-    }
+
+  // Đợt 118: deterministic canon là trọng tài cuối cho MONEY. Trước đây nếu
+  // app đã thấy -600 nhưng Semantic AI đoán nhầm -98.800, logic “residual” có
+  // thể biến nó thành -98.200 rồi vẫn commit. Bây giờ mọi delta MONEY semantic
+  // còn lại phải có một evidence giao dịch độc lập trong chính văn; số dư còn
+  // lại/giá/quantity không thể được model dùng để bịa phần chênh.
+  if (moneyText && filteredMoneyEntries.length) {
+    filteredMoneyEntries = filterMoneyEntriesAgainstCanon(filteredMoneyEntries, moneyText, {
+      alreadyApplied: applied,
+    }).accepted
   }
   return {
     ...extra,
@@ -2828,7 +2822,7 @@ export default function RoleplayChat() {
           // Semantic engine là nguồn chính; deterministic money/UI transaction
           // chỉ được ưu tiên để tránh trừ/cộng đôi. KHÔNG dùng input gate hay
           // validator legacy để phủ quyết event đã được đọc từ canon.
-          semanticParsed = filterSupplementalDuplicates(semanticParsed, stateParsed, { consumeExactMoney: true })
+          semanticParsed = filterSupplementalDuplicates(semanticParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
           stateParsed = mergeStateManifests(stateParsed, semanticParsed)
 
           // Đợt 106: nếu có State API 2, dùng nó như AUDITOR đồng bộ NGAY trong
@@ -2859,7 +2853,7 @@ export default function RoleplayChat() {
               let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
               auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-              auditorParsed = filterSupplementalDuplicates(auditorParsed, stateParsed, { consumeExactMoney: true })
+              auditorParsed = filterSupplementalDuplicates(auditorParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
               stateParsed = mergeStateManifests(stateParsed, auditorParsed)
               immediateAuditorAudit = {
                 proposed: auditor.proposedCount,
@@ -2915,7 +2909,7 @@ export default function RoleplayChat() {
               let focusParsed = filterUiPreAppliedState(row.result.parsed, preAppliedState)
               focusParsed = gateSemanticOwnership(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               focusParsed = gatePokecenterInteraction(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-              focusParsed = filterSupplementalDuplicates(focusParsed, stateParsed, { consumeExactMoney: true })
+              focusParsed = filterSupplementalDuplicates(focusParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
               const accepted = countParsedStateOperations(focusParsed)
               stateParsed = mergeStateManifests(stateParsed, focusParsed)
               focusedAudit.push({
@@ -3177,7 +3171,7 @@ export default function RoleplayChat() {
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
                 parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
                 parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-                parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true })
+                parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true, moneyText: displayText })
                 passAuditBase = {
                   pass: scanIndex + 1,
                   role: passSpec.role,
@@ -3333,6 +3327,25 @@ export default function RoleplayChat() {
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
+      // Đợt 118: “Quét lại biến thật” sửa được cả ledger MONEY đời cũ đã
+      // commit sai. Ví dụ canon trừ 600 nhưng bản cũ ghi -98.800: hoàn lại
+      // đúng phần chênh +98.200 rồi thay ledger bằng transaction canon -600.
+      const historicalMoneyRepair = reconcileAppliedMoneyLedger(applied, storyText)
+      if (historicalMoneyRepair.changed) {
+        if (historicalMoneyRepair.correction) {
+          setPlayerProfile((cur) => ({
+            ...(cur ?? {}),
+            money: Math.max(0, (Number(cur?.money) || 0) + historicalMoneyRepair.correction),
+          }))
+        }
+        applied = {
+          ...applied,
+          moneyEntries: historicalMoneyRepair.repaired,
+          money: historicalMoneyRepair.repaired.reduce((sum, value) => sum + Number(value || 0), 0),
+        }
+        lines.push(`🛠 💰 Sửa ledger tiền cũ: ${historicalMoneyRepair.original.join(', ')} → ${historicalMoneyRepair.repaired.join(', ')}${historicalMoneyRepair.correction ? ` (bù ${historicalMoneyRepair.correction > 0 ? '+' : ''}${historicalMoneyRepair.correction})` : ''}`)
+      }
+
       // Đợt 101: MONEY deterministic chạy ngay cả khi không có State API.
       // Nếu nó sửa được tiền, ledger được ghi cùng message trước khi mở khóa.
       const rerollMoney = reconcileMoneyDirectives(parseStoryStateTags(''), storyText, { alreadyApplied: applied })
@@ -3371,7 +3384,7 @@ export default function RoleplayChat() {
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
           parsed = gateSemanticOwnership(parsed, storyText)
           parsed = gatePokecenterInteraction(parsed, storyText)
-          parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true })
+          parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true, moneyText: storyText })
         } catch (scanError) {
           lines.push(`⚠ Semantic scan ${scanIndex + 1}${passSpec.focus ? ` (${passSpec.focus.label})` : ''} lỗi: ${scanError.message}`)
           rerollAuditPasses.push({
@@ -3444,6 +3457,11 @@ export default function RoleplayChat() {
               detected: rerollMoney.transactions.length,
               added: rerollMoney.inferredAdded.length,
               deltas: rerollMoney.inferredAdded,
+              repairedLedger: historicalMoneyRepair.changed ? {
+                from: historicalMoneyRepair.original,
+                to: historicalMoneyRepair.repaired,
+                correction: historicalMoneyRepair.correction,
+              } : null,
               transactions: rerollMoney.transactions.map((entry) => ({
                 delta: entry.delta,
                 kind: entry.kind,

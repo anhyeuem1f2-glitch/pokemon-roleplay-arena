@@ -11,7 +11,7 @@ const LEARNSETS_URL = 'https://play.pokemonshowdown.com/data/learnsets.json'
 // v5 (đợt 35): bảng all giữ thêm boosts/target/self/secondary — bắt buộc bump
 // key vì cache lưu output ĐÃ xử lý, người dùng cache cũ sẽ thiếu field mới.
 const MOVES_CACHE_KEY = 'trainer-arena:moves-cache-v8'
-const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v4'
+const LEARNSETS_CACHE_KEY = 'trainer-arena:learnsets-cache-v5'
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30 // 30 ngày
 
 // Showdown ghi lịch sử học chiêu qua từng thế hệ (VD 9L20, 8M...).
@@ -153,10 +153,17 @@ export async function loadMovesData() {
 }
 
 /**
- * Tải learnset thật, trả về object { [speciesId]: [{move: moveId, level}] }
- * — CHỈ giữ chiêu học qua level-up (method "L") ở gen mới nhất, đã lược bớt
- * hẳn TM/tutor/egg/event move và lịch sử các gen cũ để nhẹ hơn nhiều so với
- * file gốc (file gốc ghi lịch sử mọi cách học qua mọi thế hệ).
+ * Tải learnset thật của thế hệ hiện hành cho từng loài/form.
+ *
+ * Đợt 119: trước đây cache chỉ giữ Level-up (L) + Machine (M). Điều đó đủ
+ * cho encounter thường nhưng làm Sandbox không thể chọn Egg/Tutor/Special
+ * dù Showdown xác nhận loài đó học được. Bây giờ giữ MỌI method của đúng
+ * thế hệ đã chọn, nhưng vẫn bỏ lịch sử thế hệ cũ để cache không phình vô hạn.
+ *
+ * Output: { [speciesId]: [{ move, level, method, generation, detail }] }
+ * - L: level-up (level được parse từ detail)
+ * - M/T/E/S/...: machine, tutor, egg, special/event... giữ nguyên method code
+ *   để UI có thể giải thích nguồn học mà không phải đoán lại từ tên chiêu.
  */
 export function normalizeLearnsets(raw) {
   const out = {}
@@ -174,26 +181,28 @@ export function normalizeLearnsets(raw) {
         if (info.method === 'L') latestLevelGeneration = Math.max(latestLevelGeneration, info.generation)
       }
     }
+    // Nếu loài có learnset level-up ở gen mới nhất thì coi đó là gen hiện
+    // hành. Với loài cũ không còn level-up ở gen 9, dùng gen mới nhất có data.
     const chosenGeneration = latestLevelGeneration || latestAnyGeneration
     if (!chosenGeneration) continue
 
     const moves = []
     for (const [moveId, methods] of Object.entries(learnset)) {
-      let gotLevelUp = false
-      let gotTm = false
+      const seenMethods = new Set()
       for (const rawMethod of methods ?? []) {
         const info = learnMethodInfo(rawMethod)
         if (!info || info.generation !== chosenGeneration) continue
-        if (info.method === 'L' && !gotLevelUp) {
-          const level = parseInt(info.detail, 10)
-          if (!Number.isNaN(level)) {
-            moves.push({ move: moveId, level, method: 'L', generation: chosenGeneration })
-            gotLevelUp = true
-          }
-        } else if (info.method === 'M' && !gotTm) {
-          moves.push({ move: moveId, level: 0, method: 'M', generation: chosenGeneration })
-          gotTm = true
-        }
+        const methodKey = `${info.method}|${info.detail}`
+        if (seenMethods.has(methodKey)) continue
+        seenMethods.add(methodKey)
+        const level = info.method === 'L' ? parseInt(info.detail, 10) : 0
+        moves.push({
+          move: moveId,
+          level: Number.isFinite(level) ? level : 0,
+          method: info.method,
+          generation: chosenGeneration,
+          detail: info.detail || '',
+        })
       }
     }
     if (moves.length) out[speciesId] = moves

@@ -3288,3 +3288,40 @@ Không cần upload `public/`, `package.json`, `package-lock.json`, cấu hình 
 - Tab Chỉ số bỏ thanh tương đối gây hiểu nhầm; save cũ thiếu 6 stat được hydrate từ Pokédex rồi tính lại deterministic.
 - Semantic badge/quest giữ provenance semantic để validator legacy không bác lại; money recognizer hiểu thêm ngữ cảnh trao/nhận phần thưởng.
 - Hệ chiêu vẫn không giới hạn 4 và không tự xoá chiêu khi tiến hoá.
+
+## Đợt 119 — Gym Battle Ownership + Sandbox Full Learnset
+
+### Gym/NPC battle không còn chiếm đội hình người chơi
+
+- `[[BATTLE]]` bây giờ có thêm **Battle Ownership Gate**: ngoài việc có đối thủ/cue chiến đấu, app còn kiểm tra trận đó có thực sự thuộc về nhân vật chính hay không.
+- Cảnh kiểu `main đi cùng bạn tới Gym, đứng xem bạn thử thách Gym` không còn mọc quả cầu mở BattleModal bằng party người chơi.
+- Nếu người chơi thật sự thách đấu, tham gia đánh đôi cùng bạn, hoặc Pokémon của người chơi được tung ra sân thì battle vẫn mở bình thường.
+- Khi load save cũ còn marker sai, thao tác bấm mở battle cũng được kiểm tra lại để không dùng nhầm đội hình.
+
+### Sandbox chọn chiêu từ toàn bộ learnset hợp lệ
+
+- Cache learnset nâng lên `v5`: ngoài Level-up (`L`) và Machine/TM/TR (`M`), runtime giữ thêm Tutor, Egg Move, Special/Event và các method khác của đúng thế hệ learnset đang dùng.
+- Pokémon Builder của Sandbox có panel **Chiêu thức Sandbox · full learnset** với tìm kiếm, chọn từng chiêu, `Chọn tất cả`, preset `Level-up` và `Auto / Xoá chọn`.
+- Pool chỉ chứa chiêu mà đúng species/form có trong learnset; không phải toàn bộ move của game.
+- Không giới hạn 4 chiêu. Người chơi có thể chốt bao nhiêu chiêu trong learnset cũng được.
+- Bộ chiêu được chọn được ghi thẳng vào cá thể trước opening và không bị `repairOwnedMonMoves()` tự nhét thêm level-up move làm thay đổi lựa chọn ban đầu.
+
+### Regression đợt 119
+
+- `test-dot119.mjs`: 11/11 PASS — bao phủ learnset nhiều nguồn, full Sandbox move picker, bảo toàn bộ chiêu đã chọn và Gym spectator ownership.
+- Toàn bộ regression `test-dot73.mjs` → `test-dot119.mjs` PASS.
+- 73/73 file `.js` qua `node --check`.
+- 53/53 file `.jsx` parse sạch bằng TypeScript JSX parser.
+
+### File cần cập nhật lên GitHub sau đợt 119
+
+Upload/ghi đè:
+
+- `src/components/IntroScreen.jsx`
+- `src/components/RoleplayChat.jsx`
+- `src/data/pokemonSpecies.js`
+- `src/utils/movesFetch.js`
+- `src/utils/battleOwnership.js` **(file mới)**
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot119.mjs`.

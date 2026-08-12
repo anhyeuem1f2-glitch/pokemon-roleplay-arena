@@ -462,7 +462,10 @@ export function repairOwnedMonMoves(mon, movesDb) {
     seen.add(id)
   }
 
-  const eligible = learnsetForMon(mon, movesDb)
+  // Sandbox full-learnset selection là lựa chọn CỐ Ý của người chơi. Chữa
+  // save không được tự nhét thêm toàn bộ level-up move rồi phá bộ chiêu đã
+  // chốt. Sau khi vào game, level-up mới vẫn có thể queue chiêu mới bình thường.
+  const eligible = mon.sandboxMoveSelection ? [] : learnsetForMon(mon, movesDb)
     .filter((entry) => entry.method === 'L' && entry.level <= (mon.level ?? 1))
     .sort((a, b) => a.level - b.level || a.move.localeCompare(b.move))
   for (const entry of eligible) {
@@ -718,21 +721,34 @@ function fallbackMoves(speciesEntry) {
  * KHÔNG giới hạn 4 chiêu như hệ theo lượt. Trả về mảng {name, type, power,
  * category} đã khử trùng lặp, sort theo tên. Trống nếu chưa tải movesDb.
  */
-export function getMovePool(speciesEntry, movesDb) {
-  if (!movesDb?.learnsets || !movesDb?.allMoves) return []
+export function getMovePoolDetailed(speciesEntry, movesDb) {
+  if (!speciesEntry || !movesDb?.learnsets || !movesDb?.allMoves) return []
   const learnset =
     movesDb.learnsets[speciesEntry.species] ??
     (speciesEntry.baseSpeciesId ? movesDb.learnsets[speciesEntry.baseSpeciesId] : null)
   if (!learnset) return []
-  const seen = new Set()
-  const pool = []
-  for (const e of learnset) {
-    if (seen.has(e.move)) continue
-    seen.add(e.move)
-    const mv = movesDb.allMoves[e.move]
-    if (mv) pool.push(mv)
+  const byMove = new Map()
+  for (const entry of learnset) {
+    const id = moveId(entry.move)
+    if (!id) continue
+    const move = movesDb.allMoves[id]
+    if (!move) continue
+    const current = byMove.get(id) ?? { move: { ...move, id }, sources: [] }
+    if (!current.sources.some((source) => source.method === entry.method && source.level === entry.level && source.detail === entry.detail)) {
+      current.sources.push({
+        method: entry.method ?? '?',
+        level: Number(entry.level) || 0,
+        generation: Number(entry.generation) || null,
+        detail: entry.detail ?? '',
+      })
+    }
+    byMove.set(id, current)
   }
-  return pool.sort((a, b) => a.name.localeCompare(b.name))
+  return [...byMove.values()].sort((a, b) => a.move.name.localeCompare(b.move.name))
+}
+
+export function getMovePool(speciesEntry, movesDb) {
+  return getMovePoolDetailed(speciesEntry, movesDb).map((entry) => entry.move)
 }
 
 export function buildWildMon(speciesEntry, level = 10, movesDb = null, opponentTypes = null, isTrainerMon = false) {

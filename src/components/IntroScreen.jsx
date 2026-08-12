@@ -7,7 +7,7 @@ import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
-import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES } from '../data/pokemonSpecies.js'
+import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES, getMovePoolDetailed, moveId } from '../data/pokemonSpecies.js'
 import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
 import { validateStateAgainstProse } from '../utils/stateEvidence.js'
@@ -108,6 +108,32 @@ function starterGenderLabel(value) {
   if (value === 'female') return '♀ Cái'
   if (value === 'unknown') return '◇ Vô giới tính'
   return '🎲 Tự động'
+}
+
+const SANDBOX_MOVE_METHOD_LABELS = {
+  L: 'Level-up',
+  M: 'TM / TR',
+  T: 'Tutor',
+  E: 'Egg Move',
+  S: 'Special / Event',
+  D: 'Special',
+  V: 'Virtual Console',
+  R: 'Reminder / nguồn đặc biệt',
+}
+
+function sandboxMoveSourceLabel(sources = []) {
+  const labels = []
+  for (const source of sources) {
+    let label = SANDBOX_MOVE_METHOD_LABELS[source?.method] ?? `Nguồn ${source?.method ?? '?'}`
+    if (source?.method === 'L' && Number.isFinite(Number(source?.level))) label += ` Lv.${Number(source.level)}`
+    if (!labels.includes(label)) labels.push(label)
+  }
+  return labels.join(' · ')
+}
+
+function sandboxMoveWithPp(move) {
+  const maxPp = Math.max(1, Number(move?.maxPp ?? move?.pp) || 35)
+  return { ...move, maxPp, currentPp: maxPp, starred: Boolean(move?.starred) }
 }
 
 
@@ -324,6 +350,10 @@ export default function IntroScreen({ onOpenSettings }) {
   const [sandboxStarterIvs, setSandboxStarterIvs] = useState({ ...SANDBOX_DEFAULT_IVS })
   const [sandboxStarterEvMode, setSandboxStarterEvMode] = useState('zero')
   const [sandboxStarterEvs, setSandboxStarterEvs] = useState({ ...SANDBOX_DEFAULT_EVS })
+  // Đợt 119: Sandbox được quyền chọn từ TOÀN BỘ learnset hợp lệ của đúng
+  // species/form, không chỉ bộ level-up ngẫu nhiên lúc build mon.
+  const [sandboxStarterMoveIds, setSandboxStarterMoveIds] = useState([])
+  const [sandboxMoveSearch, setSandboxMoveSearch] = useState('')
   const [editingSandboxStarterIndex, setEditingSandboxStarterIndex] = useState(null)
   const [sandboxItems, setSandboxItems] = useState([])
   const [sandboxItemId, setSandboxItemId] = useState('pokeball')
@@ -405,6 +435,14 @@ export default function IntroScreen({ onOpenSettings }) {
     return normalizeAbilityOptions(base?.abilities)
   })()
   const sandboxStarterGenderOptions = sandboxGenderOptions(sandboxEffectiveStarterEntry)
+  const sandboxStarterMovePool = sandboxEffectiveStarterEntry ? getMovePoolDetailed(sandboxEffectiveStarterEntry, movesDb) : []
+  const sandboxFilteredMovePool = sandboxStarterMovePool.filter((entry) => {
+    const q = sandboxMoveSearch.trim().toLowerCase()
+    if (!q) return true
+    return entry.move.name.toLowerCase().includes(q)
+      || String(entry.move.type ?? '').toLowerCase().includes(q)
+      || sandboxMoveSourceLabel(entry.sources).toLowerCase().includes(q)
+  })
   const sandboxPreviewMon = sandboxEffectiveStarterEntry ? {
     name: sandboxEffectiveStarterEntry.name,
     species: sandboxEffectiveStarterEntry.species,
@@ -430,6 +468,8 @@ export default function IntroScreen({ onOpenSettings }) {
     setSandboxStarterIvs({ ...SANDBOX_DEFAULT_IVS })
     setSandboxStarterEvMode('zero')
     setSandboxStarterEvs({ ...SANDBOX_DEFAULT_EVS })
+    setSandboxStarterMoveIds([])
+    setSandboxMoveSearch('')
     setEditingSandboxStarterIndex(null)
     if (!keepLevel) setSandboxStarterLevel('5')
   }
@@ -477,6 +517,9 @@ export default function IntroScreen({ onOpenSettings }) {
       ivs,
       evMode: sandboxStarterEvMode,
       evs,
+      // Danh sách move ID do người chơi chốt. [] = dùng bộ khởi tạo tự động;
+      // có phần tử = dùng chính xác các chiêu đã chọn, không giới hạn 4.
+      moveIds: [...new Set(sandboxStarterMoveIds.map(moveId).filter(Boolean))],
     }
   }
 
@@ -534,6 +577,8 @@ export default function IntroScreen({ onOpenSettings }) {
     setSandboxStarterIvs(Object.fromEntries(SANDBOX_STAT_KEYS.map((key) => [key, String(starter.ivs?.[key] ?? 31)])))
     setSandboxStarterEvMode(starter.evMode ?? (starter.evs ? 'custom' : 'zero'))
     setSandboxStarterEvs(Object.fromEntries(SANDBOX_STAT_KEYS.map((key) => [key, String(starter.evs?.[key] ?? 0)])))
+    setSandboxStarterMoveIds(Array.isArray(starter.moveIds) ? starter.moveIds.map(moveId).filter(Boolean) : [])
+    setSandboxMoveSearch('')
     setEditingSandboxStarterIndex(index)
     setError(null)
   }
@@ -651,6 +696,22 @@ export default function IntroScreen({ onOpenSettings }) {
           ability: chosenAbility.name,
           abilitySlot: chosenAbility.slot,
           abilityHidden: Boolean(chosenAbility.hidden),
+        }
+      }
+      if (Array.isArray(starter.moveIds) && starter.moveIds.length) {
+        const legalIds = new Set(getMovePoolDetailed(entry, movesDb).map((poolEntry) => moveId(poolEntry.move)))
+        const selectedMoves = [...new Set(starter.moveIds.map(moveId).filter(Boolean))]
+          .filter((id) => legalIds.has(id))
+          .map((id) => movesDb?.allMoves?.[id])
+          .filter(Boolean)
+          .map(sandboxMoveWithPp)
+        if (selectedMoves.length) {
+          customized = {
+            ...customized,
+            moves: selectedMoves,
+            movesetSource: 'sandbox-full-learnset-selected',
+            sandboxMoveSelection: true,
+          }
         }
       }
       customized = recomputeMonStats(customized)
@@ -1414,6 +1475,8 @@ export default function IntroScreen({ onOpenSettings }) {
                         setSandboxStarterFormSpecies('')
                         setSandboxStarterAbilitySlot('auto')
                         setSandboxStarterGender('auto')
+                        setSandboxStarterMoveIds([])
+                        setSandboxMoveSearch('')
                       }}
                       placeholder="VD: Garchomp, Eevee, Giratina"
                     />
@@ -1430,6 +1493,8 @@ export default function IntroScreen({ onOpenSettings }) {
                         setSandboxStarterFormSpecies(event.target.value)
                         setSandboxStarterAbilitySlot('auto')
                         setSandboxStarterGender('auto')
+                        setSandboxStarterMoveIds([])
+                        setSandboxMoveSearch('')
                       }}
                     >
                       {!sandboxBaseStarterEntry && <option value="">Chọn loài trước</option>}
@@ -1578,6 +1643,69 @@ export default function IntroScreen({ onOpenSettings }) {
                         </div>
                       </div>
 
+                      <div style={{ padding: 10, border: '1px solid var(--line)', borderRadius: 8, background: 'rgba(80,180,255,0.025)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ color: 'var(--mint)', fontWeight: 800, fontSize: 11.5 }}>Chiêu thức Sandbox · full learnset</div>
+                            <div style={{ color: 'var(--text-dim)', fontSize: 9.8, marginTop: 2 }}>
+                              Chọn từ toàn bộ chiêu đúng loài/form có thể học: Level-up, TM/TR, Tutor, Egg Move và nguồn đặc biệt trong learnset. Không giới hạn 4 chiêu.
+                            </div>
+                          </div>
+                          <div style={{ color: 'var(--amber)', fontSize: 10.5, fontWeight: 700 }}>
+                            {sandboxStarterMoveIds.length ? `${sandboxStarterMoveIds.length}/${sandboxStarterMovePool.length} đã chọn` : `Auto · ${sandboxStarterMovePool.length} chiêu khả dụng`}
+                          </div>
+                        </div>
+
+                        {!movesDb?.learnsets || !movesDb?.allMoves ? (
+                          <div style={{ marginTop: 8, color: 'var(--text-dim)', fontSize: 10.5 }}>Đang tải learnset đầy đủ… Có thể tiếp tục cấu hình; danh sách sẽ tự hiện khi dữ liệu sẵn sàng.</div>
+                        ) : sandboxStarterMovePool.length === 0 ? (
+                          <div style={{ marginTop: 8, color: 'var(--text-dim)', fontSize: 10.5 }}>Không tìm thấy learnset cho form này. Nếu form kế thừa loài gốc, hãy thử chọn form mặc định.</div>
+                        ) : (
+                          <>
+                            <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) auto auto auto', gap: 7, marginTop: 9, alignItems: 'center' }}>
+                              <input
+                                value={sandboxMoveSearch}
+                                onChange={(event) => setSandboxMoveSearch(event.target.value)}
+                                placeholder="Tìm chiêu, hệ hoặc nguồn học…"
+                              />
+                              <button className="btn" type="button" onClick={() => setSandboxStarterMoveIds(sandboxStarterMovePool.map((entry) => moveId(entry.move)))}>Chọn tất cả</button>
+                              <button className="btn" type="button" onClick={() => setSandboxStarterMoveIds(sandboxStarterMovePool.filter((entry) => entry.sources.some((source) => source.method === 'L')).map((entry) => moveId(entry.move)))}>Level-up</button>
+                              <button className="btn" type="button" onClick={() => setSandboxStarterMoveIds([])}>Auto / Xoá chọn</button>
+                            </div>
+                            <div style={{ marginTop: 8, maxHeight: 260, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 7 }}>
+                              {sandboxFilteredMovePool.map((entry) => {
+                                const id = moveId(entry.move)
+                                const checked = sandboxStarterMoveIds.includes(id)
+                                return (
+                                  <label
+                                    key={id}
+                                    style={{
+                                      display: 'grid', gridTemplateColumns: '24px minmax(130px,1fr) 72px minmax(120px,1fr)', gap: 7,
+                                      alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid rgba(255,255,255,0.035)',
+                                      cursor: 'pointer', background: checked ? 'rgba(100,220,180,0.06)' : 'transparent',
+                                    }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(event) => setSandboxStarterMoveIds((current) => event.target.checked
+                                        ? [...new Set([...current, id])]
+                                        : current.filter((move) => move !== id))}
+                                    />
+                                    <span style={{ color: 'var(--text-hi)', fontSize: 10.8, fontWeight: 700 }}>{entry.move.name}</span>
+                                    <span style={{ color: 'var(--text-mid)', fontSize: 9.5, textTransform: 'uppercase' }}>{entry.move.type}</span>
+                                    <span style={{ color: 'var(--text-dim)', fontSize: 9.2 }}>{sandboxMoveSourceLabel(entry.sources)}</span>
+                                  </label>
+                                )
+                              })}
+                              {sandboxFilteredMovePool.length === 0 && (
+                                <div style={{ padding: 10, color: 'var(--text-dim)', fontSize: 10.5 }}>Không có chiêu khớp tìm kiếm.</div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+
                       <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
                         {editingSandboxStarterIndex !== null && (
                           <button className="btn" type="button" onClick={() => resetSandboxStarterDraft({ keepLevel: true })}>Huỷ sửa</button>
@@ -1608,7 +1736,7 @@ export default function IntroScreen({ onOpenSettings }) {
                             {index < 6 ? `Party ${index + 1}` : `PC ${index - 5}`} · {entry.shiny ? '✨ ' : ''}{entry.nickname ? `${entry.nickname} (${entry.species})` : entry.species} · Lv.{entry.level} · {starterGenderLabel(entry.gender)}
                           </div>
                           <div style={{ fontSize: 9.8, color: 'var(--text-dim)', marginTop: 2 }}>
-                            Nature {entry.nature === 'auto' ? 'Auto' : entry.nature} · Ability {entry.abilityName ?? (entry.abilitySlot === 'auto' ? 'Auto' : `slot ${entry.abilitySlot}`)} · Tera {entry.teraType === 'auto' ? 'Auto' : String(entry.teraType).toUpperCase()} · IV {entry.ivMode === 'random' ? 'Random' : entry.ivMode === 'max' ? '31×6' : 'Custom'} · EV {entry.evMode === 'max' ? '252×6' : entry.evMode === 'zero' ? '0' : 'Custom'}
+                            Nature {entry.nature === 'auto' ? 'Auto' : entry.nature} · Ability {entry.abilityName ?? (entry.abilitySlot === 'auto' ? 'Auto' : `slot ${entry.abilitySlot}`)} · Tera {entry.teraType === 'auto' ? 'Auto' : String(entry.teraType).toUpperCase()} · IV {entry.ivMode === 'random' ? 'Random' : entry.ivMode === 'max' ? '31×6' : 'Custom'} · EV {entry.evMode === 'max' ? '252×6' : entry.evMode === 'zero' ? '0' : 'Custom'} · Chiêu {entry.moveIds?.length ? `${entry.moveIds.length} đã chọn` : 'Auto'}
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>

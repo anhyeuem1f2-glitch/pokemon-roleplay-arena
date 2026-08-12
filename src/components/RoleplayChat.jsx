@@ -6,6 +6,7 @@ import { generateActionChoices } from '../services/actionChoiceGenerator.js'
 import { enrichItemDescription, itemDescriptionNeedsEnrichment, applyEnrichedItemMetadata, prepareItemForDescriptionEnrichment } from '../services/itemDescriptionEnricher.js'
 import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
+import { battleBelongsToPlayer } from '../utils/battleOwnership.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { buildToneNote } from '../data/storyTones.js'
@@ -156,6 +157,9 @@ function battleMarkerHasCanonSetup(storyText, userText, pokedex, ownNames = [], 
   if (reroll && !rerollPriorSupportsBattle(priorText)) return false
   const beforeMarker = String(storyText ?? '').split(BATTLE_MARKER)[0]
   const combined = `${String(userText ?? '')}\n${beforeMarker}`
+  // Đợt 119: marker của trận NPC/Gym mà người chơi chỉ đứng xem không được
+  // mở BattleModal bằng party người chơi.
+  if (!battleBelongsToPlayer({ storyText: beforeMarker, userText, ownNames })) return false
   const activeOpponent = detectBattleOpponentSpecies(beforeMarker, pokedex ?? [], { excludeNames: ownNames })
   if (activeOpponent) return true
   const trainer = detectTrainerBattle(combined)
@@ -4023,6 +4027,11 @@ export default function RoleplayChat() {
                   const previousUserText = messages[i - 1]?.role === 'user' ? messages[i - 1].content : ''
                   const battleSource = `${previousUserText}
 ${m.content}`
+                  const battleOwnNames = [...(party ?? []).flatMap((pm) => [pm?.name, pm?.nickname]), playerMon?.name, playerMon?.nickname].filter(Boolean)
+                  if (!battleBelongsToPlayer({ storyText: m.content, userText: previousUserText, ownNames: battleOwnNames })) {
+                    window.alert('Đây là trận của NPC/người đồng hành mà nhân vật chính đang đứng xem, nên game không dùng đội hình của bạn để mở battle.')
+                    return
+                  }
                   const battleCtx = detectTrainerBattle(battleSource)
                   const doubleCtx = detectDoubleBattle(battleSource, battleCtx)
                   if (doubleCtx.isDouble && healthy.length < 2) {
@@ -4033,7 +4042,7 @@ ${m.content}`
                   setActiveBattleMsgIndex(i)
 
                   if (!m.battleStarted) {
-                    const ownNames = [...(party ?? []).map((pm) => pm?.name), playerMon?.name].filter(Boolean)
+                    const ownNames = battleOwnNames
                     const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
                     const activeMentionedList = detectBattleOpponentSpeciesList(m.content, pokedexSpecies, { excludeNames: ownNames })
                       .concat(detectBattleOpponentSpeciesList(previousUserText, pokedexSpecies, { excludeNames: ownNames }))

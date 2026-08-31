@@ -23,6 +23,7 @@ import { startingMoneyForIdentity } from '../data/identities.js'
 import { normalizeDynamicState } from '../data/dynamicState.js'
 import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 import { completeSandboxBootstrap, loadSandboxBootstrap } from '../utils/sandboxBootstrap.js'
+import { normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from '../i18n/uiLanguage.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -63,6 +64,18 @@ function normalizeChatPreferences(value) {
 }
 
 export function GameProvider({ children }) {
+  // --- Ngôn ngữ UI (đợt 120): thiết lập theo thiết bị, không gắn vào save truyện. ---
+  const [uiLanguage, setUiLanguageState] = useState(() => {
+    try { return normalizeUiLanguage(localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || 'vi') } catch { return 'vi' }
+  })
+  const setUiLanguage = useCallback((next) => {
+    setUiLanguageState((cur) => {
+      const resolved = normalizeUiLanguage(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, resolved) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+
   // Admin Mode chỉ sống trong SESSION hiện tại: không chèn vào save, không
   // theo người chơi sang máy khác và không có URL/query công khai để bật.
   const [adminMode, setAdminModeState] = useState(() => {
@@ -1179,6 +1192,8 @@ export function GameProvider({ children }) {
   }, [movesDb, movesDbStatus, playerMon?.types, pokedexSpecies, setEnemyMon, setMessages])
 
   const value = {
+    uiLanguage,
+    setUiLanguage,
     adminMode,
     unlockAdmin,
     lockAdmin,

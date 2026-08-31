@@ -37,6 +37,7 @@ import { ALL_TYPES } from '../data/pokemonTypes.js'
 import { generateLootItems } from '../data/shopGenerator.js'
 import PokeballSpinner from './PokeballSpinner.jsx'
 import RetroBattleIntro from './RetroBattleIntro.jsx'
+import LanguageSwitcher from './LanguageSwitcher.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyDynamicStateUpdates } from '../data/dynamicState.js'
 import { saveSandboxBootstrap } from '../utils/sandboxBootstrap.js'
@@ -1062,6 +1063,7 @@ export default function IntroScreen({ onOpenSettings }) {
   if (stage === 'title') {
     return (
       <div className={`intro-bg ${showMenu ? 'intro-bg--revealed' : ''}`}>
+        <LanguageSwitcher fixed />
         {showHomage && <RetroBattleIntro active={!homageDimmed} dimmed={homageDimmed} onComplete={finishTitleIntro} />}
         {showHomage && (
           <button className="intro-skip" onClick={skipTitleIntro}>

@@ -8,6 +8,7 @@ import PlayerHUD from './components/PlayerHUD.jsx'
 import RightHUD from './components/RightHUD.jsx'
 import MoveLearnModal from './components/MoveLearnModal.jsx'
 import AdminModal from './components/AdminModal.jsx'
+import LanguageSwitcher from './components/LanguageSwitcher.jsx'
 import { isAdminShortcut } from './data/adminMode.js'
 
 function GearIcon() {
@@ -111,6 +112,7 @@ export default function App() {
           <span>roleplay × battle engine</span>
         </div>
         <div className="btn-row" style={{ gap: isMobile ? 6 : 12, flexWrap: 'wrap' }}>
+          <LanguageSwitcher compact={isMobile} />
           <span className={`status-pill ${configured ? 'status-pill--ok' : ''}`}>
             {configured ? apiConfig.model : 'Chưa cấu hình API'}
           </span>

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import MusicController from './components/MusicController.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
+import UiLanguageRuntime from './components/UiLanguageRuntime.jsx'
 import { GameProvider } from './context/GameContext.jsx'
 import './index.css'
 
@@ -14,6 +15,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           hình (title / truyện / Dev / Settings), không phụ thuộc App return
           sớm ở nhánh nào. */}
       <MusicController />
+      <UiLanguageRuntime />
       <App />
     </GameProvider>
     </ErrorBoundary>

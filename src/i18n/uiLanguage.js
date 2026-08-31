@@ -74,6 +74,23 @@ const EN = {
   'Thân phận quyết định cách thế giới nhìn bạn và những biến cố tự tìm tới bạn (Đạo diễn tình huống dùng đúng pool của thân phận này). Chọn một — hoặc tự viết ở cuối danh sách.': 'Identity determines how the world sees you and which events naturally find you. Choose one, or write a custom identity at the end.',
   'Quê nhà định hình giọng nói, mối quan hệ đầu đời — và tổ chức phản diện nào lảng vảng trong tin tức địa phương. Mỗi vùng một khí chất riêng.': 'Your home region shapes your accent, early relationships, and which villainous groups appear in local news. Every region has its own character.',
   'Mô tả cảnh mở màn bạn muốn — AI viết dựa theo ý này.': 'Describe the opening scene you want — AI will write from it.',
+  // Đợt 123: critical setup choices are local so they never depend on Google availability.
+  'Tiếp tục →': 'Continue →', '← Quay lại': '← Back',
+  'Khởi đầu mở': 'Open start', 'Dân lao động': 'Working class', 'Gia tộc & quyền quý': 'Clans & nobility', 'Giới thi đấu': 'Competitive scene', 'Giới xám': 'Underworld', 'Thực thi pháp luật': 'Law enforcement', 'Kiểm lâm & tự nhiên': 'Rangers & nature', 'Học thuật': 'Academia', 'Y tế': 'Healthcare', 'Truyền thông': 'Media', 'Biểu diễn': 'Performance', 'Thương nghiệp': 'Commerce', 'Nhân giống': 'Breeding', 'Khác': 'Other',
+  'Tính cách (chọn bao nhiêu nét tuỳ thích)': 'Personality (choose as many traits as you like)',
+  'Siêu năng lực (tuỳ chọn)': 'Special power (optional)',
+  'Chọn vài nét tính cách để AI khắc hoạ ĐÚNG nhân vật của bạn (không chọn thì AI dễ mặc định thành lạnh lùng, thực dụng). Có thể chọn nhiều nét.': 'Choose a few personality traits so the AI portrays your character accurately. You may select multiple traits.',
+  'Ấm áp, tốt bụng': 'Warm, kind', 'Vui vẻ, lạc quan': 'Cheerful, optimistic', 'Dũng cảm, gan dạ': 'Brave, fearless', 'Hiền lành, nhẹ nhàng': 'Gentle, soft-spoken', 'Tò mò, ham học hỏi': 'Curious, eager to learn', 'Trung thành, nghĩa khí': 'Loyal, honorable', 'Bướng bỉnh, kiên định': 'Stubborn, steadfast', 'Tinh nghịch, hài hước': 'Playful, humorous', 'Nhút nhát, kín đáo': 'Shy, reserved', 'Kiêu hãnh, tự tin': 'Proud, confident', 'Điềm tĩnh, chín chắn': 'Calm, mature', 'Nhiệt huyết, bốc đồng': 'Passionate, impulsive', 'Ranh mãnh, mưu mẹo': 'Cunning, crafty', 'Lạnh lùng, ít nói': 'Cold, quiet', 'Tham vọng, quyết đoán': 'Ambitious, decisive', 'Giàu lòng trắc ẩn': 'Compassionate',
+  'Không có (người thường)': 'None (ordinary person)', 'Aura / Nội lực': 'Aura / Inner power', 'Psychic (Siêu năng lực)': 'Psychic', 'Thấu hiểu Pokémon': 'Pokémon empathy', 'Linh cảm / Tiên tri': 'Intuition / Foresight', 'Cảm ứng nguyên tố': 'Elemental affinity', 'Tự mô tả…': 'Custom…',
+  'Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến nhân vật thành bất khả chiến bại.': 'Special powers are portrayed with restraint, limits, and consequences — they do not make the character invincible.',
+  'Tân binh tự do': 'Free-roaming rookie', 'Làm thuê nông trại Pokémon': 'Pokémon farmhand', 'Dân chài': 'Fisher family', 'Con nhà thợ mỏ': "Miner's child", 'Trẻ mồ côi tự lập': 'Self-reliant orphan',
+  'Con cháu đại gia tộc': 'Heir of a great clan', 'Hậu duệ gia tộc sa sút': 'Heir of a fallen clan', 'Con của trainer nổi tiếng': 'Child of a famous Trainer',
+  'Giang hồ đường phố': 'Street underworld local', 'Chân chạy vặt cho tổ chức': 'Organization runner', 'Cựu thành viên tổ chức đang rửa tay': 'Former organization member going clean', 'Con nhà buôn lậu Pokémon': 'Child of Pokémon smugglers', 'Chỉ điểm hai mang': 'Double informant', 'Cựu phụ việc săn trộm hoàn lương': 'Reformed former poaching aide',
+  'Học viên cảnh sát': 'Police academy trainee', 'Con nhà cảnh sát': 'Police family child', 'Trợ lý tập sự Cảnh sát Quốc tế': 'International Police trainee aide',
+  'Kiểm lâm tập sự': 'Ranger trainee', 'Phụ việc khu bảo tồn': 'Reserve assistant', 'Trợ lý nghiên cứu': 'Research assistant', 'Học việc khảo cổ': 'Archaeology apprentice',
+  'Thực tập sinh trung tâm Pokémon': 'Pokémon Center intern', 'Cứu hộ dã chiến': 'Field rescue medic', 'Đệ tử gym': 'Gym apprentice', 'Thí sinh liên đoàn bỏ dở': 'League dropout',
+  'Phóng viên tập sự': 'Trainee reporter', 'Nhiếp ảnh gia hoang dã': 'Wildlife photographer', 'Nghệ sĩ đường phố cùng Pokémon': 'Pokémon street performer', 'Con nhà thương lái rong': 'Child of traveling merchants', 'Con nhà trại nhân giống': 'Breeder-family child',
+
 }
 
 const ZH = {
@@ -121,6 +138,23 @@ const ZH = {
   'Thân phận quyết định cách thế giới nhìn bạn và những biến cố tự tìm tới bạn (Đạo diễn tình huống dùng đúng pool của thân phận này). Chọn một — hoặc tự viết ở cuối danh sách.': '身份决定世界如何看待你，以及哪些事件会自然找上门。选择一个，或在列表末尾自定义。',
   'Quê nhà định hình giọng nói, mối quan hệ đầu đời — và tổ chức phản diện nào lảng vảng trong tin tức địa phương. Mỗi vùng một khí chất riêng.': '故乡会塑造你的口音、早期关系，以及当地新闻中常出现的反派组织。每个地区都有独特气质。',
   'Mô tả cảnh mở màn bạn muốn — AI viết dựa theo ý này.': '描述你想要的开场场景——AI 会据此创作。',
+  // 第123轮：关键创建角色选项内置翻译，Google 暂时不可用时也不会混入越南语。
+  'Tiếp tục →': '继续 →', '← Quay lại': '← 返回',
+  'Khởi đầu mở': '自由开局', 'Dân lao động': '劳动阶层', 'Gia tộc & quyền quý': '家族与权贵', 'Giới thi đấu': '竞技圈', 'Giới xám': '灰色地带', 'Thực thi pháp luật': '执法体系', 'Kiểm lâm & tự nhiên': '护林与自然', 'Học thuật': '学术界', 'Y tế': '医疗', 'Truyền thông': '媒体', 'Biểu diễn': '表演', 'Thương nghiệp': '商业', 'Nhân giống': '培育', 'Khác': '其他',
+  'Tính cách (chọn bao nhiêu nét tuỳ thích)': '性格（可自由选择多个特质）',
+  'Siêu năng lực (tuỳ chọn)': '特殊能力（可选）',
+  'Chọn vài nét tính cách để AI khắc hoạ ĐÚNG nhân vật của bạn (không chọn thì AI dễ mặc định thành lạnh lùng, thực dụng). Có thể chọn nhiều nét.': '选择一些性格特质，让 AI 准确塑造你的角色。可以选择多个特质。',
+  'Ấm áp, tốt bụng': '温暖、善良', 'Vui vẻ, lạc quan': '开朗、乐观', 'Dũng cảm, gan dạ': '勇敢、无畏', 'Hiền lành, nhẹ nhàng': '温柔、和善', 'Tò mò, ham học hỏi': '好奇、好学', 'Trung thành, nghĩa khí': '忠诚、讲义气', 'Bướng bỉnh, kiên định': '固执、坚定', 'Tinh nghịch, hài hước': '调皮、幽默', 'Nhút nhát, kín đáo': '害羞、内敛', 'Kiêu hãnh, tự tin': '骄傲、自信', 'Điềm tĩnh, chín chắn': '沉着、成熟', 'Nhiệt huyết, bốc đồng': '热血、冲动', 'Ranh mãnh, mưu mẹo': '机灵、狡黠', 'Lạnh lùng, ít nói': '冷淡、寡言', 'Tham vọng, quyết đoán': '有野心、果断', 'Giàu lòng trắc ẩn': '富有同情心',
+  'Không có (người thường)': '没有（普通人）', 'Aura / Nội lực': '波导 / 内力', 'Psychic (Siêu năng lực)': '超能力（Psychic）', 'Thấu hiểu Pokémon': '理解宝可梦', 'Linh cảm / Tiên tri': '直觉 / 预知', 'Cảm ứng nguyên tố': '元素感应', 'Tự mô tả…': '自定义…',
+  'Siêu năng lực được thể hiện có chừng mực, có giới hạn và cái giá của nó — không biến nhân vật thành bất khả chiến bại.': '特殊能力会以适度方式呈现，并有明确限制与代价——不会让角色变得无敌。',
+  'Tân binh tự do': '自由新人', 'Làm thuê nông trại Pokémon': '宝可梦农场帮工', 'Dân chài': '渔家子弟', 'Con nhà thợ mỏ': '矿工家庭子弟', 'Trẻ mồ côi tự lập': '独立长大的孤儿',
+  'Con cháu đại gia tộc': '名门望族后裔', 'Hậu duệ gia tộc sa sút': '没落家族后裔', 'Con của trainer nổi tiếng': '知名训练家的孩子',
+  'Giang hồ đường phố': '街头灰色人物', 'Chân chạy vặt cho tổ chức': '组织跑腿', 'Cựu thành viên tổ chức đang rửa tay': '试图金盆洗手的前组织成员', 'Con nhà buôn lậu Pokémon': '宝可梦走私家庭子弟', 'Chỉ điểm hai mang': '双面线人', 'Cựu phụ việc săn trộm hoàn lương': '改过自新的前偷猎帮手',
+  'Học viên cảnh sát': '警校学员', 'Con nhà cảnh sát': '警察家庭子弟', 'Trợ lý tập sự Cảnh sát Quốc tế': '国际警察见习助理',
+  'Kiểm lâm tập sự': '见习护林员', 'Phụ việc khu bảo tồn': '保护区助手', 'Trợ lý nghiên cứu': '研究助理', 'Học việc khảo cổ': '考古学徒',
+  'Thực tập sinh trung tâm Pokémon': '宝可梦中心实习生', 'Cứu hộ dã chiến': '野外救援员', 'Đệ tử gym': '道馆学徒', 'Thí sinh liên đoàn bỏ dở': '中途退出联盟赛的选手',
+  'Phóng viên tập sự': '见习记者', 'Nhiếp ảnh gia hoang dã': '野生宝可梦摄影师', 'Nghệ sĩ đường phố cùng Pokémon': '宝可梦街头艺人', 'Con nhà thương lái rong': '行商家庭子弟', 'Con nhà trại nhân giống': '培育屋家庭子弟',
+
 }
 
 const FALLBACK_EN = [

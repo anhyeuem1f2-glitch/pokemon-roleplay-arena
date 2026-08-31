@@ -2283,3 +2283,18 @@ input[type='checkbox']:disabled { cursor:not-allowed; filter:grayscale(1); opaci
   .language-switcher--fixed { top: 12px; right: 12px; }
   .language-switcher__button { min-height: 32px; padding: 6px 9px; }
 }
+
+/* ===== ĐỢT 123 - language switcher không đè nút bỏ qua intro ===== */
+/* Giữ nút ngôn ngữ đúng yêu cầu ở góc trên-phải; chuyển Bỏ qua intro sang
+   góc trên-trái để menu ngôn ngữ mở xuống cũng không bao giờ chồng nhau. */
+.intro-bg > .intro-skip {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  right: auto;
+  bottom: auto;
+  z-index: 10019;
+}
+@media (max-width: 820px) {
+  .intro-bg > .intro-skip { top: 12px; left: 12px; right: auto; }
+}

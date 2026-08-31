@@ -152,7 +152,18 @@ export default function UiLanguageRuntime() {
       attributes: true,
       attributeFilter: ATTRIBUTE_NAMES,
     })
-    return () => observer.disconnect()
+
+    // Nếu Google Translate/bridge tạm rate-limit, bản 122 có thể để lại text Việt
+    // mãi cho tới lần mutation tiếp theo. Đợt 123 quét lại nhẹ mỗi 15s để các
+    // chuỗi visible tự được retry sau cooldown mà không cần F5 hay đổi ngôn ngữ.
+    const retryTimer = uiLanguage === 'vi'
+      ? null
+      : window.setInterval(() => walk(document.body, uiLanguage), 15_000)
+
+    return () => {
+      observer.disconnect()
+      if (retryTimer) window.clearInterval(retryTimer)
+    }
   }, [uiLanguage])
 
   return null

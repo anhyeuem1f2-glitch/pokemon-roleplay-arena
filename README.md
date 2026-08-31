@@ -1,3 +1,29 @@
+## Đợt 121 — Chinese Semantic State Coverage
+
+- Sau đợt 120, UI đã có `简体中文` nhưng state pipeline vẫn còn nhiều lớp deterministic/gate thiên về tiếng Việt. Đợt 121 mở rộng **cập nhật biến tiếng Trung thật**, không chỉ dịch UI.
+- Semantic State Interpreter được chỉ thị rõ phải hiểu ngang nhau **Tiếng Việt / English / 简体中文**. Với Pokémon chuẩn có tên bản địa, model có thể trả species canonical database và giữ `details.storyName` đúng tên xuất hiện trong chính văn để ownership firewall vẫn kiểm được canon.
+- `stateEvidence` giữ Unicode/Han thay vì xoá ký tự CJK; hỗ trợ câu/mệnh đề bằng dấu `。！？；，`, phủ định/tương lai tiếng Trung và các cue nhận Pokémon, item, di chuyển, level/evolve, quan hệ, thương tích, hunger/training.
+- MONEY deterministic hỗ trợ `元`, `宝可币/宝可梦币`, `联盟币`, `精灵币`, số Hán như `五千/三万`, `支付/付款/扣款/余额/总计/奖励/退款...`; vẫn giữ nguyên các chốt chống nhầm giá niêm yết, số dư và quantity. Ví dụ `支付600宝可币，余额剩余99400宝可币` chỉ ra `-600`.
+- Pokémon acquisition tiếng Trung không còn bị firewall bác vì `fold()` làm mất tên; future như `明天会加入队伍` vẫn bị chặn đúng. Gender nhận `雄性/雌性/无性别` và evidence chính văn tiếng Trung.
+- Custom item, nickname/target Pokémon, Badge/Quest ID tiếng Trung giữ Unicode nên không còn collapse về chuỗi rỗng/`custom-item`. Thiên phú tiếng Trung cho phép thay Ability cũng được mechanic parser nhận đúng.
+- Lượt tiếng Trung có nhiều biến kích hoạt đủ focused recovery shards thay vì chỉ chạy broad pass.
+- `test-dot121.mjs`: **15/15 PASS**; toàn bộ regression đợt 73 → 121 PASS.
+
+### File cần cập nhật lên GitHub sau đợt 121
+
+- `src/utils/stateEvidence.js`
+- `src/utils/stateScanPlan.js`
+- `src/services/semanticStateEngine.js`
+- `src/components/RoleplayChat.jsx`
+- `src/data/pokemonGender.js`
+- `src/data/shopItems.js`
+- `src/utils/ownedMonTarget.js`
+- `src/data/worldProgress.js`
+- `src/data/playerPerks.js`
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot121.mjs`.
+
 ## Đợt 118 — MONEY Canonical Arbitration + sửa ledger tiền cũ
 
 - Sửa bug nghiêm trọng trong Money Reconciler: câu kiểu **“tài khoản bị trừ 600 Poké, số dư còn lại 99.400 Poké … trước khi …”** từng có thể bị hiểu nhầm thành hai mốc số dư `600 → 99.400` và sinh delta `-98.800`. Balance parser giờ chỉ tính chênh lệch khi **cả BEFORE và AFTER đều có neo số dư/tài khoản/ví rõ ràng**; chữ “trước khi/sau đó” thuộc diễn biến truyện không còn được dùng làm mốc số dư.

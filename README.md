@@ -3325,3 +3325,35 @@ Upload/ghi đè:
 - `README.md`
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot119.mjs`.
+
+## Đợt 120 — UI Language Switcher (VI / EN / 简体中文)
+
+- Thêm nút hình địa cầu `🌐` ở góc trên bên phải màn hình chính; trong màn chơi nút ngôn ngữ cũng nằm trên header cạnh trạng thái API.
+- Hỗ trợ ba ngôn ngữ UI: `Tiếng Việt`, `English`, `简体中文`.
+- Lựa chọn được lưu theo thiết bị bằng `trainer-arena:ui-language`, nên F5/đóng mở trình duyệt vẫn giữ ngôn ngữ đã chọn và không gắn vào save truyện.
+- Thêm `UiLanguageRuntime`: đổi label, button, placeholder, title, aria-label và các nhãn UI động sau khi component render; story chính văn, input của người chơi, action-choice do AI sinh và raw debug payload được loại khỏi dịch UI để không làm biến dạng nội dung roleplay.
+- Bổ sung bộ từ điển UI nền cho title screen, character wizard, HUD, inventory, Pokémon Summary, battle, Tera, settings, chat, debug và các thao tác phổ biến. Các tên riêng Pokémon/region/model/API được giữ nguyên.
+- `document.documentElement.lang` được đồng bộ sang `vi`, `en`, hoặc `zh-CN` theo lựa chọn hiện tại.
+
+### Regression đợt 120
+
+- `test-dot120.mjs`: 15/15 PASS — kiểm tra 3 ngôn ngữ, persistence, globe switcher ở title + game header, runtime translator và vùng không dịch story.
+- Toàn bộ regression `test-dot73.mjs` → `test-dot120.mjs` PASS. `test-dot70.mjs` là test legacy của perk đã bị loại từ các đợt trước nên không thuộc bộ regression hiện hành.
+- 74/74 file `.js` qua `node --check`.
+- 55/55 file `.jsx` parse sạch bằng TypeScript JSX parser.
+
+### File cần cập nhật lên GitHub sau đợt 120
+
+Upload/ghi đè:
+
+- `src/App.jsx`
+- `src/main.jsx`
+- `src/context/GameContext.jsx`
+- `src/components/IntroScreen.jsx`
+- `src/components/LanguageSwitcher.jsx` **(file mới)**
+- `src/components/UiLanguageRuntime.jsx` **(file mới)**
+- `src/i18n/uiLanguage.js` **(file mới)**
+- `src/index.css`
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot120.mjs`.

@@ -49,6 +49,8 @@ const SEMANTIC_SYSTEM = `Bạn là CANON STATE INTERPRETER của game nhập vai
 
 MỤC TIÊU DUY NHẤT: biến CHÍNH VĂN CUỐI CÙNG người chơi thực sự nhìn thấy thành các SỰ KIỆN TRẠNG THÁI đã xảy ra. Bạn không kiểm luật game, không kiểm database, không viết tag, không đòi đúng từ khóa. Nếu chính văn đã canon hóa một việc thì state phải phản chiếu việc đó.
 
+ĐA NGÔN NGỮ (BẮT BUỘC): chính văn có thể là Tiếng Việt, English hoặc 简体中文, thậm chí trộn cả ba. Phải hiểu trực tiếp cả ba ngôn ngữ với độ ưu tiên như nhau; KHÔNG được bỏ event chỉ vì câu không phải tiếng Việt. Giữ nguyên tên riêng/item/Pokémon như canon khi cần, nhưng KIND/field JSON vẫn dùng schema tiếng Anh bên dưới. evidence có thể paraphrase bằng ngôn ngữ của chính văn.
+
 NGUYÊN TẮC CỐT LÕI:
 1. CHÍNH VĂN là nguồn sự thật. INPUT chỉ để hiểu chủ thể/ý định, không tự tạo state.
 2. Đọc theo NGỮ NGHĨA: đại từ, biệt danh, lược chủ ngữ, câu dài, nhiều đoạn, diễn đạt gián tiếp, danh sách, hóa đơn, chuyển khoản, đồ/NPC/quyền/năng lực tự sáng tạo đều hợp lệ.
@@ -83,6 +85,7 @@ Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(d
 - ABILITY KHÔNG phải quyền chỉnh tự do trong gameplay. Chỉ xuất pokemon_patch thay ability nếu STATE.player.abilityRewriteAllowed=true VÀ chính văn xác nhận người chơi đã dùng thiên phú đó để thay/chọn/xóa Ability. Nếu cờ false, không tự đổi Ability chỉ vì người chơi mong muốn. Nếu thiên phú xóa một Ability mà không thay bằng Ability khác, ghi ability="None" để state battle không còn nhận Ability cũ. Ability của Pokémon mới nhận hoặc thay đổi do tiến hóa/form chính thức đi theo event tương ứng.
 - SHINY là một cờ boolean ĐỘC LẬP với màu lửa/aura/hiệu ứng tự sáng tạo. Nếu chính văn nói 'Charmander Shiny với lửa tím', BẮT BUỘC shiny=true; 'lửa tím' phải nằm trong customAttributes.appearanceNote/visualTraits, KHÔNG được biến thành form riêng và KHÔNG được dùng thay cho shiny. Sprite/model đặc biệt ngoài Shiny chuẩn là việc của UI; interpreter chỉ lưu mô tả canon.
 - pokemon_acquired.details có thể thêm types, baseStats, moves, ability, description nếu là Pokémon/form fan-made.
+- Với chính văn tiếng Trung: nếu nhận diện chắc một loài Pokémon chuẩn, species/target nên dùng tên canonical database/Showdown (thường là English) để app resolve đúng dữ liệu; đồng thời details.storyName PHẢI giữ đúng tên/cụm tên xuất hiện trong chính văn (VD target="Pikachu", details.storyName="皮卡丘"). Nếu không chắc mapping thì giữ nguyên tên trong chính văn, không đoán bừa.
 - item_change.details: category, holdable, wearable, pokemonAccessory, accessorySlot, sourceMaterial, infinite, keyItem, effect/effects, charges, durability, rarity, usage, customAttributes và mọi thuộc tính fan-made đã được canon xác lập. description KHÔNG bắt buộc; nếu chính văn không nói rõ thì bỏ trống. Mô tả item động sẽ do Item Description Protocol riêng tạo từ canon, không tự mượn mô tả vật phẩm khác.
 - item_patch: dùng khi VẬT PHẨM ĐÃ CÓ trong túi được chính văn bổ sung/thay đổi thuộc tính mà số lượng KHÔNG đổi (công dụng mới, trạng thái, số lần dùng, độ bền, quyền truy cập, ngoại hình, liên kết chủ sở hữu, hiệu ứng fan-made...). target là đúng tên/id vật phẩm; details/fields chứa các thuộc tính mới. KHÔNG dùng item_change quantity=0 cho việc này.
 - quest_update.details: id,status,title,giver,objective,reward,region.

@@ -8,8 +8,13 @@ function fold(value) {
   return String(value ?? '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/đ/g, 'd')
-    .replace(/[^a-z0-9+\- ]+/g, ' ')
+    // Đợt 121: giữ Unicode letter/number để target tiếng Trung không biến mất.
+    .replace(/[^\p{L}\p{N}+\- ]+/gu, ' ')
     .replace(/\s+/g, ' ').trim()
+}
+
+function hasHan(value) {
+  return /\p{Script=Han}/u.test(String(value ?? ''))
 }
 
 function escapeRegExp(value) {
@@ -20,7 +25,8 @@ function phraseRegex(value) {
   const normalized = fold(value)
   if (!normalized) return null
   const body = normalized.split(' ').filter(Boolean).map(escapeRegExp).join('\\s+')
-  return new RegExp(`(?:^|\\s)${body}(?=\\s|$)`, 'i')
+  if (hasHan(normalized)) return new RegExp(body.replace(/\\s\+/g, '\\s*'), 'iu')
+  return new RegExp(`(?:^|\\s)${body}(?=\\s|$)`, 'iu')
 }
 
 function hasPhrase(text, value) {
@@ -41,8 +47,10 @@ function hasAny(text, patterns) {
 function hasExactAny(text, patterns) {
   const raw = String(text ?? '').normalize('NFC').toLocaleLowerCase('vi')
   return patterns.some((pattern) => {
-    const body = String(pattern).normalize('NFC').toLocaleLowerCase('vi')
-      .split(/\s+/).filter(Boolean).map(escapeRegExp).join('\\s+')
+    const source = String(pattern).normalize('NFC').toLocaleLowerCase('vi')
+    if (!source) return false
+    if (hasHan(source)) return raw.replace(/\s+/g, '').includes(source.replace(/\s+/g, ''))
+    const body = source.split(/\s+/).filter(Boolean).map(escapeRegExp).join('\\s+')
     return body ? new RegExp(`(?:^|[^\\p{L}\\p{N}])${body}(?=$|[^\\p{L}\\p{N}])`, 'iu').test(raw) : false
   })
 }
@@ -111,19 +119,23 @@ function genericMonTarget(value) {
 }
 
 function storySentences(text) {
-  return String(text ?? '').split(/(?<=[.!?…])\s+|\n+/).map((line) => line.trim()).filter(Boolean)
+  return String(text ?? '').split(/(?<=[，；：！？。])\s*|(?<=[.!?…])\s+|\n+/u).map((line) => line.trim()).filter(Boolean)
 }
 
 function storyClauses(text) {
-  return String(text ?? '').split(/(?<=[,;:!?…])\s+|\s+[—–-]\s+|\n+/)
+  return String(text ?? '').split(/(?<=[，；：！？。])\s*|(?<=[,;:!?…])\s+|\s+[—–-]\s+|\n+/u)
     .map((line) => line.trim()).filter(Boolean)
 }
 
 const FUTURE_MARKERS = [
   'sẽ', 'sắp', 'định', 'dự định', 'có thể', 'nếu', 'hy vọng', 'cần phải',
   'nên', 'hãy', 'thử', 'mong muốn', 'muốn sẽ',
+  '将', '将会', '会', '即将', '准备', '打算', '计划', '想要', '希望', '如果', '若', '可能', '稍后',
 ]
-const NEGATION_MARKERS = ['chưa', 'không', 'chẳng', 'không hề']
+const NEGATION_MARKERS = [
+  'chưa', 'không', 'chẳng', 'không hề',
+  '尚未', '还没', '还未', '没有', '并未', '未曾', '未能', '不会', '不打算',
+]
 
 function hasFutureOrConditional(line) {
   return hasExactAny(line, FUTURE_MARKERS)
@@ -140,7 +152,9 @@ function completedActionClause(line, patterns, { allowNegativeCompletion = [] } 
   for (const rawClause of storyClauses(line)) {
     if (!hasAny(rawClause, patterns)) continue
     if (hasAny(rawClause, allowNegativeCompletion)) return rawClause
-    const clause = rawClause.replace(/\b(?:không|chẳng)\s+(?:hề\s+)?(?:do dự|chần chừ|ngần ngại|nói gì|phản đối|buông tay)\b/giu, ' ')
+    const clause = rawClause
+      .replace(/\b(?:không|chẳng)\s+(?:hề\s+)?(?:do dự|chần chừ|ngần ngại|nói gì|phản đối|buông tay)\b/giu, ' ')
+      .replace(/(?:毫不犹豫|没有犹豫|不假思索)/gu, ' ')
     if (!hasFutureOrConditional(clause) && !hasNegation(clause)) return rawClause
   }
   return null
@@ -256,6 +270,40 @@ function containsVietnameseNumber(text, value) {
   return matchesRun()
 }
 
+const ZH_DIGITS = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '兩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 }
+const ZH_SMALL_UNITS = { '十': 10, '百': 100, '千': 1000 }
+const ZH_BIG_UNITS = { '万': 10000, '萬': 10000, '亿': 100000000, '億': 100000000 }
+
+function parseChineseNumberToken(token) {
+  const raw = String(token ?? '').trim()
+  if (!raw || !/[零〇一二两兩三四五六七八九十百千万萬亿億]/u.test(raw)) return null
+  let total = 0
+  let section = 0
+  let number = 0
+  for (const ch of raw) {
+    if (Object.prototype.hasOwnProperty.call(ZH_DIGITS, ch)) { number = ZH_DIGITS[ch]; continue }
+    if (Object.prototype.hasOwnProperty.call(ZH_SMALL_UNITS, ch)) { section += (number || 1) * ZH_SMALL_UNITS[ch]; number = 0; continue }
+    if (Object.prototype.hasOwnProperty.call(ZH_BIG_UNITS, ch)) {
+      section += number
+      number = 0
+      if (!section) section = 1
+      total += section * ZH_BIG_UNITS[ch]
+      section = 0
+    }
+  }
+  return total + section + number
+}
+
+function containsChineseNumber(text, value) {
+  const wanted = Math.abs(Math.trunc(Number(value)))
+  if (!Number.isFinite(wanted)) return false
+  for (const match of String(text ?? '').matchAll(/[零〇一二两兩三四五六七八九十百千万萬亿億]+/gu)) {
+    if (parseChineseNumberToken(match[0]) === wanted) return true
+  }
+  return false
+}
+
+
 function containsFormattedNumber(text, value) {
   const n = Math.abs(Math.trunc(Number(value)))
   if (!Number.isFinite(n)) return false
@@ -263,6 +311,7 @@ function containsFormattedNumber(text, value) {
   return new RegExp(`(^|\\D)${digits}(?=\\D|$)`).test(String(text ?? ''))
     || new RegExp(`(^|\\D)${digits}(?=\\D|$)`).test(fold(text))
     || containsVietnameseNumber(text, n)
+    || containsChineseNumber(text, n)
 }
 
 /** Một câu phải chứa đúng target và hành động đã xảy ra. */
@@ -281,6 +330,7 @@ const ACQUIRE = [
   'gia nhập', 'đi theo', 'nhận nuôi', 'được tặng', 'trao cho',
   'trở thành pokemon của', 'trở thành bạn đồng hành', 'vào đội', 'về đội',
   'đồng ý theo', 'chấp nhận đi cùng',
+  '捕获成功', '成功捕捉', '抓到了', '收服', '加入队伍', '加入了队伍', '进入队伍', '成为我的宝可梦', '成为玩家的宝可梦', '成为伙伴', '成为同伴', '同意同行', '跟随玩家',
 ]
 // Mua/nhận qua PC không nhất thiết có câu máy móc “Ralts gia nhập đội”.
 // Tách riêng khỏi ACQUIRE để “Ralts đã nhận một đòn” không bị hiểu nhầm là
@@ -289,68 +339,75 @@ const OWNERSHIP_ACQUIRE = [
   'đã mua', 'mua được', 'mua thành công', 'đã nhận', 'nhận được', 'nhận lấy', 'đón lấy',
   'đã tiếp nhận', 'tiếp nhận thành công', 'chuyển quyền sở hữu',
   'quyền sở hữu đã chuyển', 'đã sang tên', 'chuyển giao hoàn tất',
+  '已经购买', '购买成功', '已经收到', '收到', '接过', '接收成功', '所有权转移', '完成过户', '转交完成',
 ]
 const OWNERSHIP_CONTEXT = [
   'poké ball', 'poke ball', 'quả bóng', 'quả cầu', 'pc', 'box',
   'storage system', 'giao dịch', 'thanh toán', 'quyền sở hữu',
   'sang tên', 'vào đội', 'bạn đồng hành',
+  '精灵球', '宝可球', '宝可梦球', '电脑', '盒子', '储存系统', '交易', '付款', '所有权', '队伍', '伙伴',
 ]
 const EXPLICIT_POKEMON_RECEIVE = [
   'nhận pokemon', 'nhận pokémon', 'nhận được pokemon', 'nhận được pokémon',
   'đã nhận pokemon', 'đã nhận pokémon',
+  '收到宝可梦', '获得宝可梦', '接收宝可梦', '宝可梦加入队伍',
 ]
 const TRANSFER_LINK = [
   'mua', 'bán', 'rao bán', 'giao dịch', 'chuyển phát', 'chuyển giao',
   'chuyển vào pc', 'chuyển vào box', 'poké ball chứa', 'poke ball chứa',
   'đón lấy', 'nhận hàng', 'chiến lợi phẩm',
+  '购买', '出售', '交易', '转交', '转移', '传送到电脑', '传送到盒子', '精灵球里装着', '宝可球里装着', '收货', '战利品',
 ]
 const TRANSFER_COMPLETE = [
   'đã tiếp nhận', 'tiếp nhận thành công', 'đã nhận hàng', 'nhận được hàng',
   'chuyển giao hoàn tất', 'giao dịch hoàn tất', 'quyền sở hữu đã chuyển',
   'đã sang tên', 'đã chuyển vào pc', 'đã chuyển vào box', 'đã nằm trong box',
   'đã nằm trong storage', 'xuất vật chất', 'extract',
+  '接收成功', '已经收货', '转交完成', '交易完成', '所有权已转移', '已经传送到电脑', '已经传送到盒子', '已经存入盒子',
 ]
 const PC_TRANSFER_CONTEXT = [
   'pc', 'box', 'storage system', 'chuyển phát', 'chuyển giao',
   'truyền vật chất', 'khay', 'poké ball', 'poke ball',
+  '电脑', '盒子', '储存系统', '传送', '转交', '精灵球', '宝可球',
 ]
 const BALL_OBJECT = ['poké ball', 'poke ball', 'quả bóng', 'quả cầu']
 const TAKE_POSSESSION = [
   'nhận lấy', 'lấy ra', 'rút ra', 'cầm', 'nắm', 'chạm vào', 'ôm',
   'thu vào', 'siết', 'áp vào ngực', 'thu nó',
 ]
-const LEVEL_UP = ['lên cấp', 'tăng cấp', 'level up', 'rare candy', 'kẹo hiếm', 'đạt lv', 'đạt level', 'cấp độ tăng', 'mạnh lên một bậc']
-const EVOLVE = ['tiến hóa', 'evolve', 'hóa thành', 'biến đổi thành', 'lột xác thành']
-const EQUIP_ITEM = ['đeo', 'trang bị', 'cho cầm', 'đưa cho giữ', 'gắn vào', 'trao cho cầm', 'cầm lấy', 'giữ trên người', 'giữ', 'cầm', 'mang theo']
-const UNEQUIP_ITEM = ['tháo', 'gỡ', 'cất lại', 'thu hồi', 'lấy lại', 'bỏ trang bị', 'không còn cầm']
-const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho', 'trao']
+const LEVEL_UP = ['lên cấp', 'tăng cấp', 'level up', 'rare candy', 'kẹo hiếm', 'đạt lv', 'đạt level', 'cấp độ tăng', 'mạnh lên một bậc', '升级', '提升等级', '等级提升', '达到等级', '神奇糖果']
+const EVOLVE = ['tiến hóa', 'evolve', 'hóa thành', 'biến đổi thành', 'lột xác thành', '进化', '进化成', '变成']
+const EQUIP_ITEM = ['đeo', 'trang bị', 'cho cầm', 'đưa cho giữ', 'gắn vào', 'trao cho cầm', 'cầm lấy', 'giữ trên người', 'giữ', 'cầm', 'mang theo', '佩戴', '装备', '携带', '让它拿着', '给它拿着']
+const UNEQUIP_ITEM = ['tháo', 'gỡ', 'cất lại', 'thu hồi', 'lấy lại', 'bỏ trang bị', 'không còn cầm', '卸下', '取下', '收回', '不再携带']
+const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho', 'trao', '收到', '获得', '得到', '获赠', '拿到', '捡到', '购买', '买到', '放进背包', '收入背包', '交给玩家']
 const TAKE_ITEM_ILLEGALLY = ['trộm', 'trộm được', 'cuỗm', 'chôm', 'thó', 'giật lấy', 'cướp', 'chiếm đoạt', 'lấy trộm', 'nẫng', 'tịch thu']
-const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn']
+const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn', '使用', '用掉', '消耗', '交给', '归还', '被拿走', '失去', '丢弃', '喂给']
 const LOOT_ACTION = ['vơ vét', 'lấy sạch', 'cuỗm', 'trộm được', 'thu chiến lợi phẩm', 'gom hết', 'nhặt được', 'tịch thu', 'mang số đồ', 'bỏ chiến lợi phẩm vào túi']
 const MOVE = [
   'đi tới', 'đi đến', 'đã tới', 'đã đến', 'tới nơi', 'đến nơi', 'đặt chân',
   'rời khỏi', 'đi vào', 'bước vào', 'đi qua', 'tiến về', 'khởi hành tới',
   'di chuyển tới', 'cập bến', 'hạ cánh tại', 'đến được', 'bước qua', 'đi xuyên qua',
   'vào bên trong', 'ở bên trong', 'lọt vào', 'tiến sâu vào', 'qua cổng', 'mở cổng cho vào',
+  '前往', '到达', '抵达', '进入', '走进', '来到', '离开', '出发前往', '穿过',
 ]
-const BOND_POSITIVE = ['tin tưởng', 'thân thiết', 'gắn bó', 'quý mến', 'yêu mến', 'cảm mến', 'bảo vệ', 'chăm sóc', 'cứu', 'ôm', 'khen', 'cảm ơn', 'tha thứ', 'cùng vượt qua', 'dựa vào', 'rúc đầu']
-const BOND_NEGATIVE = ['mất niềm tin', 'thất vọng', 'sợ hãi', 'dè chừng', 'giận dỗi', 'bị bỏ rơi', 'ngược đãi', 'phản bội', 'xa cách', 'không còn tin']
-const REL_POSITIVE = ['cảm ơn', 'quý mến', 'tin tưởng', 'thân thiết', 'giúp đỡ', 'cứu', 'đồng ý', 'hảo cảm', 'mỉm cười', 'thán phục', 'xin lỗi', 'cúi đầu', 'kính nể', 'nể phục', 'nhượng bộ', 'mở cổng', 'dịu giọng', 'tôn trọng', 'thiện cảm']
-const REL_NEGATIVE = ['tức giận', 'thất vọng', 'ghét', 'mất lòng', 'cãi nhau', 'xung đột', 'đe dọa', 'phản bội', 'hảo cảm giảm', 'khó chịu', 'căm ghét', 'mất niềm tin', 'xua đuổi']
-const HURT = ['bị thương', 'vết thương', 'chảy máu', 'gãy', 'bỏng', 'bầm tím', 'đau nhức', 'rách', 'vỡ', 'trúng đòn', 'bị cắn', 'bị cào']
-const HEAL = ['hồi phục', 'lành lại', 'chữa trị', 'băng bó', 'hết đau', 'khỏi', 'được trị liệu']
-const EAT = ['ăn', 'uống', 'dùng bữa', 'no bụng', 'được cho ăn', 'cho pokemon ăn', 'nuốt', 'nhâm nhi']
-const HUNGER_NEGATIVE = ['đói bụng', 'cảm thấy đói', 'đang đói', 'cơn đói', 'bỏ bữa', 'lao lực', 'kiệt sức', 'vận động nặng', 'độ no giảm']
+const BOND_POSITIVE = ['tin tưởng', 'thân thiết', 'gắn bó', 'quý mến', 'yêu mến', 'cảm mến', 'bảo vệ', 'chăm sóc', 'cứu', 'ôm', 'khen', 'cảm ơn', 'tha thứ', 'cùng vượt qua', 'dựa vào', 'rúc đầu', '信任', '亲近', '羁绊加深', '喜欢', '感谢', '拥抱', '照顾', '保护']
+const BOND_NEGATIVE = ['mất niềm tin', 'thất vọng', 'sợ hãi', 'dè chừng', 'giận dỗi', 'bị bỏ rơi', 'ngược đãi', 'phản bội', 'xa cách', 'không còn tin', '失去信任', '失望', '害怕', '疏远', '背叛']
+const REL_POSITIVE = ['cảm ơn', 'quý mến', 'tin tưởng', 'thân thiết', 'giúp đỡ', 'cứu', 'đồng ý', 'hảo cảm', 'mỉm cười', 'thán phục', 'xin lỗi', 'cúi đầu', 'kính nể', 'nể phục', 'nhượng bộ', 'mở cổng', 'dịu giọng', 'tôn trọng', 'thiện cảm', '感谢', '信任', '亲近', '帮助', '尊重', '好感上升', '微笑', '道歉']
+const REL_NEGATIVE = ['tức giận', 'thất vọng', 'ghét', 'mất lòng', 'cãi nhau', 'xung đột', 'đe dọa', 'phản bội', 'hảo cảm giảm', 'khó chịu', 'căm ghét', 'mất niềm tin', 'xua đuổi', '生气', '失望', '讨厌', '冲突', '威胁', '背叛', '好感下降']
+const HURT = ['bị thương', 'vết thương', 'chảy máu', 'gãy', 'bỏng', 'bầm tím', 'đau nhức', 'rách', 'vỡ', 'trúng đòn', 'bị cắn', 'bị cào', '受伤', '伤口', '流血', '骨折', '烧伤', '命中', '被咬', '被抓伤']
+const HEAL = ['hồi phục', 'lành lại', 'chữa trị', 'băng bó', 'hết đau', 'khỏi', 'được trị liệu', '恢复', '治愈', '治疗', '包扎', '痊愈']
+const EAT = ['ăn', 'uống', 'dùng bữa', 'no bụng', 'được cho ăn', 'cho pokemon ăn', 'nuốt', 'nhâm nhi', '吃', '喝', '用餐', '吃饱', '喂食']
+const HUNGER_NEGATIVE = ['đói bụng', 'cảm thấy đói', 'đang đói', 'cơn đói', 'bỏ bữa', 'lao lực', 'kiệt sức', 'vận động nặng', 'độ no giảm', '饥饿', '肚子饿', '饿了', '没吃饭', '体力透支']
 const TIME_PASS = ['ngày trôi qua', 'đêm trôi qua', 'sáng hôm sau', 'qua đêm', 'ngủ một đêm', 'sau một ngày', 'sau hai ngày', 'mất một ngày', 'nhiều ngày', 'vài ngày trôi qua']
 const TIME_TRANSITION = ['đã sang', 'chuyển sang', 'trời đã', 'khi trời', 'lúc này là', 'bây giờ là', 'sáng hôm sau']
-const TRAINING = ['luyện tập', 'huấn luyện', 'tập luyện', 'tập chiêu', 'đối luyện', 'chạy bền', 'khổ luyện', 'tập thể lực']
-const CENTER_INSIDE = ['bước vào trung tâm pokemon', 'đi vào trung tâm pokemon', 'bên trong trung tâm pokemon', 'đứng trước quầy y tá', 'y tá joy chào']
-const MONEY_CONTEXT = ['tiền', 'tiền mặt', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng', 'tổng cộng', 'tổng tiền', 'hóa đơn', 'hoá đơn', 'thành tiền', 'số tiền', 'số dư', 'thanh toán', 'trả tiền', 'chi tiền', 'tiền thưởng', 'phần thưởng', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'máy pos', 'pos', 'thẻ', 'ghi có', 'ghi nợ']
-const MONEY_GAIN = ['nhận tiền', 'nhận khoản', 'nhận được', 'được nhận', 'gửi khoản hỗ trợ', 'gửi tiền vào', 'gửi vào tài khoản', 'được thưởng', 'thưởng cho', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'nhận thưởng', 'nhận phần thưởng', 'phần thưởng được trao', 'tiền thưởng được trao', 'được trao', 'đã trao', 'kiếm được', 'được trả công', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển vào', 'chuyển đến', 'tiền vào', 'chuyển tiền vào', 'chuyển khoản vào', 'gia tộc gửi', 'gia đình gửi', 'được gửi', 'ứng tiền', 'giải ngân cho', 'ghi có', 'cộng vào', 'số dư tăng', 'tài khoản tăng']
-const MONEY_LOSS = ['trả', 'đã trả', 'chuyển tiền cho', 'chuyển khoản đi', 'thanh toán', 'đã thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'đưa cho', 'đặt tiền', 'đặt lên quầy', 'khấu trừ', 'bị trừ', 'trừ đi', 'trừ khỏi', 'quẹt thẻ', 'quẹt', 'thẻ bị trừ', 'ghi nợ', 'số dư giảm', 'tài khoản giảm']
-const SHOP_SELECT_ITEM = ['mua', 'lấy', 'lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'đơn hàng', 'giỏ hàng', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe']
-const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'giao dịch thành công', 'giao dịch hoàn tất', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'trừ khỏi', 'thẻ bị trừ', 'máy pos xác nhận', 'máy pos báo', 'nhận hóa đơn', 'xuất hóa đơn']
-const SHOP_PACK_COMPLETE = ['đóng gói toàn bộ', 'xách theo đống hàng', 'xách theo hàng', 'toàn bộ đống vật tư']
+const TRAINING = ['luyện tập', 'huấn luyện', 'tập luyện', 'tập chiêu', 'đối luyện', 'chạy bền', 'khổ luyện', 'tập thể lực', '训练', '锻炼', '练习招式', '特训', '对练']
+const CENTER_INSIDE = ['bước vào trung tâm pokemon', 'đi vào trung tâm pokemon', 'bên trong trung tâm pokemon', 'đứng trước quầy y tá', 'y tá joy chào', '进入宝可梦中心', '走进宝可梦中心', '在宝可梦中心内', '站在护士柜台前', '乔伊小姐打招呼']
+const MONEY_CONTEXT = ['tiền', 'tiền mặt', 'poke dollar', 'pokedollar', 'pokecoin', 'đồng', 'giá', 'tổng', 'tổng cộng', 'tổng tiền', 'hóa đơn', 'hoá đơn', 'thành tiền', 'số tiền', 'số dư', 'thanh toán', 'trả tiền', 'chi tiền', 'tiền thưởng', 'phần thưởng', 'tài khoản', 'chuyển khoản', 'ngân hàng', 'khoản hỗ trợ', 'máy pos', 'pos', 'thẻ', 'ghi có', 'ghi nợ', '钱', '现金', '余额', '账户', '钱包', '价格', '总计', '合计', '总额', '账单', '应付', '支付', '付款', '消费', '奖金', '奖励', '转账', '银行', '刷卡', '入账', '扣款', '金额']
+const MONEY_GAIN = ['nhận tiền', 'nhận khoản', 'nhận được', 'được nhận', 'gửi khoản hỗ trợ', 'gửi tiền vào', 'gửi vào tài khoản', 'được thưởng', 'thưởng cho', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'nhận thưởng', 'nhận phần thưởng', 'phần thưởng được trao', 'tiền thưởng được trao', 'được trao', 'đã trao', 'kiếm được', 'được trả công', 'hoàn tiền', 'nhặt được', 'bán được', 'thu về', 'chuyển vào', 'chuyển đến', 'tiền vào', 'chuyển tiền vào', 'chuyển khoản vào', 'gia tộc gửi', 'gia đình gửi', 'được gửi', 'ứng tiền', 'giải ngân cho', 'ghi có', 'cộng vào', 'số dư tăng', 'tài khoản tăng', '收到钱', '收到款项', '获得', '得到', '获得奖励', '领取奖励', '奖金到账', '转入', '转入账户', '入账', '退款', '赚到', '收入', '余额增加', '账户增加']
+const MONEY_LOSS = ['trả', 'đã trả', 'chuyển tiền cho', 'chuyển khoản đi', 'thanh toán', 'đã thanh toán', 'mua', 'chi', 'mất', 'bị cướp', 'nộp', 'đưa tiền', 'đưa cho', 'đặt tiền', 'đặt lên quầy', 'khấu trừ', 'bị trừ', 'trừ đi', 'trừ khỏi', 'quẹt thẻ', 'quẹt', 'thẻ bị trừ', 'ghi nợ', 'số dư giảm', 'tài khoản giảm', '支付', '已支付', '付款', '已付款', '购买', '买下', '花费', '消费', '扣除', '被扣除', '扣款', '刷卡', '转账给', '汇款给', '余额减少', '账户减少']
+const SHOP_SELECT_ITEM = ['mua', 'lấy', 'lấy cho tôi', 'thêm', 'nhặt', 'quăng thêm', 'chọn mua', 'đặt mua', 'đơn hàng', 'giỏ hàng', 'gom hàng', 'đóng gói', 'cho vào xe', 'bỏ vào xe', '购买', '买', '选择购买', '下单', '订单', '购物车', '打包', '加入购物车']
+const SHOP_PAYMENT_COMPLETE = ['đã thanh toán', 'thanh toán thành công', 'giao dịch thành công', 'giao dịch hoàn tất', 'quẹt thẻ', 'quẹt', 'bị trừ', 'trừ đi', 'trừ khỏi', 'thẻ bị trừ', 'máy pos xác nhận', 'máy pos báo', 'nhận hóa đơn', 'xuất hóa đơn', '支付成功', '付款成功', '交易成功', '交易完成', '已支付', '已付款', '刷卡成功', '已扣款', '扣款成功', '收到收据', '开具收据']
+const SHOP_PACK_COMPLETE = ['đóng gói toàn bộ', 'xách theo đống hàng', 'xách theo hàng', 'toàn bộ đống vật tư', '全部打包', '已经打包', '把所有商品装好', '带走全部商品']
 const UNKNOWN_BALL_CONTEXT = [
   'chưa kiểm tra', 'chưa mở', 'chưa xác định', 'không biết bên trong', 'không rõ bên trong',
   'không biết chứa', 'chưa biết chứa', 'không biết pokemon gì', 'không biết pokémon gì',
@@ -418,10 +475,10 @@ function dedupeTurnTarget(entries, type, rejected, keyOf) {
   return out
 }
 
-const MONEY_TOTAL_MARKERS = ['tổng', 'tổng cộng', 'tổng tiền', 'tổng thanh toán', 'tổng phải trả', 'tổng hóa đơn', 'tổng hoá đơn', 'thành tiền', 'hóa đơn', 'hoá đơn', 'số tiền phải trả', 'cần thanh toán', 'phải thanh toán']
-const MONEY_BALANCE_MARKERS = ['số dư', 'tài khoản', 'ví', 'còn lại', 'còn', 'từ', 'xuống', 'lên', 'tăng lên', 'giảm còn']
-const MONEY_PRICE_ONLY = ['giá', 'niêm yết', 'đơn giá', 'giá bán', 'giá mua']
-const MONEY_CURRENCY_RE = /(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|pok[eé](?!mon)(?!\s*balls?)(?=\s|[.,;:!?)]|$)|đồng)/iu
+const MONEY_TOTAL_MARKERS = ['tổng', 'tổng cộng', 'tổng tiền', 'tổng thanh toán', 'tổng phải trả', 'tổng hóa đơn', 'tổng hoá đơn', 'thành tiền', 'hóa đơn', 'hoá đơn', 'số tiền phải trả', 'cần thanh toán', 'phải thanh toán', '总计', '合计', '总额', '总价', '共计', '应付总额', '应付金额', '账单金额', '需支付', '需要支付']
+const MONEY_BALANCE_MARKERS = ['số dư', 'tài khoản', 'ví', 'còn lại', 'còn', 'từ', 'xuống', 'lên', 'tăng lên', 'giảm còn', '余额', '账户', '钱包', '剩余', '还剩', '从', '降至', '增至', '增加到', '减少到']
+const MONEY_PRICE_ONLY = ['giá', 'niêm yết', 'đơn giá', 'giá bán', 'giá mua', '价格', '标价', '单价', '售价', '买价']
+const MONEY_CURRENCY_RE = /(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|pok[eé](?!mon)(?!\s*balls?)(?=\s|[.,;:!?，。；：！？)]|$)|đồng|元|宝可(?:梦)?币|联盟币|精灵币)/iu
 
 function parseMoneyNumberToken(raw, suffix = '') {
   const compact = String(raw ?? '').replace(/\s+/g, '').trim()
@@ -435,29 +492,37 @@ function parseMoneyNumberToken(raw, suffix = '') {
   }
   if (!Number.isFinite(numeric)) return null
   const unit = fold(suffix)
-  if (['k', 'nghin', 'ngan'].includes(unit)) numeric *= 1_000
-  else if (['tr', 'm', 'trieu'].includes(unit)) numeric *= 1_000_000
-  else if (['ty'].includes(unit)) numeric *= 1_000_000_000
+  if (['k', 'nghin', 'ngan', '千'].includes(unit)) numeric *= 1_000
+  else if (['万', '萬'].includes(unit)) numeric *= 10_000
+  else if (['tr', 'm', 'trieu', '百万'].includes(unit)) numeric *= 1_000_000
+  else if (['ty', '亿', '億'].includes(unit)) numeric *= 100_000_000
   return Math.round(numeric)
 }
 
 function extractMoneyNumbers(text) {
   const raw = String(text ?? '')
-  const re = /(?:₽\s*)?(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|nghìn|ngàn|nghin|ngan|triệu|trieu|tr|m|tỷ|ty))?(?:\s*(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|pok[eé](?!mon)(?!\s*balls?)(?=\s|[.,;:!?)]|$)|đồng))?/giu
+  const re = /(?:₽\s*)?(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d+)?)(?:\s*(k|nghìn|ngàn|nghin|ngan|triệu|trieu|tr|m|tỷ|ty|千|万|萬|百万|亿|億))?(?:\s*(?:₽|₱|¥|\$|pok[eé]\s*dollars?|pok[eé]dollars?|pokedollars?|pokecoin|pok[eé](?!mon)(?!\s*balls?)(?=\s|[.,;:!?，。；：！？)]|$)|đồng|元|宝可(?:梦)?币|联盟币|精灵币))?/giu
   const out = []
+  const occupied = []
   for (const match of raw.matchAll(re)) {
     const value = parseMoneyNumberToken(match[1], match[2] ?? '')
     if (!Number.isFinite(value)) continue
-    out.push({
-      value,
-      raw: match[0],
-      index: match.index ?? 0,
-      // Dùng để phân biệt “mua 3 Potion, trả 1.500₽”: số 3 là quantity,
-      // không bao giờ được tự hiểu thành 3 tiền.
-      explicitMoney: Boolean(match[2]) || MONEY_CURRENCY_RE.test(match[0]),
-    })
+    const begin = match.index ?? 0
+    const finish = begin + match[0].length
+    occupied.push([begin, finish])
+    out.push({ value, raw: match[0], index: begin, explicitMoney: Boolean(match[2]) || MONEY_CURRENCY_RE.test(match[0]) })
   }
-  return out
+  for (const match of raw.matchAll(/[零〇一二两兩三四五六七八九十百千万萬亿億]+/gu)) {
+    const begin = match.index ?? 0
+    const finish = begin + match[0].length
+    if (occupied.some(([a, b]) => begin < b && finish > a)) continue
+    const value = parseChineseNumberToken(match[0])
+    if (!Number.isFinite(value)) continue
+    const tail = raw.slice(finish, finish + 10)
+    const currency = tail.match(/^\s*(?:元|宝可(?:梦)?币|联盟币|精灵币|₽|₱|¥|\$)/u)?.[0] ?? ''
+    out.push({ value, raw: `${match[0]}${currency}`, index: begin, explicitMoney: Boolean(currency) })
+  }
+  return out.sort((a, b) => a.index - b.index)
 }
 
 function containsMoneyAmount(text, value) {
@@ -520,8 +585,8 @@ function completedMoneyClauseAmount(text, direction) {
     const total = anchoredMoneyAmount(clause, MONEY_TOTAL_MARKERS, amounts)
     if (total) return total
     const actionMarkers = direction > 0
-      ? ['nhận tiền', 'nhận khoản', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'trả công', 'hoàn tiền', 'thu về', 'chuyển vào', 'ghi có', 'cộng vào']
-      : ['trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền', 'bị trừ', 'trừ đi', 'trừ khỏi', 'khấu trừ', 'ghi nợ', 'quẹt thẻ', 'chuyển khoản']
+      ? ['nhận tiền', 'nhận khoản', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'trả công', 'hoàn tiền', 'thu về', 'chuyển vào', 'ghi có', 'cộng vào', '收到钱', '收到款项', '获得奖励', '领取奖励', '奖金到账', '转入', '入账', '退款', '收入']
+      : ['trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền', 'bị trừ', 'trừ đi', 'trừ khỏi', 'khấu trừ', 'ghi nợ', 'quẹt thẻ', 'chuyển khoản', '支付', '已支付', '付款', '已付款', '花费', '扣除', '被扣除', '扣款', '刷卡', '转账给']
     const actionAnchor = anchoredMoneyAmount(clause, actionMarkers, amounts)
     if (actionAnchor) return actionAnchor
     const explicit = amounts.filter((entry) => entry.explicitMoney)
@@ -530,7 +595,7 @@ function completedMoneyClauseAmount(text, direction) {
     if (explicit.length === 1) return explicit[0]
     if (!explicit.length && amounts.length === 1 && hasAny(clause, [
       'trả', 'đã trả', 'thanh toán', 'đã thanh toán', 'chi', 'nộp', 'đưa tiền',
-      'bị trừ', 'trừ đi', 'trừ khỏi', 'khấu trừ', 'ghi nợ', 'chuyển khoản', 'nhận tiền', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'ghi có',
+      'bị trừ', 'trừ đi', 'trừ khỏi', 'khấu trừ', 'ghi nợ', 'chuyển khoản', 'nhận tiền', 'được thưởng', 'nhận thưởng', 'nhận phần thưởng', 'trao thưởng', 'trao phần thưởng', 'trao cho', 'được trao', 'đã trao', 'ghi có', '支付', '已支付', '付款', '已付款', '花费', '扣除', '扣款', '刷卡', '收到钱', '获得奖励', '领取奖励', '入账', '退款',
     ])) return amounts[0]
   }
   return null
@@ -543,7 +608,7 @@ function moneyish(text) {
 function balanceClauseObservation(clause) {
   const raw = String(clause ?? '').trim()
   const normalized = fold(raw)
-  if (!raw || !hasAny(raw, ['số dư', 'tài khoản', 'ví'])) return { before: null, after: null }
+  if (!raw || !hasAny(raw, ['số dư', 'tài khoản', 'ví', '余额', '账户', '钱包'])) return { before: null, after: null }
 
   const entries = extractMoneyNumbers(raw)
   const explicit = entries.filter((entry) => entry.explicitMoney)
@@ -553,8 +618,8 @@ function balanceClauseObservation(clause) {
   // Trường hợp mạnh nhất: “số dư từ 300k giảm còn 285k”. Chỉ đọc những
   // con số nằm trong CHÍNH mệnh đề balance, không lấy số tiền giao dịch ở
   // mệnh đề trước cùng câu (“trừ 600, số dư còn 99.400”).
-  const hasFromBalance = /\b(?:so du|tai khoan|vi)(?: [a-z0-9]+){0,5} tu\b/.test(normalized)
-  const hasAfterMarker = /\b(?:giam(?: xuong)?|xuong|con(?: lai)?|tang(?: len)?|len|so du moi|sau do)\b/.test(normalized)
+  const hasFromBalance = /\b(?:so du|tai khoan|vi)(?: [\p{L}\p{N}]+){0,5} tu\b/u.test(normalized) || /(?:余额|账户|钱包).{0,16}(?:从|由)/u.test(raw)
+  const hasAfterMarker = /\b(?:giam(?: xuong)?|xuong|con(?: lai)?|tang(?: len)?|len|so du moi|sau do)\b/.test(normalized) || /(?:降至|减少到|剩余|还剩|余额为|增至|增加到|变为)/u.test(raw)
   if (hasFromBalance && hasAfterMarker && amounts.length >= 2) {
     return { before: amounts[0].value, after: amounts[1].value }
   }
@@ -563,8 +628,9 @@ function balanceClauseObservation(clause) {
   // sau giao dịch rất hay có “trước khi…”, từng khiến 600 và 99.400 bị lấy
   // thành hai số dư rồi suy ra -98.800.
   const explicitBefore = /\b(?:truoc do|ban dau)\b.{0,45}\b(?:so du|tai khoan|vi)\b|\b(?:so du|tai khoan|vi)\b.{0,30}\b(?:truoc do|ban dau)\b/.test(normalized)
-    || /\b(?:truoc do|ban dau)\b.{0,45}\b(?:co|la|o muc)\b/.test(normalized) && /\b(?:so du|tai khoan|vi)\b/.test(normalized)
-  const explicitAfter = /\b(?:so du|tai khoan|vi)\b.{0,35}\b(?:con(?: lai)?|giam con|xuong con|so du moi|sau do|tang len|len thanh)\b/.test(normalized)
+    || (/\b(?:truoc do|ban dau)\b.{0,45}\b(?:co|la|o muc)\b/.test(normalized) && /\b(?:so du|tai khoan|vi)\b/.test(normalized))
+    || /(?:之前|原本|起初).{0,24}(?:余额|账户|钱包)|(?:余额|账户|钱包).{0,24}(?:之前|原本|起初)/u.test(raw)
+  const explicitAfter = /\b(?:so du|tai khoan|vi)\b.{0,35}\b(?:con(?: lai)?|giam con|xuong con|so du moi|sau do|tang len|len thanh)\b/.test(normalized) || /(?:余额|账户|钱包).{0,24}(?:剩余|还剩|降至|减少到|增至|增加到|变为)/u.test(raw)
 
   return {
     before: explicitBefore ? amounts[0].value : null,
@@ -604,9 +670,9 @@ function balanceDeltaFromWindow(text) {
 }
 
 function moneyCompletionDirection(text) {
-  const explicitIncoming = hasAny(text, ['gia đình gửi', 'gia tộc gửi', 'gửi khoản hỗ trợ', 'chuyển tiền vào', 'chuyển khoản vào', 'ghi có', 'số dư tăng', 'tài khoản tăng'])
+  const explicitIncoming = hasAny(text, ['gia đình gửi', 'gia tộc gửi', 'gửi khoản hỗ trợ', 'chuyển tiền vào', 'chuyển khoản vào', 'ghi có', 'số dư tăng', 'tài khoản tăng', '转入账户', '转账入账', '入账', '余额增加', '账户增加'])
     && !hasFutureOrConditional(text) && !hasNegation(text)
-  const explicitOutgoing = hasAny(text, ['chuyển tiền cho', 'chuyển khoản đi', 'ghi nợ', 'số dư giảm', 'tài khoản giảm'])
+  const explicitOutgoing = hasAny(text, ['chuyển tiền cho', 'chuyển khoản đi', 'ghi nợ', 'số dư giảm', 'tài khoản giảm', '转账给', '汇款给', '扣款', '余额减少', '账户减少'])
     && !hasFutureOrConditional(text) && !hasNegation(text)
   // “tổng thanh toán 15k / cần thanh toán 15k” là NHÃN số tiền phải trả,
   // không phải động tác đã trả. Gỡ các cụm danh từ/điều kiện này trước khi
@@ -615,6 +681,7 @@ function moneyCompletionDirection(text) {
     .replace(/(?:tổng|tong)\s+(?:tiền\s+)?(?:thanh\s*toán|thanh\s*toan)/giu, ' ')
     .replace(/(?:cần|can|phải|phai)\s+(?:thanh\s*toán|thanh\s*toan|trả|tra)/giu, ' ')
     .replace(/(?:số\s*tiền|so\s*tien)\s+(?:phải|phai)\s+(?:trả|tra)/giu, ' ')
+    .replace(/(?:需|需要|应|应当)\s*(?:支付|付款)/gu, ' ')
   const loss = explicitOutgoing
     || Boolean(completedActionClause(actionText, MONEY_LOSS))
     || Boolean(completedActionClause(actionText, SHOP_PAYMENT_COMPLETE))

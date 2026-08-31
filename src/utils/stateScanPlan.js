@@ -38,6 +38,17 @@ const CUE_GROUPS = [
   /\b(?:s[aá]ng\s*h[oô]m\s*sau|qua\s*[dđ][eê]m|ng[aà]y\s*tr[oô]i\s*qua|luy[eệ]n\s*t[aậ]p|hu[aấ]n\s*luy[eệ]n)\b/iu,
   /\b(?:nhi[eệ]m\s*v[uụ]|huy\s*hi[eệ]u|danh\s*ti[eế]ng|truy\s*n[aã]|l[eệ]nh\s*b[aắ]t|tri[eệ]u\s*h[oồ]i)\b/iu,
   /\b(?:g[aặ]p|xu[aấ]t\s*hi[eệ]n|gi[aá]o\s*s[uư]|y\s*t[aá]|nh[aâ]n\s*vi[eê]n|c[aả]nh\s*s[aá]t|trainer|gym\s*leader)\b/iu,
+  // 简体中文 cues — lượt nhiều biến tiếng Trung vẫn bật đủ focus shards.
+  /(?:支付|付款|扣款|余额|账户|总计|合计|账单|转账|退款|奖励|奖金)/u,
+  /(?:收到|获得|得到|购买|捡到|放进背包|使用|消耗|失去|归还).{0,18}(?:物品|道具|球|药|钥匙|票|证)/u,
+  /(?:捕获成功|成功捕捉|收服|加入队伍|升级|等级提升|进化|亲密度|羁绊)/u,
+  /(?:信任|亲近|好感|关系|失望|疏远|背叛)/u,
+  /(?:受伤|流血|骨折|烧伤|恢复|治愈|治疗)/u,
+  /(?:前往|到达|抵达|进入|走进|离开|出发前往)/u,
+  /(?:饥饿|肚子饿|吃饭|用餐|喂食|训练|锻炼|特训)/u,
+  /(?:第二天|一夜过去|几天后|时间过去|徽章|任务|声望|通缉)/u,
+  /(?:遇到|出现|教授|护士|工作人员|警察|训练家|道馆馆主)/u,
+  /(?:权限|VIP|许可证|钥匙|称号|设备|激活|失效|状态|密码|所有权)/u,
   // Biến/tài sản tự sáng tạo: quyền VIP, giấy phép, thiết bị, danh hiệu, chìa
   // khóa, trạng thái máy móc... Không biết schema trước nhưng vẫn nên kích
   // hoạt pass cứu hộ semantic thay vì đợi một tag mới.
@@ -48,7 +59,7 @@ const STATE_TAG_RE = /\[\[\s*(?:MONEY|REL|BODY|POKEMON|EVOLVE|EVOLUTION|LEVEL|LV
 
 function sentenceLikeSegments(text) {
   return String(text ?? '')
-    .split(/(?<=[.!?…])\s+|\n+/)
+    .split(/(?<=[。！？])\s*|(?<=[.!?…])\s+|\n+/u)
     .map((part) => part.trim())
     .filter(Boolean)
 }

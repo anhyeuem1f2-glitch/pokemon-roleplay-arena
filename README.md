@@ -3383,3 +3383,13 @@ Upload/ghi đè:
 - `README.md`
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, deploy config hay `test-dot120.mjs`.
+
+## Đợt 122 — Full UI translation fallback (Google Translate)
+
+- Sửa tình trạng chọn English/简体中文 nhưng UI vẫn lẫn nhiều câu tiếng Việt.
+- Bảng dịch tĩnh vẫn dùng trước để các nhãn phổ biến đổi ngay lập tức.
+- Chuỗi UI tiếng Việt chưa có trong bảng sẽ tự động được dịch sang ngôn ngữ đang chọn bằng Google Translate web endpoint thông qua `/api-bridge` hiện có.
+- Có queue giới hạn đồng thời + cache localStorage; một câu đã dịch không bị gọi lại mỗi lần render/F5.
+- Không gửi chính văn roleplay, action-choice prose, nội dung textarea người chơi, debug payload/raw response hay API key sang dịch vụ dịch.
+- Placeholder/title/aria-label (kể cả textarea) nay cũng đổi ngôn ngữ; trước đây textarea bị skip cả placeholder nên còn tiếng Việt.
+- Nếu Google Translate tạm lỗi/rate-limit, UI giữ bản gốc/bản dịch tĩnh và tự thử lại sau cooldown, không làm treo gameplay.

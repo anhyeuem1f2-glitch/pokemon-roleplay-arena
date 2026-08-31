@@ -3393,3 +3393,33 @@ Không cần upload `public/`, `package.json`, `package-lock.json`, deploy confi
 - Không gửi chính văn roleplay, action-choice prose, nội dung textarea người chơi, debug payload/raw response hay API key sang dịch vụ dịch.
 - Placeholder/title/aria-label (kể cả textarea) nay cũng đổi ngôn ngữ; trước đây textarea bị skip cả placeholder nên còn tiếng Việt.
 - Nếu Google Translate tạm lỗi/rate-limit, UI giữ bản gốc/bản dịch tĩnh và tự thử lại sau cooldown, không làm treo gameplay.
+
+## Đợt 123 — Setup i18n coverage + Google Translate batching + intro layout fix
+
+- Sửa tình trạng màn tạo nhân vật khi chọn English/简体中文 vẫn còn nhiều lựa chọn tiếng Việt.
+- Bổ sung bản dịch tĩnh tức thời cho các nhãn quan trọng của wizard: nút `Tiếp tục/Quay lại`, nhóm thân phận, toàn bộ chip tính cách, chip siêu năng lực và tên các thân phận. Các mô tả dài vẫn được Google Translate fallback xử lý.
+- `uiAutoTranslate` nâng cache lên `v3`, cố định source language `sl=vi`, thử cả `translate.googleapis.com` và `translate.google.com`.
+- Các text node UI được gom thành batch nhỏ trước khi gọi Google Translate để tránh hàng chục request đồng thời trên các màn có nhiều card/lựa chọn; vẫn giữ giới hạn 2 request batch chạy song song.
+- Nếu Google/bridge tạm rate-limit, `UiLanguageRuntime` tự quét lại UI định kỳ để retry sau cooldown, không cần F5 hay đổi ngôn ngữ thủ công.
+- Mở rộng detector tiếng Việt cho nhóm từ xuất hiện nhiều trong character wizard để không bỏ sót label ngắn.
+- Nút `🌐` vẫn nằm góc trên bên phải như yêu cầu; nút `Bỏ qua intro` chuyển sang góc trên bên trái nên không còn chồng lên nhau hoặc chặn menu ngôn ngữ.
+- Chính văn roleplay, input người chơi, action choices và debug raw payload vẫn không bị Google Translate can thiệp.
+
+### Regression đợt 123
+
+- `test-dot123.mjs`: 10/10 PASS.
+- Regression hiện hành `test-dot73`, `test-dot74`, `test-dot99` → `test-dot123` PASS (`test-dot70` là legacy đã loại khỏi bộ regression từ trước).
+- 75/75 file `.js` qua `node --check`.
+- 55/55 file `.jsx` parse sạch bằng TypeScript JSX parser.
+
+### File cần cập nhật lên GitHub sau đợt 123
+
+Upload/ghi đè:
+
+- `src/services/uiAutoTranslate.js`
+- `src/components/UiLanguageRuntime.jsx`
+- `src/i18n/uiLanguage.js`
+- `src/index.css`
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, worker/deploy config hay `test-dot123.mjs`.

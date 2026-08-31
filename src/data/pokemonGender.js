@@ -7,9 +7,9 @@ export const GENDER_DATA_VERSION = 2
 
 export function normalizePokemonGender(value) {
   const key = String(value ?? '').trim().toLowerCase()
-  if (['male', 'm', 'đực', 'duc', '♂'].includes(key)) return 'male'
-  if (['female', 'f', 'cái', 'cai', '♀'].includes(key)) return 'female'
-  if (['unknown', 'genderless', 'none', 'n', 'vô giới tính', 'vo gioi tinh', '—', '◇'].includes(key)) return 'unknown'
+  if (['male', 'm', 'đực', 'duc', '♂', '雄', '雄性', '公', '男'].includes(key)) return 'male'
+  if (['female', 'f', 'cái', 'cai', '♀', '雌', '雌性', '母', '女'].includes(key)) return 'female'
+  if (['unknown', 'genderless', 'none', 'n', 'vô giới tính', 'vo gioi tinh', '—', '◇', '无性别', '無性別'].includes(key)) return 'unknown'
   return null
 }
 
@@ -56,7 +56,7 @@ export function genderRatioForSpecies(speciesEntry) {
 function foldStory(value) {
   return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/đ/g, 'd')
-    .replace(/[^a-z0-9♂♀]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/[^\p{L}\p{N}♂♀]+/gu, ' ').replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -69,9 +69,9 @@ function findPokemonGenderEvidence(storyText, target) {
   if (!storyText || !target) return null
   const targetKey = foldStory(target)
   if (!targetKey) return null
-  const lines = String(storyText).split(/(?<=[.!?…])\s+|\n+/).map((line) => line.trim()).filter(Boolean)
-  const female = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:cai|female)\b|\bfemale(?:\s+form)?\b|♀|\bco\s*be\b/
-  const male = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:duc|male)\b|\bmale(?:\s+form)?\b|♂|\bcau\s*be\b/
+  const lines = String(storyText).split(/(?<=[。！？])\s*|(?<=[.!?…])\s+|\n+/u).map((line) => line.trim()).filter(Boolean)
+  const female = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:cai|female)\b|\bfemale(?:\s+form)?\b|♀|\bco\s*be\b|(?:性别|性別|个体|個體|形态|形態)?(?:为|為|是)?(?:雌性|雌|母|女性)/u
+  const male = /(?:gioi\s*tinh|giong|ca\s*the|con|dang|hinh\s*thai|phien\s*ban|form)\s*(?::|la)?\s*(?:duc|male)\b|\bmale(?:\s+form)?\b|♂|\bcau\s*be\b|(?:性别|性別|个体|個體|形态|形態)?(?:为|為|是)?(?:雄性|雄|公|男性)/u
   for (let index = lines.length - 1; index >= 0; index--) {
     if (!foldStory(lines[index]).includes(targetKey)) continue
     const local = foldStory(lines.slice(index, Math.min(lines.length, index + 2)).join(' '))

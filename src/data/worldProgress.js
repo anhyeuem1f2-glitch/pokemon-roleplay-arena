@@ -9,7 +9,7 @@ export const DEFAULT_WORLD_PROGRESS = {
   legendaryPermits: [],
 }
 
-const idPart = (value) => String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9à-ỹ]+/gi, '-').replace(/^-|-$/g, '')
+const idPart = (value) => String(value ?? '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
 const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0))
 
 export function normalizeWorldProgress(value) {

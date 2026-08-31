@@ -133,8 +133,8 @@ export function parseCustomMechanicEffects(source) {
   // thì Semantic Engine mới được persist thay đổi này. Dùng cửa sổ ngữ nghĩa
   // đủ rộng để bắt cả tiếng Việt lẫn cách viết "ability" phổ biến.
   const abilityRewriteAllowed = Boolean(text && (
-    /(?:ability|dac tinh|nang luc)[\s\S]{0,100}(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove)/.test(text)
-    || /(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove)[\s\S]{0,100}(?:ability|dac tinh|nang luc)/.test(text)
+    /(?:ability|dac tinh|nang luc|特性|能力)[\s\S]{0,100}(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove|改变|更换|替换|选择|移除|删除)/.test(text)
+    || /(?:thay doi|thay|doi|chon|tuy chon|tuy y|loai bo|xoa|replace|change|choose|remove|改变|更换|替换|选择|移除|删除)[\s\S]{0,100}(?:ability|dac tinh|nang luc|特性|能力)/.test(text)
   ))
 
   const genericExp = exp.generic

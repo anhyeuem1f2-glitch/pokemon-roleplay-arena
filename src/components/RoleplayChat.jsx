@@ -90,7 +90,13 @@ function gateSemanticOwnership(parsed, storyText, { reroll = false, priorText = 
   for (const pk of parsed.pokemons ?? []) {
     const species = pk.species ?? pk.name
     const semantic = Boolean(pk?.semantic || pk?.canon)
-    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, species)
+    // Đợt 121: chính văn tiếng Trung có thể gọi loài bằng tên bản địa trong
+    // khi Semantic Engine chuẩn hoá target về tên database tiếng Anh. Model
+    // được yêu cầu giữ exact mention trong details.storyName để ownership gate
+    // vẫn kiểm được canon mà không phải bỏ firewall chống Pokémon hallucinated.
+    const storyName = pk?.details?.storyName ?? pk?.storyName ?? species
+    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, storyName)
+      || (storyName !== species && proseSupportsPokemonAcquisition(storyText, species))
     // Reroll chỉ được tái hiện Pokémon có liên hệ trực tiếp với nhánh trước đó.
     // Nếu model tự bịa một loài hoàn toàn mới trong biến thể reroll, dù chính
     // câu nó vừa viết có nói "nhận được", app vẫn không cho side-effect đó

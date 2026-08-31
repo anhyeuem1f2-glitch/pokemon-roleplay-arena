@@ -148,6 +148,15 @@ function translateCore(core, language) {
   return out
 }
 
+export function hasExactUiTranslation(source, language) {
+  const lang = normalizeUiLanguage(language)
+  if (lang === 'vi') return true
+  const core = String(source ?? '').trim()
+  if (!core) return true
+  const table = lang === 'zh' ? ZH : EN
+  return Boolean(table[core])
+}
+
 export function translateUiText(source, language) {
   const text = String(source ?? '')
   const core = text.trim()

@@ -1,3 +1,33 @@
+## Đợt 127 — Offline Simplified Chinese UI + mặc định Tiếng Việt
+
+- Chuyển giao diện `简体中文` sang **catalog bản dịch đóng gói trong source**, không còn phụ thuộc Google Translate khi chạy game. Người chơi ở Trung Quốc đại lục có thể đổi sang tiếng Trung mà các màn chính không cần gọi domain Google.
+- Thêm `src/i18n/zhStaticCatalog.js` làm nguồn dịch Trung offline. Catalog bao phủ màn hình chính, toàn bộ wizard tạo nhân vật, tên/mô tả thân phận, mode, tính cách, năng lực, vùng xuất thân, tông truyện, opening, Sandbox Builder, HUD, túi đồ, Pokémon Summary, battle, shop, PokéCenter, Pokédex, save, settings/API, action choices, map/notebook/world progress và debug/state audit.
+- Toàn bộ **130 chuỗi dữ liệu lựa chọn tiếng Việt** trong `identities.js`, `openings.js`, `gameModes.js`, `storyTones.js`, `characterTraits.js` đã có bản dịch Trung offline; không còn phải chờ Google mới dịch các card/chip lựa chọn.
+- `UiLanguageRuntime` chỉ cho phép Google fallback với **English**. Khi chọn `简体中文`, mọi chuỗi được dịch từ catalog/local patterns; `uiAutoTranslate` chặn hẳn request `zh` để không vô tình gọi Google.
+- Giữ nguyên vùng không được dịch: chính văn roleplay, input người chơi, action choice do model sinh, raw payload/debug và code. State Engine tiếng Trung của đợt 121 vẫn giữ nguyên, không bị thay đổi bởi patch UI này.
+- Ngôn ngữ mặc định của bản cài mới/thiết bị chưa có lựa chọn là **Tiếng Việt** (`DEFAULT_UI_LANGUAGE = 'vi'`). Nếu người chơi chủ động chọn English/简体中文 thì lựa chọn đó vẫn được lưu như trước; xoá preference/trình duyệt mới sẽ trở lại Tiếng Việt.
+- Menu 🌐 vẫn luôn giữ tên bản địa bất biến: `Tiếng Việt`, `English`, `简体中文`.
+
+### Regression đợt 127
+
+- `test-dot127.mjs`: **10/10 PASS**.
+- Regression `test-dot73`, `test-dot74`, `test-dot99` → `test-dot127`: PASS.
+- **76/76 file `.js`** qua `node --check`.
+- **55/55 file `.jsx`** parse sạch bằng TypeScript JSX parser.
+
+### File cần cập nhật lên GitHub sau đợt 127
+
+Upload/ghi đè:
+
+- `src/i18n/zhStaticCatalog.js` **(file mới)**
+- `src/i18n/uiLanguage.js`
+- `src/components/UiLanguageRuntime.jsx`
+- `src/services/uiAutoTranslate.js`
+- `src/context/GameContext.jsx`
+- `README.md`
+
+Không cần upload `public/`, `package.json`, `package-lock.json`, worker/deploy config hay `test-dot127.mjs`.
+
 ## Đợt 121 — Chinese Semantic State Coverage
 
 - Sau đợt 120, UI đã có `简体中文` nhưng state pipeline vẫn còn nhiều lớp deterministic/gate thiên về tiếng Việt. Đợt 121 mở rộng **cập nhật biến tiếng Trung thật**, không chỉ dịch UI.
@@ -3454,3 +3484,24 @@ Upload/ghi đè:
 - `README.md`
 
 Không cần upload `public/`, package files, worker/deploy config hay `test-dot125.mjs`.
+
+## Đợt 126 — Language selector immutable native names
+
+- Gia cố menu chọn ngôn ngữ để tên của từng ngôn ngữ không bao giờ bị UI auto-translate đổi theo ngôn ngữ đang chọn.
+- `LanguageSwitcher` được loại trực tiếp khỏi `UiLanguageRuntime` bằng cả `data-ui-language-control="true"`, `data-ui-no-translate="true"` và chuẩn HTML `translate="no"`.
+- Từng nhãn ngôn ngữ mang `lang` riêng (`vi`, `en`, `zh-CN`) và `translate="no"`, nên menu luôn hiển thị đúng dạng bản địa: `Tiếng Việt`, `English`, `简体中文`.
+- `UiLanguageRuntime` cũng coi mọi vùng `[translate="no"]` và `[data-ui-language-control="true"]` là vùng cấm dịch, tránh cache Google Translate hoặc mutation observer can thiệp lại sau khi đổi ngôn ngữ.
+
+### Regression đợt 126
+
+- `test-dot126.mjs`: kiểm tra nhãn bản địa bất biến, opt-out ở wrapper, opt-out từng nhãn và runtime skip selector.
+
+### File cần cập nhật lên GitHub sau đợt 126
+
+Upload/ghi đè:
+
+- `src/components/LanguageSwitcher.jsx`
+- `src/components/UiLanguageRuntime.jsx`
+- `README.md`
+
+Không cần upload `public/`, package files, worker/deploy config hay `test-dot126.mjs`.

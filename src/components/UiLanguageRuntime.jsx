@@ -16,6 +16,8 @@ let runtimeLanguage = 'vi'
 
 const NO_TRANSLATE_BASE = [
   '[data-ui-no-translate="true"]',
+  '[data-ui-language-control="true"]',
+  '[translate="no"]',
   '.story-text',
   '.action-choice__text',
   '.llm-debug__payload',
@@ -40,7 +42,9 @@ function reapplyWhitespace(source, translated) {
 }
 
 function needsGoogle(source, language) {
-  return language !== 'vi' && !hasExactUiTranslation(source, language) && looksLikeVietnameseUi(source)
+  // Chinese is fully bundled/offline from đợt 127 so players in mainland China
+  // never depend on Google domains. English may still use Google as a fallback.
+  return language === 'en' && !hasExactUiTranslation(source, language) && looksLikeVietnameseUi(source)
 }
 
 function applyAsyncText(node, source, language) {

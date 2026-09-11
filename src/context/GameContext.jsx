@@ -23,7 +23,7 @@ import { startingMoneyForIdentity } from '../data/identities.js'
 import { normalizeDynamicState } from '../data/dynamicState.js'
 import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 import { completeSandboxBootstrap, loadSandboxBootstrap } from '../utils/sandboxBootstrap.js'
-import { normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from '../i18n/uiLanguage.js'
+import { DEFAULT_UI_LANGUAGE, normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from '../i18n/uiLanguage.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -66,7 +66,7 @@ function normalizeChatPreferences(value) {
 export function GameProvider({ children }) {
   // --- Ngôn ngữ UI (đợt 120): thiết lập theo thiết bị, không gắn vào save truyện. ---
   const [uiLanguage, setUiLanguageState] = useState(() => {
-    try { return normalizeUiLanguage(localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || 'vi') } catch { return 'vi' }
+    try { return normalizeUiLanguage(localStorage.getItem(UI_LANGUAGE_STORAGE_KEY) || DEFAULT_UI_LANGUAGE) } catch { return DEFAULT_UI_LANGUAGE }
   })
   const setUiLanguage = useCallback((next) => {
     setUiLanguageState((cur) => {

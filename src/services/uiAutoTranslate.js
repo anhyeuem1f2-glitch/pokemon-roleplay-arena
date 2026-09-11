@@ -232,7 +232,10 @@ function schedulePump(delay = BATCH_DEBOUNCE_MS) {
 export function requestUiAutoTranslation(source, language) {
   const lang = normalizeUiLanguage(language)
   const normalized = normalizedText(source)
-  if (lang === 'vi' || !looksLikeVietnameseUi(normalized)) return Promise.resolve(null)
+  // Chinese UI is shipped as a static offline catalog from đợt 127. Do not
+  // contact Google Translate for zh-CN; this keeps the Chinese build usable
+  // behind networks where Google domains are unavailable.
+  if (lang === 'vi' || lang === 'zh' || !looksLikeVietnameseUi(normalized)) return Promise.resolve(null)
 
   const cached = getLanguageCache(lang).get(normalized)
   if (cached) return Promise.resolve(cached)

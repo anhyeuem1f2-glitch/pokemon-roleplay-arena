@@ -23,6 +23,7 @@ export default function LanguageSwitcher({ compact = false, fixed = false }) {
       className={`language-switcher ${fixed ? 'language-switcher--fixed' : ''}`}
       data-ui-language-control="true"
       data-ui-no-translate="true"
+      translate="no"
     >
       <button
         type="button"
@@ -31,13 +32,14 @@ export default function LanguageSwitcher({ compact = false, fixed = false }) {
         aria-haspopup="menu"
         aria-expanded={open}
         title="Ngôn ngữ / Language / 语言"
+        translate="no"
       >
         <span className="language-switcher__globe" aria-hidden="true">🌐</span>
         {!compact && <span>{current.short}</span>}
         <span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
       </button>
       {open && (
-        <div className="language-switcher__menu" role="menu">
+        <div className="language-switcher__menu" role="menu" translate="no">
           {UI_LANGUAGES.map((entry) => (
             <button
               type="button"
@@ -51,7 +53,7 @@ export default function LanguageSwitcher({ compact = false, fixed = false }) {
               }}
             >
               <span>{uiLanguage === entry.key ? '●' : '○'}</span>
-              <span>{entry.label}</span>
+              <span lang={entry.htmlLang} translate="no" data-native-language-label={entry.key}>{entry.label}</span>
             </button>
           ))}
         </div>

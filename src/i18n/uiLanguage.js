@@ -1,4 +1,7 @@
+import { hasZhStaticTranslation, translateZhStatic, ZH_STATIC_CATALOG } from './zhStaticCatalog.js'
+
 export const UI_LANGUAGE_STORAGE_KEY = 'trainer-arena:ui-language'
+export const DEFAULT_UI_LANGUAGE = 'vi'
 
 export const UI_LANGUAGES = Object.freeze([
   { key: 'vi', label: 'Tiếng Việt', short: 'VI', htmlLang: 'vi' },
@@ -7,7 +10,7 @@ export const UI_LANGUAGES = Object.freeze([
 ])
 
 export function normalizeUiLanguage(value) {
-  return UI_LANGUAGES.some((entry) => entry.key === value) ? value : 'vi'
+  return UI_LANGUAGES.some((entry) => entry.key === value) ? value : DEFAULT_UI_LANGUAGE
 }
 
 const EN = {
@@ -155,6 +158,7 @@ const ZH = {
   'Thực tập sinh trung tâm Pokémon': '宝可梦中心实习生', 'Cứu hộ dã chiến': '野外救援员', 'Đệ tử gym': '道馆学徒', 'Thí sinh liên đoàn bỏ dở': '中途退出联盟赛的选手',
   'Phóng viên tập sự': '见习记者', 'Nhiếp ảnh gia hoang dã': '野生宝可梦摄影师', 'Nghệ sĩ đường phố cùng Pokémon': '宝可梦街头艺人', 'Con nhà thương lái rong': '行商家庭子弟', 'Con nhà trại nhân giống': '培育屋家庭子弟',
 
+  ...ZH_STATIC_CATALOG,
 }
 
 const FALLBACK_EN = [
@@ -172,13 +176,24 @@ function preserveWhitespace(source, translated) {
 
 function translateCore(core, language) {
   if (!core || language === 'vi') return core
-  const table = language === 'zh' ? ZH : EN
-  if (table[core]) return table[core]
-  // Avoid mangling long story/help prose. Fallback phrase replacement is only for short UI labels.
+  if (language === 'zh') {
+    const offline = translateZhStatic(core)
+    if (offline) return offline
+    if (ZH[core]) return ZH[core]
+    // Chinese UI must stay offline. Never depend on Google Translate at runtime.
+    // A short label may still be covered by legacy phrase fallbacks.
+    if (core.length <= 72) {
+      let out = core
+      for (const [from, to] of FALLBACK_ZH) out = out.replaceAll(from, to)
+      return out
+    }
+    return core
+  }
+  if (EN[core]) return EN[core]
+  // English keeps the existing optional Google fallback for strings not yet bundled.
   if (core.length > 72) return core
-  const pairs = language === 'zh' ? FALLBACK_ZH : FALLBACK_EN
   let out = core
-  for (const [from, to] of pairs) out = out.replaceAll(from, to)
+  for (const [from, to] of FALLBACK_EN) out = out.replaceAll(from, to)
   return out
 }
 
@@ -187,8 +202,8 @@ export function hasExactUiTranslation(source, language) {
   if (lang === 'vi') return true
   const core = String(source ?? '').trim()
   if (!core) return true
-  const table = lang === 'zh' ? ZH : EN
-  return Boolean(table[core])
+  if (lang === 'zh') return Boolean(ZH[core] || hasZhStaticTranslation(core))
+  return Boolean(EN[core])
 }
 
 export function translateUiText(source, language) {

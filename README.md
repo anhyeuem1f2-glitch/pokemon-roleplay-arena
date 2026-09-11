@@ -3423,3 +3423,34 @@ Upload/ghi đè:
 - `README.md`
 
 Không cần upload `public/`, `package.json`, `package-lock.json`, worker/deploy config hay `test-dot123.mjs`.
+
+## Đợt 124 — Language selector native labels
+
+- Khóa `LanguageSwitcher` khỏi UI auto-translation runtime.
+- Tên ngôn ngữ luôn giữ nguyên ở dạng bản địa: `Tiếng Việt`, `English`, `简体中文` bất kể ngôn ngữ UI hiện tại.
+- Ngăn Google Translate đổi `Tiếng Việt` thành `越南语` hoặc đổi tên lựa chọn ngôn ngữ sang ngôn ngữ đang chọn.
+
+## Đợt 125 — Poké Mart stock invariant
+
+- Sửa lỗi Poké Mart có tên đúng nhưng `type` rỗng bị `shopGenerator` hiểu thành cửa hàng dân dụng, khiến quầy không có Poké Ball dù `SHOP_ITEMS` vẫn chứa bóng.
+- `detectShopType()` giờ xét cả `type` lẫn `shop.name`; các tên `Poké Mart`, `Pokemart`, `Poke Mart` và các tên shop Pokémon tiếng Trung phổ biến đều được nhận là `trainer`.
+- `generateShopItems()` dùng cả tên cửa hàng khi phân loại, nên Semantic Engine không cần khai thêm `type=trainer` mới có kho trainer.
+- `shopDescriptor()` không còn làm mất `type` chỉ vì có `explicitName`; một `Viridian Poké Mart` được xác lập trực tiếp sẽ vẫn mang `type: trainer`.
+- Parser SHOP legacy hiểu thêm khóa tiếng Trung `类型/類型` và `规模/規模`.
+- Poké Mart đảm bảo bày `Poké Ball`, `Great Ball`, `Ultra Ball`; `Master Ball` và mọi item `noShop` vẫn không được bán.
+
+### Regression đợt 125
+
+- `test-dot125.mjs`: kiểm tra Poké Mart chỉ có name vẫn nhận kho trainer, bóng cơ bản xuất hiện, Master Ball không xuất hiện, tên tiếng Trung hoạt động và cửa hàng dân dụng không bị ép thành Poké Mart.
+
+### File cần cập nhật lên GitHub sau đợt 125
+
+Upload/ghi đè:
+
+- `src/data/shopGenerator.js`
+- `src/data/storyScenes.js`
+- `src/components/ShopModal.jsx`
+- `src/utils/storyStateProtocol.js`
+- `README.md`
+
+Không cần upload `public/`, package files, worker/deploy config hay `test-dot125.mjs`.

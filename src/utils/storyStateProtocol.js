@@ -130,8 +130,8 @@ export function parseStoryStateTags(text) {
         if (eq > 0) {
           const k = part.slice(0, eq).trim().toLowerCase()
           const v = part.slice(eq + 1).trim()
-          if (k.startsWith('loại') || k.startsWith('loai') || k === 'type') shop.type = v
-          else if (k.startsWith('quy') || k === 'size') shop.size = v
+          if (k.startsWith('loại') || k.startsWith('loai') || k === 'type' || k === '类型' || k === '類型') shop.type = v
+          else if (k.startsWith('quy') || k === 'size' || k === '规模' || k === '規模') shop.size = v
         }
       }
     }

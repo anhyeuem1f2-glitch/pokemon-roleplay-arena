@@ -58,7 +58,7 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
         {
           role: 'system',
           content: [
-            `Bạn đóng vai CHỦ QUÁN "${shopInfo.name}" (loại: ${detectShopType(shopInfo.type)}). TÍNH CÁCH: ${personality.desc}.`,
+            `Bạn đóng vai CHỦ QUÁN "${shopInfo.name}" (loại: ${detectShopType(shopInfo.type, shopInfo.name)}). TÍNH CÁCH: ${personality.desc}.`,
             `KHO HÀNG: tổng ${items.length} món. Mẫu: ${sample}.`,
             matches.length
               ? `TRA KHO theo câu khách hỏi — CÁC MÓN KHỚP: ${matches.map((it) => `${it.name} ₽${it.price}`).join('; ')}. Trả lời dựa trên đúng danh sách này.`

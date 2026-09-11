@@ -22,6 +22,7 @@ export default function LanguageSwitcher({ compact = false, fixed = false }) {
       ref={rootRef}
       className={`language-switcher ${fixed ? 'language-switcher--fixed' : ''}`}
       data-ui-language-control="true"
+      data-ui-no-translate="true"
     >
       <button
         type="button"

@@ -197,9 +197,12 @@ export function generateLootItems(loot = {}, sourceSeed = '') {
 }
 
 /** Suy LOẠI cửa hàng từ chuỗi loại AI khai (từ khoá VN/EN, mặc định general). */
-export function detectShopType(typeStr) {
-  const t = (typeStr ?? '').toLowerCase()
-  if (/trainer|mart|poké|poke|bóng|thuốc/.test(t)) return 'trainer'
+export function detectShopType(typeStr, shopName = '') {
+  const t = `${typeStr ?? ''} ${shopName ?? ''}`.toLowerCase()
+  // Đợt 125: Poké Mart thường đi vào state chỉ với `name` mà không có
+  // `type`. Phải suy loại từ CẢ tên shop, nếu không Poké Mart bị rơi về
+  // `general` và mất toàn bộ quầy Poké Ball/thuốc. Hỗ trợ cả VI/EN/ZH.
+  if (/trainer|pok[ée]?\s*mart|pokemart|poke\s*mart|mart|poké|poke|bóng|thuốc|宝可梦商店|宝可梦友好商店|友好商店|精灵商店|精灵中心商店/.test(t)) return 'trainer'
   if (/quần áo|thời trang|clothes|may mặc/.test(t)) return 'clothes'
   if (/leo núi|climb/.test(t)) return 'climbing'
   if (/dã ngoại|cắm trại|lều|outdoor|camping/.test(t)) return 'outdoor'
@@ -221,7 +224,7 @@ function countForSize(sizeStr, rng) {
  * @returns {Array<{id,name,price,category,desc}>}
  */
 export function generateShopItems(shop) {
-  const type = detectShopType(shop?.type)
+  const type = detectShopType(shop?.type, shop?.name)
   // Đợt 72: lọc bỏ món có cờ `noShop` (Kẹo Hiếm) — nó nằm trong SHOP_ITEMS
   // chỉ để túi đồ tra được tên/mô tả, TUYỆT ĐỐI không được bày bán ở đâu.
   if (type === 'trainer') return SHOP_ITEMS.filter((it) => !it.noShop)

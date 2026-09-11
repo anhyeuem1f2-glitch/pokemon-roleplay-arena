@@ -213,6 +213,7 @@ const SHOP_NOUNS = [
   'cua hang', 'pokemart', 'poke mart', 'shop', 'sieu thi', 'trung tam mua sam',
   'bach hoa', 'tiem tap hoa', 'tiem quan ao', 'tiem do', 'quay ban hang',
   'mart', 'department store', 'supermarket',
+  '宝可梦商店', '宝可梦友好商店', '友好商店', '精灵商店', '精灵中心商店', '商店', '超市',
 ]
 const SHOP_ENTRY_CUES = [
   'buoc vao', 'di vao', 'tien vao', 're vao', 'ghe vao', 'mo cua buoc vao',
@@ -238,9 +239,15 @@ const SHOP_FUTURE_CUES = [
 ]
 
 function shopDescriptor(text, explicitName = '') {
-  if (explicitName?.trim()) return { name: explicitName.trim(), type: '', size: '' }
-  const hay = normalizeSceneText(text)
-  if (hay.includes('pokemart') || hay.includes('poke mart')) return { name: 'Poké Mart', type: 'trainer', size: '' }
+  // Đợt 125: không được mất type chỉ vì shop có tên explicit. Semantic/tag
+  // thường đưa `name=Poké Mart` nhưng để `type=''`; code cũ return sớm ở đây
+  // làm ShopModal sinh cửa hàng dân dụng và vì thế không có Poké Ball.
+  const hay = normalizeSceneText(`${explicitName ?? ''}\n${text ?? ''}`)
+  const explicit = explicitName?.trim()
+  if (hay.includes('pokemart') || hay.includes('poke mart') || hay.includes('宝可梦商店') || hay.includes('宝可梦友好商店') || hay.includes('友好商店') || hay.includes('精灵商店') || hay.includes('精灵中心商店')) {
+    return { name: explicit || 'Poké Mart', type: 'trainer', size: '' }
+  }
+  if (explicit) return { name: explicit, type: '', size: '' }
   if (hay.includes('trung tam mua sam')) return { name: 'Trung tâm Mua sắm', type: 'bách hoá', size: 'lớn' }
   if (hay.includes('sieu thi') || hay.includes('supermarket')) return { name: 'Siêu Thị', type: 'bách hoá', size: 'lớn' }
   if (hay.includes('bach hoa') || hay.includes('department store')) return { name: 'Cửa hàng Bách hoá', type: 'bách hoá', size: 'lớn' }

@@ -1,3 +1,16 @@
+## Đợt 131 — fix crash `uiLanguage is not defined`
+
+- Sửa runtime crash ở `RightHUD.jsx`: component đã gọi `translateUiText(..., uiLanguage)` cho ngày/giờ và thời tiết nhưng quên lấy `uiLanguage` từ `GameContext`.
+- Bổ sung `uiLanguage` vào destructuring của `useGame()` trong `RightHUD`, nên HUD phải render bình thường ở cả Tiếng Việt / English / 简体中文.
+- Không thay đổi gameplay, State Engine, battle, preset/lorebook hay logic dịch nội dung.
+
+### File cần cập nhật lên GitHub sau đợt 131
+
+Upload/ghi đè:
+
+- `src/components/RightHUD.jsx`
+- `README.md`
+
 ## Đợt 130 — rollback dịch nội dung preset/lorebook, chỉ dịch UI chrome
 
 - Sửa hiểu nhầm từ đợt 129: tên block, tên regex script và nội dung do preset/lorebook/Tawa nhập vào là **nội dung người dùng**, không phải UI hệ thống, nên không được dịch theo ngôn ngữ giao diện.
@@ -3569,3 +3582,11 @@ Upload/ghi đè:
 - `README.md`
 
 Không cần upload `public/`, package files, worker/deploy config hay `test-dot126.mjs`.
+
+
+## Dot 132 — RightHUD runtime language crash hardening
+
+- Reworked `RightHUD` so it no longer depends on a free/local identifier named `uiLanguage`.
+- The HUD now reads `const game = useGame()` and derives `hudLanguage = game?.uiLanguage || 'vi'`.
+- This makes the change visibly different on Git and removes the `uiLanguage is not defined` failure path from `RightHUD`.
+- No gameplay, state engine, battle, preset, or lorebook logic was changed.

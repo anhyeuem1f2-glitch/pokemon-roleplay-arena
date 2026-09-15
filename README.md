@@ -1,3 +1,64 @@
+## Đợt 130 — rollback dịch nội dung preset/lorebook, chỉ dịch UI chrome
+
+- Sửa hiểu nhầm từ đợt 129: tên block, tên regex script và nội dung do preset/lorebook/Tawa nhập vào là **nội dung người dùng**, không phải UI hệ thống, nên không được dịch theo ngôn ngữ giao diện.
+- `SettingsPage` giờ giữ nguyên tuyệt đối `block.name` và `scriptName` bằng `translate="no"` + `data-ui-no-translate="true"`; các tên như `Giáp Kháng Cắt Xén Tawa`, `Lời Hứa Cặp Sinh Đôi`, `Phân khu 01 · ...`, `Ngôn ngữ đầu ra` sẽ hiển thị đúng nguyên văn preset.
+- Chỉ dịch các control thật của màn preset: `Xem/Ẩn`, `← Trước`, `Trang N/M`, `Sau →`, `Nạp preset khác`, nhãn `Regex preset ...` và badge `HIỂN THỊ`.
+- Gỡ các entry dịch tĩnh dành riêng cho tên Tawa/preset đã thêm nhầm ở đợt 129. Không thay đổi state engine, gameplay, prompt hay nội dung preset thực tế.
+
+### Regression đợt 130
+
+- `test-dot128.mjs`: **8/8 PASS**.
+- `test-dot129.mjs`: **12/12 PASS** sau khi cập nhật expectation theo quy tắc mới: preset/lorebook giữ nguyên, state tiếng Trung vẫn nguyên vẹn.
+- `test-dot130.mjs`: **13/13 PASS**.
+- **77/77 file `.js`** syntax PASS.
+- **55/55 file `.jsx`** parse PASS.
+
+### File cần cập nhật lên GitHub sau đợt 130
+
+Upload/ghi đè:
+
+- `src/components/SettingsPage.jsx`
+- `src/i18n/uiLanguage.js`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+Không cần upload `public/`, package files, worker/deploy config hay test.
+
+## Đợt 129 — vá UI 中文 còn sót + gia cố State Engine tiếng Trung mơ hồ
+
+- Vá các nhãn UI động từng còn lẫn tiếng Việt trong chế độ `简体中文`: tên block/prompt preset hiển thị, nút `Xem/Ẩn`, phân trang `Trang N/M`, mùa/buổi/thời tiết, personality trên HUD và các nhãn động liên quan. Không sửa nội dung prompt/preset gốc; chỉ dịch lớp hiển thị.
+- `SettingsPage` giờ dịch trực tiếp tên block/script khi render, nên các tên như `Giáp Kháng Cắt Xén Tawa`, `Lời Hứa Cặp Sinh Đôi`, `Phân khu 01 · Ngôn ngữ & CoT đa ngữ`, `Ngôn ngữ đầu ra` không còn hiện tiếng Việt trong UI Trung.
+- `RightHUD` dịch trực tiếp `Buổi ...`, `Mùa ...`, nhãn thời tiết và tooltip; `PlayerHUD` dịch trực tiếp các trait/superpower động thay vì chỉ trông chờ MutationObserver.
+- Không dùng Google Translate/runtime fetch; toàn bộ thay đổi UI vẫn offline.
+- Gia cố Semantic State Engine cho tiếng Trung và tình huống vật phẩm mơ hồ: tên rõ + số rõ giữ exact; tên rõ nhưng số lượng không rõ được lưu như một bundle có `quantityUncertain`; tên vật phẩm mơ hồ như `几样杂物/一些东西` vẫn thành inventory entity với `identityUncertain`; nếu model quên `target` nhưng evidence canon rõ thì dùng placeholder `未确认杂物` thay vì làm rơi event.
+- Nếu model quên `operation`, app có thể suy hướng nhận/mất từ evidence tiếng Trung (`塞进背包/收到/获得` vs `扔掉/失去/消耗/...`). Các state linh tinh ngoài schema chuẩn vẫn persist bằng `custom_state/dynamic state`.
+- Bổ sung cue tiếng Trung cho các câu kiểu `几样杂物塞进背包` để lượt nhiều biến vẫn kích hoạt focused recovery shards.
+
+### Regression đợt 129
+
+- `test-dot105.mjs`: **10/10 PASS** (không phá semantic engine cũ).
+- `test-dot121.mjs`: **15/15 PASS** (coverage tiếng Trung hiện có).
+- `test-dot128.mjs`: **8/8 PASS** (UI offline, không Google Translate).
+- `test-dot129.mjs`: **12/12 PASS** (preset/UI động + item tiếng Trung rõ/mơ hồ + dynamic state).
+- **77/77 file `.js`** syntax PASS.
+- **55/55 file `.jsx`** parse PASS.
+
+### File cần cập nhật lên GitHub sau đợt 129
+
+Upload/ghi đè:
+
+- `src/i18n/uiStaticExtras.js`
+- `src/i18n/uiLanguage.js`
+- `src/components/SettingsPage.jsx`
+- `src/components/PlayerHUD.jsx`
+- `src/components/RightHUD.jsx`
+- `src/services/semanticStateEngine.js`
+- `src/utils/stateScanPlan.js`
+- `src/utils/stateEvidence.js`
+- `README.md`
+
+Không cần upload `public/`, package files, worker/deploy config hay `test-dot129.mjs`.
+
 
 ## Đợt 128 — UI đa ngôn ngữ offline hoàn toàn
 - Xóa toàn bộ Google Translate runtime/fetch; UI đổi ngôn ngữ chỉ dùng catalog đóng gói trong source.

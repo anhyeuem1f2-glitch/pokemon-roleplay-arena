@@ -12,10 +12,12 @@ import StateApiSection from './StateApiSection.jsx'
 import WorldbookSection from './WorldbookSection.jsx'
 import PokemonToggle from './PokemonToggle.jsx'
 import { isLlmDebugEnabled, setLlmDebugEnabled, subscribeLlmDebug } from '../services/llmDebug.js'
+import { translateUiText } from '../i18n/uiLanguage.js'
 
 const PRESET_PAGE_SIZE = 8
 
 function MainPresetManager({ mainPreset, setMainPreset, onPresetPrefill }) {
+  const { uiLanguage } = useGame()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
   const [expanded, setExpanded] = useState(() => new Set())
@@ -141,13 +143,13 @@ function MainPresetManager({ mainPreset, setMainPreset, onPresetPrefill }) {
                   compact
                   checked={block.enabled}
                   onChange={() => toggleBlock(block.identifier)}
-                  label={block.name}
+                  label={<span translate="no" data-ui-no-translate="true">{block.name}</span>}
                 />
               </div>
               {block.marker && <span className="status-pill">marker</span>}
               {!block.marker && (
                 <button className="btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => toggleExpanded(block.identifier)}>
-                  {isOpen ? 'Ẩn' : 'Xem'}
+                  {translateUiText(isOpen ? 'Ẩn' : 'Xem', uiLanguage)}
                 </button>
               )}
             </div>
@@ -173,30 +175,30 @@ function MainPresetManager({ mainPreset, setMainPreset, onPresetPrefill }) {
       {filtered.length > PRESET_PAGE_SIZE && (
         <div className="btn-row" style={{ marginTop: 10, justifyContent: 'center' }}>
           <button className="btn" disabled={safePage === 0} onClick={() => setPage(safePage - 1)}>
-            ← Trước
+            {translateUiText('← Trước', uiLanguage)}
           </button>
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            Trang {safePage + 1} / {totalPages}
+            {translateUiText(`Trang ${safePage + 1} / ${totalPages}`, uiLanguage)}
           </span>
           <button className="btn" disabled={safePage >= totalPages - 1} onClick={() => setPage(safePage + 1)}>
-            Sau →
+            {translateUiText('Sau →', uiLanguage)}
           </button>
         </div>
       )}
 
       <label className="btn" style={{ display: 'inline-block', cursor: 'pointer', marginTop: 12 }}>
-        Nạp preset khác (thay preset hiện tại)
+        {translateUiText('Nạp preset khác (thay preset hiện tại)', uiLanguage)}
         <input type="file" accept=".json" onChange={handleFile} style={{ display: 'none' }} />
       </label>
 
       {mainPreset.regexScripts?.length > 0 && (
-        <RegexScriptsManager mainPreset={mainPreset} setMainPreset={setMainPreset} />
+        <RegexScriptsManager mainPreset={mainPreset} setMainPreset={setMainPreset} uiLanguage={uiLanguage} />
       )}
     </div>
   )
 }
 
-function RegexScriptsManager({ mainPreset, setMainPreset }) {
+function RegexScriptsManager({ mainPreset, setMainPreset, uiLanguage }) {
   function toggle(id) {
     setMainPreset({
       ...mainPreset,
@@ -207,8 +209,7 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
   return (
     <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
       <label>
-        Regex preset: prompt + hiển thị ({mainPreset.regexScripts.filter((s) => s.enabled).length}/
-        {mainPreset.regexScripts.length} đang bật)
+        {translateUiText(`Regex preset: prompt + hiển thị (${mainPreset.regexScripts.filter((s) => s.enabled).length}/${mainPreset.regexScripts.length} đang bật)`, uiLanguage)}
       </label>
       <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '4px 0 10px' }}>
         App tôn trọng placement, promptOnly/markdownOnly và min/max depth như SillyTavern; regex dọn
@@ -231,11 +232,11 @@ function RegexScriptsManager({ mainPreset, setMainPreset }) {
             }}
           >
             <div style={{ flex: 1 }}>
-              <PokemonToggle compact checked={s.enabled} onChange={() => toggle(s.id)} label={s.scriptName} />
+              <PokemonToggle compact checked={s.enabled} onChange={() => toggle(s.id)} label={<span translate="no" data-ui-no-translate="true">{s.scriptName}</span>} />
             </div>
             {s.isDecorative && <span className="status-pill">HTML</span>}
             {s.promptOnly && <span className="status-pill">PROMPT</span>}
-            {s.markdownOnly && <span className="status-pill">HIỂN THỊ</span>}
+            {s.markdownOnly && <span className="status-pill">{translateUiText('HIỂN THỊ', uiLanguage)}</span>}
             {(s.minDepth !== null || s.maxDepth !== null) && (
               <span className="status-pill">D{s.minDepth ?? 0}–{s.maxDepth ?? '∞'}</span>
             )}

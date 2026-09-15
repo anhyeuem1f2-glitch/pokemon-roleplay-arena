@@ -379,9 +379,9 @@ const LEVEL_UP = ['lên cấp', 'tăng cấp', 'level up', 'rare candy', 'kẹo 
 const EVOLVE = ['tiến hóa', 'evolve', 'hóa thành', 'biến đổi thành', 'lột xác thành', '进化', '进化成', '变成']
 const EQUIP_ITEM = ['đeo', 'trang bị', 'cho cầm', 'đưa cho giữ', 'gắn vào', 'trao cho cầm', 'cầm lấy', 'giữ trên người', 'giữ', 'cầm', 'mang theo', '佩戴', '装备', '携带', '让它拿着', '给它拿着']
 const UNEQUIP_ITEM = ['tháo', 'gỡ', 'cất lại', 'thu hồi', 'lấy lại', 'bỏ trang bị', 'không còn cầm', '卸下', '取下', '收回', '不再携带']
-const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho', 'trao', '收到', '获得', '得到', '获赠', '拿到', '捡到', '购买', '买到', '放进背包', '收入背包', '交给玩家']
-const TAKE_ITEM_ILLEGALLY = ['trộm', 'trộm được', 'cuỗm', 'chôm', 'thó', 'giật lấy', 'cướp', 'chiếm đoạt', 'lấy trộm', 'nẫng', 'tịch thu']
-const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn', '使用', '用掉', '消耗', '交给', '归还', '被拿走', '失去', '丢弃', '喂给']
+const RECEIVE_ITEM = ['nhận được', 'được tặng', 'được trao', 'nhặt được', 'mua', 'lấy được', 'cất vào túi', 'bỏ vào túi', 'trao cho', 'trao', '收到', '获得', '得到', '获赠', '拿到', '捡到', '购买', '买到', '放进背包', '放入背包', '塞进背包', '装进包里', '收入背包', '交给玩家', '随身带着', '拿在手里', '背包里有', '包里有']
+const TAKE_ITEM_ILLEGALLY = ['trộm', 'trộm được', 'cuỗm', 'chôm', 'thó', 'giật lấy', 'cướp', 'chiếm đoạt', 'lấy trộm', 'nẫng', 'tịch thu', '偷走', '偷到', '顺走', '抢走', '夺走', '拿走', '没收']
+const LOSE_ITEM = ['sử dụng', 'dùng hết', 'đưa cho', 'trả lại', 'bị lấy', 'bị cướp', 'mất đi', 'ném', 'tiêu hao', 'ăn kẹo', 'cho ăn', '使用', '用掉', '消耗', '交给', '送给', '归还', '被拿走', '被抢走', '失去', '丢弃', '扔掉', '喂给']
 const LOOT_ACTION = ['vơ vét', 'lấy sạch', 'cuỗm', 'trộm được', 'thu chiến lợi phẩm', 'gom hết', 'nhặt được', 'tịch thu', 'mang số đồ', 'bỏ chiến lợi phẩm vào túi']
 const MOVE = [
   'đi tới', 'đi đến', 'đã tới', 'đã đến', 'tới nơi', 'đến nơi', 'đặt chân',

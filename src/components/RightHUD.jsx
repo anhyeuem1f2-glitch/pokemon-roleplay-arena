@@ -16,6 +16,7 @@ import { modeAllowsTrading } from '../data/gameModes.js'
 import StoryTagsModal from './StoryTagsModal.jsx'
 import LlmDebugModal from './LlmDebugModal.jsx'
 import { isLlmDebugEnabled, subscribeLlmDebug } from '../services/llmDebug.js'
+import { translateUiText } from '../i18n/uiLanguage.js'
 
 // ============ CỘT HUD BÊN PHẢI (đợt 26) ============
 // Theo yêu cầu chuyển Cài đặt / Màn hình chính / Bản đồ sang PHẢI (bố cục
@@ -116,9 +117,9 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
 
       {/* Ngày giờ trong truyện (đợt 32) */}
       <div style={{ fontSize: 10.5, color: 'var(--text-mid)', fontFamily: 'var(--font-mono)', textAlign: 'center', border: '1px solid var(--line)', borderRadius: 8, padding: '5px 8px' }}>
-        📅 Buổi {storyDate.part} · {storyDate.day}/{storyDate.month}/{storyDate.year}
-        <div style={{ marginTop: 3, color: 'var(--text-dim)' }} title={getWeather(storyDate, playerLocation).label}>
-          {getWeather(storyDate, playerLocation).icon} Mùa {getWeather(storyDate, playerLocation).season} · {getWeather(storyDate, playerLocation).label.split(',')[0].split(' — ')[0]}
+        📅 {translateUiText(`Buổi ${storyDate.part} · ${storyDate.day}/${storyDate.month}/${storyDate.year}`, uiLanguage)}
+        <div style={{ marginTop: 3, color: 'var(--text-dim)' }} title={translateUiText(getWeather(storyDate, playerLocation).label, uiLanguage)}>
+          {getWeather(storyDate, playerLocation).icon} {translateUiText(`Mùa ${getWeather(storyDate, playerLocation).season} · ${getWeather(storyDate, playerLocation).label.split(',')[0].split(' — ')[0]}`, uiLanguage)}
         </div>
       </div>
 

@@ -11,6 +11,7 @@ import { PERSONALITY_TRAITS, SUPERPOWERS } from '../data/characterTraits.js'
 import { describeCustomMechanicEffects } from '../data/playerPerks.js'
 import { pokemonDisplayName, levelUpMon, isSameMon } from '../data/pokemonSpecies.js'
 import { heldItemDescription, heldItemLabel, isHoldableItem, isTrainerGear, normalizeHeldItem, resolveHeldItemByName } from '../data/pokemonHeldItems.js'
+import { translateUiText } from '../i18n/uiLanguage.js'
 
 // ============ HUD DỌC BÊN TRÁI (chỉ hiện khi đang chơi game) ============
 // Bố cục dọc lấy cảm hứng từ giao diện game text Phàm Nhân Tu Tiên: cột
@@ -64,7 +65,7 @@ export default function PlayerHUD({ mobile = false }) {
   const {
     playerName, playerProfile, setPlayerProfile, bodyStatus, setBodyStatus, hunger, setHunger, playerTraits,
     party, setParty, playerMon, setPlayerMon,
-    relationships, inventory, setInventory, movesDb,
+    relationships, inventory, setInventory, movesDb, uiLanguage,
   } = useGame()
   const [infoMon, setInfoMon] = useState(null)
   // Đợt 54: bấm khung avatar để đổi ảnh ngay giữa truyện.
@@ -164,7 +165,7 @@ export default function PlayerHUD({ mobile = false }) {
             {playerTraits?.personality?.length > 0 && (
               <div style={{ color: 'var(--text-mid)' }}>
                 {playerTraits.personality
-                  .map((k) => PERSONALITY_TRAITS.find((t) => t.key === k)?.label)
+                  .map((k) => translateUiText(PERSONALITY_TRAITS.find((t) => t.key === k)?.label ?? '', uiLanguage))
                   .filter(Boolean)
                   .join(' · ')}
               </div>
@@ -172,8 +173,8 @@ export default function PlayerHUD({ mobile = false }) {
             {playerTraits?.superpower && playerTraits.superpower !== 'none' && (
               <div style={{ color: 'var(--amber)', marginTop: 3 }}>
                 ✦ {playerTraits.superpower === 'custom'
-                  ? (playerTraits.customPower || 'Năng lực riêng')
-                  : (SUPERPOWERS.find((sp) => sp.key === playerTraits.superpower)?.label ?? playerTraits.superpower)}
+                  ? (playerTraits.customPower || translateUiText('Năng lực riêng', uiLanguage))
+                  : translateUiText(SUPERPOWERS.find((sp) => sp.key === playerTraits.superpower)?.label ?? playerTraits.superpower, uiLanguage)}
               </div>
             )}
             {/* Đợt 74: chỉ cơ chế đọc từ ô Tự mô tả mới hiện ở đây. */}

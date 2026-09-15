@@ -168,7 +168,7 @@ const FALLBACK_EN = [
   ['Chọn ', 'Choose '], ['Đang ', ''], ['Không có ', 'No '], ['Chưa ', 'Not yet '], ['Thêm ', 'Add '], ['Xoá ', 'Delete '], ['Sửa ', 'Edit '], ['Lưu ', 'Save '], ['Mở ', 'Open '], ['Đóng ', 'Close '], ['Tạo ', 'Create '], ['Tự động', 'Auto'], ['tùy chọn', 'optional'], ['tuỳ chọn', 'optional'], ['khởi đầu', 'starting'], ['Pokémon khởi đầu', 'starter Pokémon'], ['thân mật', 'friendship'], ['trang bị', 'equipment'], ['vật phẩm', 'item'], ['hành động', 'action'], ['cài đặt', 'settings'], ['ngôn ngữ', 'language'],
 ]
 const FALLBACK_ZH = [
-  ['Chọn ', '选择'], ['Đang ', '正在'], ['Không có ', '没有'], ['Chưa ', '尚未'], ['Thêm ', '添加'], ['Xoá ', '删除'], ['Sửa ', '编辑'], ['Lưu ', '保存'], ['Mở ', '打开'], ['Đóng ', '关闭'], ['Tạo ', '创建'], ['Tự động', '自动'], ['tùy chọn', '可选'], ['tuỳ chọn', '可选'], ['khởi đầu', '初始'], ['Pokémon khởi đầu', '初始宝可梦'], ['thân mật', '亲密度'], ['trang bị', '装备'], ['vật phẩm', '道具'], ['hành động', '行动'], ['cài đặt', '设置'], ['ngôn ngữ', '语言'],
+  ['Chọn ', '选择'], ['Đang ', '正在'], ['Không có ', '没有'], ['Chưa ', '尚未'], ['Thêm ', '添加'], ['Xoá ', '删除'], ['Sửa ', '编辑'], ['Lưu ', '保存'], ['Mở ', '打开'], ['Đóng ', '关闭'], ['Tạo ', '创建'], ['Tự động', '自动'], ['tùy chọn', '可选'], ['tuỳ chọn', '可选'], ['khởi đầu', '初始'], ['Pokémon khởi đầu', '初始宝可梦'], ['thân mật', '亲密度'], ['trang bị', '装备'], ['vật phẩm', '道具'], ['hành động', '行动'], ['cài đặt', '设置'], ['ngôn ngữ', '语言'], ['Xem', '查看'], ['Sau', '下一页'], ['Trước', '上一页'], ['Trang', '页'], ['hiển thị', '显示'], ['đang bật', '已启用'],
 ]
 
 function preserveWhitespace(source, translated) {
@@ -197,12 +197,56 @@ function translateComposite(core, language) {
   return null
 }
 
+const ZH_SEASONS = { xuân: '春', hạ: '夏', thu: '秋', đông: '冬' }
+const EN_SEASONS = { xuân: 'Spring', hạ: 'Summer', thu: 'Autumn', đông: 'Winter' }
+const ZH_DAYPARTS = { sáng: '早晨', trưa: '中午', chiều: '下午', tối: '晚上', đêm: '夜晚' }
+const EN_DAYPARTS = { sáng: 'Morning', trưa: 'Noon', chiều: 'Afternoon', tối: 'Evening', đêm: 'Night' }
+
+function translateDynamicUi(core, language) {
+  let m = core.match(/^Trang\s+(\d+)\s*\/\s*(\d+)$/u)
+  if (m) return language === 'zh' ? `第 ${m[1]} / ${m[2]} 页` : `Page ${m[1]} / ${m[2]}`
+
+  m = core.match(/^Buổi\s+([^·]+?)\s*·\s*(\d+\/\d+\/\d+)$/u)
+  if (m) {
+    const key = m[1].trim().toLowerCase()
+    const part = language === 'zh' ? (ZH_DAYPARTS[key] ?? m[1].trim()) : (EN_DAYPARTS[key] ?? m[1].trim())
+    return language === 'zh' ? `时段 ${part} · ${m[2]}` : `${part} · ${m[2]}`
+  }
+
+  m = core.match(/^Mùa\s+([^·]+?)\s*·\s*(.+)$/u)
+  if (m) {
+    const key = m[1].trim().toLowerCase()
+    const season = language === 'zh' ? (ZH_SEASONS[key] ?? m[1].trim()) : (EN_SEASONS[key] ?? m[1].trim())
+    const weather = exactOffline(m[2].trim(), language) || m[2].trim()
+    return language === 'zh' ? `季节 ${season} · ${weather}` : `Season ${season} · ${weather}`
+  }
+
+  m = core.match(/^Đang phát:\s*(.+)$/u)
+  if (m) return language === 'zh' ? `正在播放：${m[1]}` : `Playing: ${m[1]}`
+
+  m = core.match(/^Pokédex\s*·\s*thấy\s*(\d+)\s*\/\s*bắt\s*(\d+)$/iu)
+  if (m) return language === 'zh' ? `Pokédex · 已见 ${m[1]} / 已捕获 ${m[2]}` : `Pokédex · seen ${m[1]} / caught ${m[2]}`
+
+  m = core.match(/^Nhật ký\s*·\s*(\d+)\s*huy hiệu\s*\/\s*(\d+)\s*việc$/iu)
+  if (m) return language === 'zh' ? `日志 · ${m[1]} 枚徽章 / ${m[2]} 项任务` : `Journal · ${m[1]} badges / ${m[2]} tasks`
+
+  m = core.match(/^Đời sống\s*·\s*(\d+)\s*trứng$/iu)
+  if (m) return language === 'zh' ? `生活 · ${m[1]} 枚蛋` : `Life · ${m[1]} eggs`
+
+  m = core.match(/^Regex preset:\s*prompt \+ hiển thị\s*\((\d+)\/(\d+)\s*đang bật\)$/iu)
+  if (m) return language === 'zh' ? `Regex 预设：prompt + 显示（${m[1]}/${m[2]} 已启用）` : `Regex preset: prompt + display (${m[1]}/${m[2]} enabled)`
+
+  return null
+}
+
 function translateCore(core, language) {
   if (!core || language === 'vi') return core
   const exact = exactOffline(core, language)
   if (exact) return exact
   const composite = translateComposite(core, language)
   if (composite) return composite
+  const dynamic = translateDynamicUi(core, language)
+  if (dynamic) return dynamic
   const fallback = language === 'zh' ? FALLBACK_ZH : FALLBACK_EN
   // Fully offline best-effort fallback for short interface labels. Long UI
   // descriptions are intentionally translated as exact catalog entries.

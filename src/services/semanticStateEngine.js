@@ -61,6 +61,13 @@ NGUYÊN TẮC CỐT LÕI:
 7. Event nào đã xảy ra thì status=completed. Việc đang cân nhắc/dự định/giá niêm yết/khả năng tương lai thì bỏ.
 8. Không giới hạn số event. Mỗi event độc lập; một event mơ hồ không được làm mất các event rõ khác.
 9. Vật phẩm: trả NET CHANGE của từng tên vật phẩm trong lượt. Nhận 3 rồi dùng 1 => quantity=2. Mất/dùng/trả => quantity âm. Vật phẩm lạ vẫn giữ nguyên tên.
+9.1. KHÔNG ĐƯỢC LÀM RƠI VẬT PHẨM CHỈ VÌ MƠ HỒ. Với 中文 cũng như Việt/Anh:
+- Tên rõ + số lượng rõ: target=tên thật, quantity=số thật.
+- Tên rõ + số lượng không rõ (一些树果 / vài quả berry / some berries): vẫn xuất item_change; nếu không suy ra được con số an toàn thì quantity=1 theo nghĩa MỘT LÔ/BUNDLE và details.quantityUncertain=true, details.quantityText=<cụm định lượng gốc>. KHÔNG bịa số.
+- Tên không rõ nhưng vật thể/tài sản rõ (几样杂物 / một ít đồ linh tinh / some miscellaneous things): target dùng nhãn mô tả cùng ngôn ngữ như 未确认杂物 / Vật phẩm chưa xác định / Unidentified item bundle, quantity=1 cho một bundle, details.identityUncertain=true và giữ rawLabel/rawDescription trong details.
+- Tên lẫn số lượng đều không rõ nhưng canon xác nhận người chơi đã có/mất/tiêu hao một nhóm đồ: vẫn phải tạo item_change cho bundle mơ hồ; đừng bỏ event.
+- Nếu về sau bundle được xác định thành vật phẩm cụ thể, dùng item_patch hoặc item_change để reconciliation thay vì tạo ký ức rời rạc.
+9.2. Các thay đổi linh tinh không phải inventory (quyền, mật mã, thiết bị đang bật/tắt, cánh cửa mở, lời nguyền, trạng thái máy, luật tự tạo...) nếu không khớp schema chuẩn thì PHẢI dùng custom_state, không được bỏ qua.
 9a. TRANG SỨC/PHỤ KIỆN POKÉMON là entity RIÊNG với held item chiến đấu. Nếu người chơi dùng Leaf Stone/Fire Stone/vật liệu canon để CHẾ thành bông tai, vòng cổ, mặt dây, vòng tay, nơ... thì THÀNH PHẨM phải có TÊN RIÊNG khác nguyên liệu (VD Leaf Stone -> Bông Tai Lá Xanh / Vòng Cổ Lá Xanh / Phụ Kiện Lá Xanh), category=accessory, wearable=true, pokemonAccessory=true, holdable=false, sourceMaterial=<tên nguyên liệu>. TUYỆT ĐỐI không biến chính Leaf Stone thành đồ đeo.
 9b. Khi chính văn nói Pokémon đeo/tháo phụ kiện, dùng kind=equip/unequip với details.slot="accessory" và item=<tên thành phẩm>. Held item battle vẫn dùng details.slot="held" hoặc bỏ slot.
 10. MONEY: chỉ tiền thật sự vào/ra. Giá niêm yết không phải giao dịch. Nếu có số dư trước→sau, dùng chênh lệch. Nếu đã thanh toán hóa đơn, dùng tổng đã trả. operation=spend/payment phải có amount âm; income/reward/refund phải dương.
@@ -86,7 +93,7 @@ Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(d
 - SHINY là một cờ boolean ĐỘC LẬP với màu lửa/aura/hiệu ứng tự sáng tạo. Nếu chính văn nói 'Charmander Shiny với lửa tím', BẮT BUỘC shiny=true; 'lửa tím' phải nằm trong customAttributes.appearanceNote/visualTraits, KHÔNG được biến thành form riêng và KHÔNG được dùng thay cho shiny. Sprite/model đặc biệt ngoài Shiny chuẩn là việc của UI; interpreter chỉ lưu mô tả canon.
 - pokemon_acquired.details có thể thêm types, baseStats, moves, ability, description nếu là Pokémon/form fan-made.
 - Với chính văn tiếng Trung: nếu nhận diện chắc một loài Pokémon chuẩn, species/target nên dùng tên canonical database/Showdown (thường là English) để app resolve đúng dữ liệu; đồng thời details.storyName PHẢI giữ đúng tên/cụm tên xuất hiện trong chính văn (VD target="Pikachu", details.storyName="皮卡丘"). Nếu không chắc mapping thì giữ nguyên tên trong chính văn, không đoán bừa.
-- item_change.details: category, holdable, wearable, pokemonAccessory, accessorySlot, sourceMaterial, infinite, keyItem, effect/effects, charges, durability, rarity, usage, customAttributes và mọi thuộc tính fan-made đã được canon xác lập. description KHÔNG bắt buộc; nếu chính văn không nói rõ thì bỏ trống. Mô tả item động sẽ do Item Description Protocol riêng tạo từ canon, không tự mượn mô tả vật phẩm khác.
+- item_change.details: category, holdable, wearable, pokemonAccessory, accessorySlot, sourceMaterial, infinite, keyItem, effect/effects, charges, durability, rarity, usage, customAttributes, quantityUncertain, quantityText, identityUncertain, rawLabel/rawDescription và mọi thuộc tính fan-made đã được canon xác lập. description KHÔNG bắt buộc; nếu chính văn không nói rõ thì bỏ trống. Mô tả item động sẽ do Item Description Protocol riêng tạo từ canon, không tự mượn mô tả vật phẩm khác.
 - item_patch: dùng khi VẬT PHẨM ĐÃ CÓ trong túi được chính văn bổ sung/thay đổi thuộc tính mà số lượng KHÔNG đổi (công dụng mới, trạng thái, số lần dùng, độ bền, quyền truy cập, ngoại hình, liên kết chủ sở hữu, hiệu ứng fan-made...). target là đúng tên/id vật phẩm; details/fields chứa các thuộc tính mới. KHÔNG dùng item_change quantity=0 cho việc này.
 - quest_update.details: id,status,title,giver,objective,reward,region.
 - custom_state dùng cho mọi state mới không khớp loại chuẩn: target là khóa; namespace; operation=set|merge|delta|append|remove; value/details là dữ liệu.
@@ -124,12 +131,45 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function hasExplicitItemQuantity(event) {
+  return [event?.quantity, event?.qty, event?.amount, event?.delta].some((value) => value !== undefined && value !== null && String(value).trim() !== '')
+}
+
+function vagueItemIdentity(value) {
+  const text = String(value ?? '').normalize('NFKC').trim().toLowerCase()
+  if (!text) return true
+  return /^(?:东西|物品|道具|杂物|一些东西|几样东西|若干物品|不明物品|未知物品|stuff|things|misc(?:ellaneous)?(?: items?)?|đồ|đồ đạc|mấy thứ|mấy món|vật phẩm|đồ linh tinh|mấy thứ linh tinh)$/iu.test(text)
+}
+
+function fallbackUnknownItemTarget(event) {
+  const details = event?.details ?? {}
+  const candidate = String(event?.target ?? event?.name ?? event?.item ?? event?.label ?? details.name ?? details.item ?? details.rawLabel ?? details.rawItem ?? '').trim()
+  if (candidate) return candidate
+  const evidence = String(event?.evidence ?? event?.note ?? '').trim()
+  const direction = String(event?.operation ?? event?.op ?? event?.action ?? event?.direction ?? '').trim()
+  const uncertaintyDeclared = details.identityUncertain === true || details.rawLabel || details.rawItem || details.rawDescription
+  // Không cứu một object hỏng trống hoàn toàn. Fallback chỉ dành cho event
+  // semantic có căn cứ canon/operation nhưng tên vật phẩm thật sự mơ hồ.
+  if (!evidence && !direction && !uncertaintyDeclared) return ''
+  if (/\p{Script=Han}/u.test(evidence)) return '未确认杂物'
+  if (/(?:the|a|an|some|bag|item|stuff|things)/i.test(evidence)) return 'Unidentified item bundle'
+  return 'Vật phẩm chưa xác định'
+}
+
+function evidenceSuggestsUnclearQuantity(event) {
+  const text = String(event?.evidence ?? event?.note ?? '')
+  return /(?:一些|若干|几样|几件|一堆|一包|若干个|một ít|mấy món|mấy thứ|vài món|vài thứ|một đống|some|several|a few|a bunch|a handful)/iu.test(text)
+}
+
 function signedQuantity(event) {
   const explicit = event.quantity ?? event.qty ?? event.amount ?? event.delta
   const numeric = asNumber(explicit, NaN)
   const direction = String(event.operation ?? event.op ?? event.action ?? event.direction ?? '').toLowerCase()
+  const evidence = String(event.evidence ?? event.note ?? '').normalize('NFKC').toLowerCase()
   const negativeDirection = /remove|lose|lost|use|used|consume|consumed|give|gave|sell|sold|spend|discard|return|returned|pay/.test(direction)
+    || /(?:使用|用掉|消耗|失去|丢弃|扔掉|归还|交给|送给|被拿走|被抢走|mất|dùng|sử dụng|tiêu hao|ném|trả lại|đưa cho|gave|used|discarded|lost|returned)/iu.test(evidence)
   const positiveDirection = /add|gain|gained|receive|received|obtain|obtained|acquire|acquired|buy|bought|find|found|reward|create|created|craft|crafted|forge|forged|make|made|own|owned|possess|possessed|carry|carried|have/.test(direction)
+    || /(?:收到|获得|得到|获赠|拿到|捡到|购买|买到|放进.{0,6}背包|放入.{0,6}背包|塞进.{0,6}背包|装进.{0,6}包里|收入.{0,6}背包|随身带着|拿在手里|背包里有|包里有|nhận|được tặng|nhặt|mua|cất vào túi|bỏ vào túi|receive|received|obtained|bought|found|put into (?:the )?bag)/iu.test(evidence)
   if (Number.isFinite(numeric) && numeric !== 0) {
     if (negativeDirection) return -Math.abs(numeric)
     if (positiveDirection) return Math.abs(numeric)
@@ -265,18 +305,25 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       }
       case 'item_change': {
         const qty = signedQuantity(event)
-        if (target && qty) parsed.items.push({
-          name: target,
-          qty,
-          ...details,
-          semantic: true,
-          evidence: event.evidence,
-          source: event.source ?? '',
-          semanticEventId: event.id,
-          confidence: event.confidence,
-          canon: true,
-        })
-        else accepted = false
+        const itemTarget = fallbackUnknownItemTarget(event)
+        if (itemTarget && qty) {
+          const quantityUncertain = !hasExplicitItemQuantity(event) && evidenceSuggestsUnclearQuantity(event)
+          const identityUncertain = Boolean(details.identityUncertain) || vagueItemIdentity(itemTarget)
+          parsed.items.push({
+            name: itemTarget,
+            qty,
+            ...details,
+            ...(quantityUncertain ? { quantityUncertain: true, quantityMode: details.quantityMode ?? 'bundle' } : {}),
+            ...(identityUncertain ? { identityUncertain: true } : {}),
+            ...(quantityUncertain || identityUncertain ? { rawEvidence: String(event.evidence ?? event.note ?? '').slice(0, 360) } : {}),
+            semantic: true,
+            evidence: event.evidence,
+            source: event.source ?? '',
+            semanticEventId: event.id,
+            confidence: event.confidence,
+            canon: true,
+          })
+        } else accepted = false
         break
       }
       case 'item_patch': {

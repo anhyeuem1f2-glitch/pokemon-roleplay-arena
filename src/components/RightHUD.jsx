@@ -25,8 +25,12 @@ import { translateUiText } from '../i18n/uiLanguage.js'
 
 export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
   const [saveOpen, setSaveOpen] = useState(false)
-  const { adminMode, playerLocation, setPlayerLocation, storyDate, pokedexRecords, pokedexSpecies, worldProgress, pokemonLife, storyTone,
-  } = useGame()
+  // Dot132: keep HUD language access defensive and scoped.  Do not reference a
+  // free `uiLanguage` identifier: older/stale bundles crashed with
+  // `ReferenceError: uiLanguage is not defined` before the HUD could mount.
+  const game = useGame()
+  const { adminMode, playerLocation, setPlayerLocation, storyDate, pokedexRecords, pokedexSpecies, worldProgress, pokemonLife, storyTone } = game
+  const hudLanguage = game?.uiLanguage || 'vi'
   const [mapOpen, setMapOpen] = useState(false)
   const [notebookOpen, setNotebookOpen] = useState(false)
   const [pokedexOpen, setPokedexOpen] = useState(false)
@@ -117,9 +121,9 @@ export default function RightHUD({ onOpenSettings, onHome, mobile = false }) {
 
       {/* Ngày giờ trong truyện (đợt 32) */}
       <div style={{ fontSize: 10.5, color: 'var(--text-mid)', fontFamily: 'var(--font-mono)', textAlign: 'center', border: '1px solid var(--line)', borderRadius: 8, padding: '5px 8px' }}>
-        📅 {translateUiText(`Buổi ${storyDate.part} · ${storyDate.day}/${storyDate.month}/${storyDate.year}`, uiLanguage)}
-        <div style={{ marginTop: 3, color: 'var(--text-dim)' }} title={translateUiText(getWeather(storyDate, playerLocation).label, uiLanguage)}>
-          {getWeather(storyDate, playerLocation).icon} {translateUiText(`Mùa ${getWeather(storyDate, playerLocation).season} · ${getWeather(storyDate, playerLocation).label.split(',')[0].split(' — ')[0]}`, uiLanguage)}
+        📅 {translateUiText(`Buổi ${storyDate.part} · ${storyDate.day}/${storyDate.month}/${storyDate.year}`, hudLanguage)}
+        <div style={{ marginTop: 3, color: 'var(--text-dim)' }} title={translateUiText(getWeather(storyDate, playerLocation).label, hudLanguage)}>
+          {getWeather(storyDate, playerLocation).icon} {translateUiText(`Mùa ${getWeather(storyDate, playerLocation).season} · ${getWeather(storyDate, playerLocation).label.split(',')[0].split(' — ')[0]}`, hudLanguage)}
         </div>
       </div>
 

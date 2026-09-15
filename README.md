@@ -1,9 +1,15 @@
+
+## Đợt 128 — UI đa ngôn ngữ offline hoàn toàn
+- Xóa toàn bộ Google Translate runtime/fetch; UI đổi ngôn ngữ chỉ dùng catalog đóng gói trong source.
+- Bổ sung catalog tĩnh cho các màn còn sót nhiều tiếng Việt: Settings/API, Memory/Rerank, Semantic State Engine, Worldbook, Director, Intro/Profile, HUD, chat controls, PokéCenter, Pokémon Life, Safari, shop và các modal phổ biến.
+- Không thay đổi story text, input người chơi, action text do AI sinh, state engine hay gameplay. Ngôn ngữ mặc định vẫn là Tiếng Việt.
+
 ## Đợt 127 — Offline Simplified Chinese UI + mặc định Tiếng Việt
 
 - Chuyển giao diện `简体中文` sang **catalog bản dịch đóng gói trong source**, không còn phụ thuộc Google Translate khi chạy game. Người chơi ở Trung Quốc đại lục có thể đổi sang tiếng Trung mà các màn chính không cần gọi domain Google.
 - Thêm `src/i18n/zhStaticCatalog.js` làm nguồn dịch Trung offline. Catalog bao phủ màn hình chính, toàn bộ wizard tạo nhân vật, tên/mô tả thân phận, mode, tính cách, năng lực, vùng xuất thân, tông truyện, opening, Sandbox Builder, HUD, túi đồ, Pokémon Summary, battle, shop, PokéCenter, Pokédex, save, settings/API, action choices, map/notebook/world progress và debug/state audit.
 - Toàn bộ **130 chuỗi dữ liệu lựa chọn tiếng Việt** trong `identities.js`, `openings.js`, `gameModes.js`, `storyTones.js`, `characterTraits.js` đã có bản dịch Trung offline; không còn phải chờ Google mới dịch các card/chip lựa chọn.
-- `UiLanguageRuntime` chỉ cho phép Google fallback với **English**. Khi chọn `简体中文`, mọi chuỗi được dịch từ catalog/local patterns; `uiAutoTranslate` chặn hẳn request `zh` để không vô tình gọi Google.
+- `UiLanguageRuntime` dịch UI hoàn toàn offline bằng catalog tĩnh. Không còn gọi Google Translate cho bất kỳ ngôn ngữ nào.
 - Giữ nguyên vùng không được dịch: chính văn roleplay, input người chơi, action choice do model sinh, raw payload/debug và code. State Engine tiếng Trung của đợt 121 vẫn giữ nguyên, không bị thay đổi bởi patch UI này.
 - Ngôn ngữ mặc định của bản cài mới/thiết bị chưa có lựa chọn là **Tiếng Việt** (`DEFAULT_UI_LANGUAGE = 'vi'`). Nếu người chơi chủ động chọn English/简体中文 thì lựa chọn đó vẫn được lưu như trước; xoá preference/trình duyệt mới sẽ trở lại Tiếng Việt.
 - Menu 🌐 vẫn luôn giữ tên bản địa bất biến: `Tiếng Việt`, `English`, `简体中文`.
@@ -22,7 +28,6 @@ Upload/ghi đè:
 - `src/i18n/zhStaticCatalog.js` **(file mới)**
 - `src/i18n/uiLanguage.js`
 - `src/components/UiLanguageRuntime.jsx`
-- `src/services/uiAutoTranslate.js`
 - `src/context/GameContext.jsx`
 - `README.md`
 
@@ -3428,7 +3433,6 @@ Không cần upload `public/`, `package.json`, `package-lock.json`, deploy confi
 
 - Sửa tình trạng màn tạo nhân vật khi chọn English/简体中文 vẫn còn nhiều lựa chọn tiếng Việt.
 - Bổ sung bản dịch tĩnh tức thời cho các nhãn quan trọng của wizard: nút `Tiếp tục/Quay lại`, nhóm thân phận, toàn bộ chip tính cách, chip siêu năng lực và tên các thân phận. Các mô tả dài vẫn được Google Translate fallback xử lý.
-- `uiAutoTranslate` nâng cache lên `v3`, cố định source language `sl=vi`, thử cả `translate.googleapis.com` và `translate.google.com`.
 - Các text node UI được gom thành batch nhỏ trước khi gọi Google Translate để tránh hàng chục request đồng thời trên các màn có nhiều card/lựa chọn; vẫn giữ giới hạn 2 request batch chạy song song.
 - Nếu Google/bridge tạm rate-limit, `UiLanguageRuntime` tự quét lại UI định kỳ để retry sau cooldown, không cần F5 hay đổi ngôn ngữ thủ công.
 - Mở rộng detector tiếng Việt cho nhóm từ xuất hiện nhiều trong character wizard để không bỏ sót label ngắn.
@@ -3446,7 +3450,6 @@ Không cần upload `public/`, `package.json`, `package-lock.json`, deploy confi
 
 Upload/ghi đè:
 
-- `src/services/uiAutoTranslate.js`
 - `src/components/UiLanguageRuntime.jsx`
 - `src/i18n/uiLanguage.js`
 - `src/index.css`

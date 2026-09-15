@@ -1,18 +1,12 @@
 import React, { useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
-import { hasExactUiTranslation, translateUiText, UI_LANGUAGES } from '../i18n/uiLanguage.js'
-import {
-  getCachedUiAutoTranslation,
-  looksLikeVietnameseUi,
-  requestUiAutoTranslation,
-} from '../services/uiAutoTranslate.js'
+import { translateUiText, UI_LANGUAGES } from '../i18n/uiLanguage.js'
 
 const sourceText = new WeakMap()
 const lastRenderedText = new WeakMap()
 const sourceAttrs = new WeakMap()
 const lastRenderedAttrs = new WeakMap()
 const ATTRIBUTE_NAMES = ['placeholder', 'title', 'aria-label']
-let runtimeLanguage = 'vi'
 
 const NO_TRANSLATE_BASE = [
   '[data-ui-no-translate="true"]',
@@ -26,42 +20,13 @@ const NO_TRANSLATE_BASE = [
 ]
 
 function skippedText(element) {
-  // Nội dung người dùng đang nhập trong textarea tuyệt đối không được dịch.
+  // Player-written textarea content is story/input, not interface chrome.
   return Boolean(element?.closest?.([...NO_TRANSLATE_BASE, 'textarea'].join(',')))
 }
 
 function skippedAttributes(element) {
-  // Placeholder/title/aria-label CỦA textarea là UI nên vẫn phải dịch.
+  // placeholder/title/aria-label on textarea are UI and should still translate.
   return Boolean(element?.closest?.(NO_TRANSLATE_BASE.join(',')))
-}
-
-function reapplyWhitespace(source, translated) {
-  const lead = String(source ?? '').match(/^\s*/)?.[0] ?? ''
-  const tail = String(source ?? '').match(/\s*$/)?.[0] ?? ''
-  return `${lead}${String(translated ?? '').trim()}${tail}`
-}
-
-function needsGoogle(source, language) {
-  // Chinese is fully bundled/offline from đợt 127 so players in mainland China
-  // never depend on Google domains. English may still use Google as a fallback.
-  return language === 'en' && !hasExactUiTranslation(source, language) && looksLikeVietnameseUi(source)
-}
-
-function applyAsyncText(node, source, language) {
-  if (!needsGoogle(source, language)) return
-  const cached = getCachedUiAutoTranslation(source, language)
-  if (cached) {
-    const next = reapplyWhitespace(source, cached)
-    lastRenderedText.set(node, next)
-    if (node.nodeValue !== next) node.nodeValue = next
-    return
-  }
-  requestUiAutoTranslation(source, language).then((translated) => {
-    if (!translated || runtimeLanguage !== language || sourceText.get(node) !== source || !node.isConnected) return
-    const next = reapplyWhitespace(source, translated)
-    lastRenderedText.set(node, next)
-    if (node.nodeValue !== next) node.nodeValue = next
-  })
 }
 
 function translateTextNode(node, language) {
@@ -71,28 +36,9 @@ function translateTextNode(node, language) {
   const previousRendered = lastRenderedText.get(node)
   if (!sourceText.has(node) || current !== previousRendered) sourceText.set(node, current)
   const source = sourceText.get(node) ?? current
-  const cached = needsGoogle(source, language) ? getCachedUiAutoTranslation(source, language) : null
-  const next = cached ? reapplyWhitespace(source, cached) : translateUiText(source, language)
+  const next = translateUiText(source, language)
   lastRenderedText.set(node, next)
   if (current !== next) node.nodeValue = next
-  if (!cached) applyAsyncText(node, source, language)
-}
-
-function applyAsyncAttribute(element, name, source, language) {
-  if (!needsGoogle(source, language)) return
-  const cached = getCachedUiAutoTranslation(source, language)
-  const commit = (translated) => {
-    if (!translated || runtimeLanguage !== language || !element.isConnected) return
-    const sources = sourceAttrs.get(element)
-    if (!sources || sources[name] !== source) return
-    const rendered = lastRenderedAttrs.get(element) || {}
-    const next = reapplyWhitespace(source, translated)
-    rendered[name] = next
-    lastRenderedAttrs.set(element, rendered)
-    if (element.getAttribute(name) !== next) element.setAttribute(name, next)
-  }
-  if (cached) commit(cached)
-  else requestUiAutoTranslation(source, language).then(commit)
 }
 
 function translateAttributes(element, language) {
@@ -106,11 +52,9 @@ function translateAttributes(element, language) {
     const current = element.getAttribute(name) ?? ''
     if (!(name in sources) || current !== rendered[name]) sources[name] = current
     const source = sources[name]
-    const cached = needsGoogle(source, language) ? getCachedUiAutoTranslation(source, language) : null
-    const next = cached ? reapplyWhitespace(source, cached) : translateUiText(source, language)
+    const next = translateUiText(source, language)
     rendered[name] = next
     if (current !== next) element.setAttribute(name, next)
-    if (!cached) applyAsyncAttribute(element, name, source, language)
   }
 }
 
@@ -136,7 +80,6 @@ export default function UiLanguageRuntime() {
   const { uiLanguage } = useGame()
 
   useEffect(() => {
-    runtimeLanguage = uiLanguage
     const info = UI_LANGUAGES.find((entry) => entry.key === uiLanguage) ?? UI_LANGUAGES[0]
     document.documentElement.lang = info.htmlLang
     document.documentElement.dataset.uiLanguage = uiLanguage
@@ -157,17 +100,7 @@ export default function UiLanguageRuntime() {
       attributeFilter: ATTRIBUTE_NAMES,
     })
 
-    // Nếu Google Translate/bridge tạm rate-limit, bản 122 có thể để lại text Việt
-    // mãi cho tới lần mutation tiếp theo. Đợt 123 quét lại nhẹ mỗi 15s để các
-    // chuỗi visible tự được retry sau cooldown mà không cần F5 hay đổi ngôn ngữ.
-    const retryTimer = uiLanguage === 'vi'
-      ? null
-      : window.setInterval(() => walk(document.body, uiLanguage), 15_000)
-
-    return () => {
-      observer.disconnect()
-      if (retryTimer) window.clearInterval(retryTimer)
-    }
+    return () => observer.disconnect()
   }, [uiLanguage])
 
   return null

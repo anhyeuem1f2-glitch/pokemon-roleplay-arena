@@ -1,4 +1,5 @@
 import { hasZhStaticTranslation, translateZhStatic, ZH_STATIC_CATALOG } from './zhStaticCatalog.js'
+import { EN_UI_EXTRAS, ZH_UI_EXTRAS } from './uiStaticExtras.js'
 
 export const UI_LANGUAGE_STORAGE_KEY = 'trainer-arena:ui-language'
 export const DEFAULT_UI_LANGUAGE = 'vi'
@@ -14,6 +15,7 @@ export function normalizeUiLanguage(value) {
 }
 
 const EN = {
+  ...EN_UI_EXTRAS,
   'Thế giới nhập vai của huấn luyện viên Pokémon': 'A Pokémon Trainer roleplay world',
   'Bỏ qua intro': 'Skip intro',
   'Đang phát intro...': 'Playing intro...',
@@ -159,6 +161,7 @@ const ZH = {
   'Phóng viên tập sự': '见习记者', 'Nhiếp ảnh gia hoang dã': '野生宝可梦摄影师', 'Nghệ sĩ đường phố cùng Pokémon': '宝可梦街头艺人', 'Con nhà thương lái rong': '行商家庭子弟', 'Con nhà trại nhân giống': '培育屋家庭子弟',
 
   ...ZH_STATIC_CATALOG,
+  ...ZH_UI_EXTRAS,
 }
 
 const FALLBACK_EN = [
@@ -174,26 +177,38 @@ function preserveWhitespace(source, translated) {
   return `${lead}${translated}${tail}`
 }
 
+function exactOffline(core, language) {
+  if (language === 'zh') return ZH[core] || translateZhStatic(core) || null
+  if (language === 'en') return EN[core] || null
+  return core
+}
+
+function translateComposite(core, language) {
+  // UI often joins already-translated labels at render time (traits, badges,
+  // counters...). Translate each stable segment instead of requiring a giant
+  // exact entry for every possible combination. Story text is excluded before
+  // reaching this function by UiLanguageRuntime.
+  for (const separator of [' · ', ' / ']) {
+    if (!core.includes(separator)) continue
+    const parts = core.split(separator)
+    const translated = parts.map((part) => exactOffline(part.trim(), language))
+    if (translated.every(Boolean)) return translated.join(separator)
+  }
+  return null
+}
+
 function translateCore(core, language) {
   if (!core || language === 'vi') return core
-  if (language === 'zh') {
-    const offline = translateZhStatic(core)
-    if (offline) return offline
-    if (ZH[core]) return ZH[core]
-    // Chinese UI must stay offline. Never depend on Google Translate at runtime.
-    // A short label may still be covered by legacy phrase fallbacks.
-    if (core.length <= 72) {
-      let out = core
-      for (const [from, to] of FALLBACK_ZH) out = out.replaceAll(from, to)
-      return out
-    }
-    return core
-  }
-  if (EN[core]) return EN[core]
-  // English keeps the existing optional Google fallback for strings not yet bundled.
+  const exact = exactOffline(core, language)
+  if (exact) return exact
+  const composite = translateComposite(core, language)
+  if (composite) return composite
+  const fallback = language === 'zh' ? FALLBACK_ZH : FALLBACK_EN
+  // Fully offline best-effort fallback for short interface labels. Long UI
+  // descriptions are intentionally translated as exact catalog entries.
   if (core.length > 72) return core
   let out = core
-  for (const [from, to] of FALLBACK_EN) out = out.replaceAll(from, to)
+  for (const [from, to] of fallback) out = out.replaceAll(from, to)
   return out
 }
 

@@ -3590,3 +3590,21 @@ Không cần upload `public/`, package files, worker/deploy config hay `test-dot
 - The HUD now reads `const game = useGame()` and derives `hudLanguage = game?.uiLanguage || 'vi'`.
 - This makes the change visibly different on Git and removes the `uiLanguage is not defined` failure path from `RightHUD`.
 - No gameplay, state engine, battle, preset, or lorebook logic was changed.
+
+---
+
+## Đợt 133 — Ngôn ngữ truyện đi theo UI, nhưng tôn trọng preset (16/09/2026)
+
+### Lỗi đã sửa
+Người chơi chọn **English** hoặc **简体中文** trước đây mới chỉ đổi giao diện. Pipeline AI vẫn còn nhiều prompt cứng ép **tiếng Việt**, nên người dùng Trung Quốc có thể nhận toàn bộ chính văn bằng tiếng Việt dù UI đã là tiếng Trung.
+
+### Hành vi mới
+- Nếu preset chính văn / hướng dẫn văn phong **không chỉ định ngôn ngữ**, ngôn ngữ truyện mặc định đi theo lựa chọn UI: `vi` → Tiếng Việt, `en` → English, `zh` → 简体中文.
+- Nếu preset **chỉ định rõ ngôn ngữ**, preset được ưu tiên; app không ép đổi về ngôn ngữ UI.
+- Main Story, Opening, Action Choices, API chau chuốt văn phong, wiki canon note, Shop NPC, Safari talk, Battle talk và Anime Battle không còn hard-code đầu ra tiếng Việt.
+- API chau chuốt phải giữ **đúng ngôn ngữ của chính văn nguồn**, tuyệt đối không được biến tiếng Trung/Anh thành tiếng Việt.
+- Story Summary phải tóm tắt bằng **cùng ngôn ngữ với diễn biến mới nhất** để memory không kéo truyện trở lại tiếng Việt ở các lượt sau.
+- Thêm `src/i18n/storyLanguage.js` làm nguồn chung để phân giải `UI → story language` và nhận diện chỉ dẫn ngôn ngữ rõ ràng trong preset.
+
+### Regression
+Thêm `test-dot133.mjs` kiểm tra UI tiếng Trung → chính văn tiếng Trung, preset được quyền override, action choices đa ngôn ngữ và không còn các prompt phụ ép tiếng Việt.

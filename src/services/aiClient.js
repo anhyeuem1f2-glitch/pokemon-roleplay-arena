@@ -1,4 +1,5 @@
 import { startLlmDebugRecord, finishLlmDebugRecord, failLlmDebugRecord } from './llmDebug.js'
+import { buildSameLanguageInstruction, storyLanguageInfo } from '../i18n/storyLanguage.js'
 // Client gọi bất kỳ API nào tương thích chuẩn OpenAI /chat/completions
 // (OpenAI, OpenRouter, Groq, local server như LM Studio / text-generation-webui,
 // hoặc các proxy Gemini/Claude giả lập format OpenAI như trong ảnh bạn gửi).
@@ -546,14 +547,15 @@ export async function rerankDocs(config, query, documents, topN) {
 // beta nên slot này đổi vai): sau khi có chính văn sạch, model phụ ĐÁNH BÓNG
 // câu chữ theo tông truyện — KHÔNG được đổi nội dung/sự kiện/thoại/thứ tự.
 // Lỗi bất kỳ → trả nguyên văn cũ, truyện không bao giờ bị chặn.
-export async function polishProse(cfg, text, toneNote, pokemonBehaviorNote = '') {
+export async function polishProse(cfg, text, toneNote, pokemonBehaviorNote = '', language = 'vi') {
   if (!cfg?.baseUrl || !cfg?.model || !text?.trim()) return text
   const reply = await chatCompletion(cfg, [
     {
       role: 'system',
       content: [
-        'Bạn là biên tập viên văn xuôi tiếng Việt cho một game nhập vai Pokémon. Nhiệm vụ DUY NHẤT: chau chuốt câu chữ của đoạn chính văn được đưa — mượt hơn, tự nhiên hơn, đúng tông truyện — rồi trả về TOÀN BỘ đoạn văn đã sửa.',
-        'LUẬT SẮT: (1) KHÔNG thay đổi nội dung, sự kiện, thông tin, tên riêng, con số; (2) KHÔNG thêm/bớt tình tiết hay lời thoại (chỉ được sửa cách diễn đạt của thoại, giữ nguyên ý); (3) giữ nguyên bố cục đoạn; (4) sửa các cấu trúc dịch-máy lủng củng (động từ chồng chất, tính từ xâu chuỗi vô nghĩa) thành câu tiếng Việt tự nhiên; (5) trả về CHỈ đoạn văn, không lời dẫn, không markdown rào.',
+        `Bạn là biên tập viên văn xuôi cho một game nhập vai Pokémon. Nhiệm vụ DUY NHẤT: chau chuốt câu chữ của đoạn chính văn được đưa — mượt hơn, tự nhiên hơn, đúng tông truyện — rồi trả về TOÀN BỘ đoạn văn đã sửa. Ngôn ngữ dự phòng: ${storyLanguageInfo(language).label}.`,
+        buildSameLanguageInstruction(language),
+        'LUẬT SẮT: (1) KHÔNG thay đổi nội dung, sự kiện, thông tin, tên riêng, con số; (2) KHÔNG thêm/bớt tình tiết hay lời thoại (chỉ được sửa cách diễn đạt của thoại, giữ nguyên ý); (3) giữ nguyên bố cục đoạn; (4) chỉ sửa cách diễn đạt cho tự nhiên trong CHÍNH NGÔN NGỮ GỐC của đoạn văn; TUYỆT ĐỐI KHÔNG dịch sang ngôn ngữ khác; (5) trả về CHỈ đoạn văn, không lời dẫn, không markdown rào.',
         toneNote ? `TÔNG TRUYỆN cần bám: ${toneNote}` : '',
         pokemonBehaviorNote
           ? `BẢO TOÀN NHẬP VAI POKÉMON: Khi chau chuốt, không được làm mất, đảo ngược hoặc trung hoà những hành vi thể hiện Nature/Friendship đã có trong đoạn. Hồ sơ tham chiếu:\n${pokemonBehaviorNote}`

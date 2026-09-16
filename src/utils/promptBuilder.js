@@ -1,6 +1,7 @@
 import { getActiveLoreEntries } from './lorebook.js'
 
 import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
+import { buildStoryLanguageInstruction } from '../i18n/storyLanguage.js'
 
 export const BATTLE_MARKER = '[[BATTLE]]'
 
@@ -25,7 +26,7 @@ export const BATTLE_INSTRUCTION = `QUAN TRỌNG — ĐIỂM DỪNG CHỜ NGƯỜ
  * @param {string} scanText văn bản gần đây để quét kích hoạt lorebook (World Info)
  * @param {string} stylePreset hướng dẫn văn phong tuỳ chỉnh, thay cho câu mặc định nếu có
  */
-export function buildSystemPrompt(character, playerName, scanText = '', stylePreset = '') {
+export function buildSystemPrompt(character, playerName, scanText = '', stylePreset = '', storyLanguage = 'vi') {
   const name = character.name
   const desc = applyPlaceholders(character.description, name, playerName)
   const personality = applyPlaceholders(character.personality, name, playerName)
@@ -35,7 +36,7 @@ export function buildSystemPrompt(character, playerName, scanText = '', stylePre
 
   const styleLine = stylePreset?.trim()
     ? stylePreset.trim()
-    : `Trả lời bằng tiếng Việt, giọng văn tự nhiên như tiểu thuyết, có thể dùng *hành động* xen kẽ lời thoại. Viết thành đoạn văn liền mạch, không dùng định dạng chat/tin nhắn.`
+    : `Giọng văn tự nhiên như tiểu thuyết, có thể dùng *hành động* xen kẽ lời thoại. Viết thành đoạn văn liền mạch, không dùng định dạng chat/tin nhắn.`
 
   return [
     `Bạn sẽ dẫn dắt một câu chuyện roleplay dạng tiểu thuyết tương tác (interactive fiction), viết bằng ngôi thứ 2 hoặc ngôi thứ 3 tuỳ bối cảnh, không thoát vai, không nhắc mình là AI.`,
@@ -48,6 +49,7 @@ export function buildSystemPrompt(character, playerName, scanText = '', stylePre
       `Thông tin thế giới liên quan (lorebook, PHẢI tuân theo, không tự bịa khác đi):\n${activeLore
         .map((c) => `- ${c}`)
         .join('\n')}`,
+    buildStoryLanguageInstruction(storyLanguage),
     styleLine,
     BATTLE_INSTRUCTION,
     STORY_STATE_INSTRUCTION,

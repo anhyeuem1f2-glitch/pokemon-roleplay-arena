@@ -39,7 +39,7 @@ const QUICK_ITEMS = [
 
 export default function SimulationTester({ onEnterGame }) {
   const {
-    apiConfig, character, stylePreset, mainPreset, assistantPrefill, worldbook,
+    apiConfig, character, stylePreset, mainPreset, assistantPrefill, worldbook, uiLanguage,
     setPlayerName, setPlayerMon, setParty, setMessages, setGameStarted,
     setPlayerLocation, setPlayerIdentity, setPlayerCharacter, setStoryDate,
     setInventory, setPlayerProfile, setPcBox, pokedexSpecies, movesDb,
@@ -132,6 +132,7 @@ export default function SimulationTester({ onEnterGame }) {
         worldbook,
         toneNote: buildToneNote(storyTone),
         lastUserMessage: directive,
+        uiLanguage,
       })
       callOptions.assistantPrefill = assistantPrefill
 

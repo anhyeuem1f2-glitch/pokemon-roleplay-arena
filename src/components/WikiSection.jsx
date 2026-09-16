@@ -39,7 +39,7 @@ export default function WikiSection() {
       <small>
         Khi truyện nhắc tên nhân vật GỐC của Pokémon (Misty, Cynthia, Giovanni…), app tự tra
         Bulbapedia lấy tóm tắt chính xác và đưa vào prompt để AI không bịa sai nhân vật canon.
-        Tư liệu tiếng Anh, AI vẫn kể tiếng Việt. Cần mạng; lỗi mạng tự bỏ qua.
+        Tư liệu tiếng Anh; AI vẫn kể theo ngôn ngữ truyện hiện tại. Cần mạng; lỗi mạng tự bỏ qua.
       </small>
       <PokemonToggle
         checked={cfg.enabled}

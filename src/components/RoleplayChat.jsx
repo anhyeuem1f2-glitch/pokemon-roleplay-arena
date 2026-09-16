@@ -9,6 +9,7 @@ import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { battleBelongsToPlayer } from '../utils/battleOwnership.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
+import { resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
 import {
@@ -713,6 +714,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
 export default function RoleplayChat() {
   const {
     adminMode,
+    uiLanguage,
     apiConfig,
     character,
     setCharacter,
@@ -767,6 +769,7 @@ export default function RoleplayChat() {
     chatPreferences,
     trainerId,
   } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const originRegion = getRegion(playerCharacter?.originRegionKey)
   const originArea = getArea(playerCharacter?.originRegionKey, playerCharacter?.originAreaKey)
   const identityContext = buildIdentityContext({
@@ -2661,6 +2664,8 @@ export default function RoleplayChat() {
         canonNote,
         toneNote: buildToneNote(storyTone),
         lastUserMessage: currentVisibleInput,
+        uiLanguage,
+        storyLanguage,
       })
       callOptions.assistantPrefill = assistantPrefill
 
@@ -2699,7 +2704,7 @@ export default function RoleplayChat() {
       }
       // Đợt 79: preset có thể dùng <choice>, <selection> hoặc <details>. Bóc
       // từ reply GỐC trước khi outputCleanup vứt scaffold hậu kỳ.
-      const replyActionChoices = extractActionChoices(reply)
+      const replyActionChoices = extractActionChoices(reply, storyLanguage)
       if (!cleaned) {
         throw new Error(
           'AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset (mục Preset chính văn) hoặc kiểm tra lại preset ở nút Debug.',
@@ -2759,6 +2764,7 @@ export default function RoleplayChat() {
               displayText,
               buildToneNote(storyTone),
               partyNote,
+              storyLanguage,
             ),
           )
         } catch (polErr) {
@@ -3105,6 +3111,7 @@ export default function RoleplayChat() {
             storyText: displayText,
             userText: stateUserText,
             playerName: playerName || playerProfile?.name || '',
+            language: storyLanguage,
           }))
             .then((generated) => {
               setMessages((msgs) => {
@@ -3649,6 +3656,7 @@ export default function RoleplayChat() {
         storyText,
         userText,
         playerName: playerName || playerProfile?.name || '',
+        language: storyLanguage,
       }))
       setMessages((current) => current.map((message) => (
         message.id === messageId && message.content === storyText

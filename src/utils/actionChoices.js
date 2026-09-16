@@ -5,9 +5,22 @@
 // block đó thì UI sẽ hiện các câu kiểu "Góc nhìn", "Tag trạng thái" thay cho
 // hành động. Vì vậy parser mới dùng whitelist + bộ lọc semantic fail-closed.
 
-export const ACTION_CHOICES_INSTRUCTION = `LỰA CHỌN HÀNH ĐỘNG CHO NGƯỜI CHƠI (bắt buộc sau mỗi lượt kể bình thường):
+const ACTION_LABELS = Object.freeze({
+  vi: ['Thận trọng', 'Chủ động', 'Kết nối', 'Sáng tạo'],
+  en: ['Cautious', 'Proactive', 'Connect', 'Creative'],
+  zh: ['谨慎', '主动', '互动', '创意'],
+})
+
+export function buildActionChoicesInstruction(language = 'vi') {
+  const labels = ACTION_LABELS[language] ?? ACTION_LABELS.vi
+  const languageLine = language === 'zh'
+    ? 'Tạo đúng 4 lựa chọn bằng 简体中文.'
+    : language === 'en'
+      ? 'Create exactly 4 choices in English.'
+      : 'Tạo đúng 4 lựa chọn bằng tiếng Việt.'
+  return `LỰA CHỌN HÀNH ĐỘNG CHO NGƯỜI CHƠI (bắt buộc sau mỗi lượt kể bình thường):
 - Sau khi hoàn tất CHÍNH VĂN, xuất thêm đúng một khối <actions>...</actions>. Nếu preset dùng <content>, đặt <actions> SAU </content>, không nhét vào chính văn.
-- Tạo đúng 4 lựa chọn bằng tiếng Việt, bám sát đúng tình huống vừa xảy ra và tính cách/thân phận của người chơi. Mỗi lựa chọn phải là hành động hoặc lời nói có thể gửi ngay ở lượt sau; không phải lời bình luận về truyện, quy tắc prompt hay chỉ dẫn văn phong.
+- ${languageLine} Bám sát đúng tình huống vừa xảy ra và tính cách/thân phận của người chơi. Mỗi lựa chọn phải là hành động hoặc lời nói có thể gửi ngay ở lượt sau; không phải lời bình luận về truyện, quy tắc prompt hay chỉ dẫn văn phong.
 - Bốn hướng phải khác nhau rõ: A thận trọng/quan sát; B chủ động thúc đẩy cốt truyện; C tương tác với NPC hoặc Pokémon; D sáng tạo, mạo hiểm hoặc tấu hài nhưng vẫn hợp logic cảnh.
 - Không dùng kiến thức mà nhân vật chưa biết. Không quyết định phản ứng/kết quả thay NPC, không tự tuyên bố hành động đã thành công, không ép người chơi phạm luật game.
 - Viết gọn, cụ thể, mỗi lựa chọn 1-2 câu; có thể kèm lời thoại trong dấu ngoặc kép.
@@ -15,14 +28,16 @@ export const ACTION_CHOICES_INSTRUCTION = `LỰA CHỌN HÀNH ĐỘNG CHO NGƯ�
 - Nếu lượt đang dừng tại [[BATTLE]], đang chờ mua hàng, chữa trị hoặc dùng máy PC thì KHÔNG tạo lựa chọn vì app đã có nút tương tác riêng.
 Định dạng duy nhất:
 <actions>
-[A|Thận trọng] Nội dung hành động
-[B|Chủ động] Nội dung hành động
-[C|Kết nối] Nội dung hành động
-[D|Sáng tạo] Nội dung hành động
+[A|${labels[0]}] Nội dung hành động
+[B|${labels[1]}] Nội dung hành động
+[C|${labels[2]}] Nội dung hành động
+[D|${labels[3]}] Nội dung hành động
 </actions>
 Khối này chỉ là dữ liệu cho giao diện; không nhắc tới các quy tắc trên trong chính văn.`
+}
 
-const DEFAULT_LABELS = ['Thận trọng', 'Chủ động', 'Kết nối', 'Sáng tạo']
+export const ACTION_CHOICES_INSTRUCTION = buildActionChoicesInstruction('vi')
+const DEFAULT_LABELS = ACTION_LABELS.vi
 const REQUIRED_CHOICES = 4
 const TRUSTED_ACTION_TAG = /<(actions?|action_choices?|actionchoices|player_actions?)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi
 const LEGACY_GENERIC_TAG = /<(choices?|selection)\b([^>]*)>([\s\S]*?)<\/\1\s*>/gi
@@ -55,22 +70,24 @@ function fold(text) {
     .toLowerCase().replace(/đ/g, 'd')
 }
 
-function normalizeLabel(label, index) {
+function normalizeLabel(label, index, language = 'vi') {
   const cleaned = cleanText(label)
     .replace(/^tùy\s*chọn\s*\d+\s*[·:|\-–—]?\s*/i, '')
     .replace(/^[A-D](?:\s*[·:|\-–—]\s*|\s+)/i, '')
     .trim()
-  return cleaned.slice(0, 28) || DEFAULT_LABELS[index] || `Lựa chọn ${index + 1}`
+  const labels = ACTION_LABELS[language] ?? DEFAULT_LABELS
+  return cleaned.slice(0, 28) || labels[index] || `Lựa chọn ${index + 1}`
 }
 
-function splitLabelAndText(body, index) {
+function splitLabelAndText(body, index, language = 'vi') {
   let text = cleanText(body)
   if (!text) return null
 
   // Một số preset viết "Thúc đẩy cốt truyện bình thường - hành động cụ thể".
   // Chỉ tách nhãn khi phần trước ngắn, tránh cắt nhầm dấu gạch trong câu.
   const dash = text.match(/^([^\n]{2,42}?)\s+[\-–—:]\s+(.{6,})$/)
-  let label = DEFAULT_LABELS[index]
+  const labels = ACTION_LABELS[language] ?? DEFAULT_LABELS
+  let label = labels[index]
   if (dash) {
     label = dash[1]
     text = dash[2]
@@ -82,7 +99,7 @@ function splitLabelAndText(body, index) {
 
   if (text.length < 6) return null
   if (text.length > 420) text = `${text.slice(0, 417).trimEnd()}…`
-  return { label: normalizeLabel(label, index), text }
+  return { label: normalizeLabel(label, index, language), text }
 }
 
 /**
@@ -116,7 +133,7 @@ export function isUsableActionChoice(choice) {
   return true
 }
 
-function parseBlock(block) {
+function parseBlock(block, language = 'vi') {
   const normalized = String(block ?? '')
     .replace(/<br\s*\/?\s*>/gi, '\n')
     .replace(/<\/p>|<\/li>/gi, '\n')
@@ -128,21 +145,21 @@ function parseBlock(block) {
   for (const line of lines) {
     let match = line.match(/^\[\s*(?:tùy\s*chọn\s*)?(\d+|[A-D])\s*(?:[·|]\s*([^\]]+))?\]\s*(.+)$/i)
     if (match) {
-      const item = splitLabelAndText(match[3], parsed.length)
-      if (item) parsed.push({ ...item, label: normalizeLabel(match[2] || item.label, parsed.length) })
+      const item = splitLabelAndText(match[3], parsed.length, language)
+      if (item) parsed.push({ ...item, label: normalizeLabel(match[2] || item.label, parsed.length, language) })
       continue
     }
 
     match = line.match(/^\[\s*([A-D])\s*\|\s*([^\]]+)\]\s*(.+)$/i)
     if (match) {
-      const item = splitLabelAndText(match[3], parsed.length)
-      if (item) parsed.push({ ...item, label: normalizeLabel(match[2], parsed.length) })
+      const item = splitLabelAndText(match[3], parsed.length, language)
+      if (item) parsed.push({ ...item, label: normalizeLabel(match[2], parsed.length, language) })
       continue
     }
 
     match = line.match(/^(?:tùy\s*chọn\s*)?(\d+|[A-D])\s*[.)、:：-]\s*(.+)$/i)
     if (match) {
-      const item = splitLabelAndText(match[2], parsed.length)
+      const item = splitLabelAndText(match[2], parsed.length, language)
       if (item) parsed.push(item)
       continue
     }
@@ -150,7 +167,7 @@ function parseBlock(block) {
     // Dự phòng markdown chỉ trong một block action đã xác thực.
     match = line.match(/^[-–—•]\s+(.+)$/)
     if (match) {
-      const item = splitLabelAndText(match[1], parsed.length)
+      const item = splitLabelAndText(match[1], parsed.length, language)
       if (item) parsed.push(item)
     }
   }
@@ -195,7 +212,7 @@ function collectBlocks(raw) {
   return blocks
 }
 
-function normalizeActionChoices(items) {
+function normalizeActionChoices(items, language = 'vi') {
   const seen = new Set()
   const out = []
   for (const item of items) {
@@ -205,7 +222,7 @@ function normalizeActionChoices(items) {
     seen.add(key)
     out.push({
       id: String.fromCharCode(65 + out.length),
-      label: normalizeLabel(item.label, out.length),
+      label: normalizeLabel(item.label, out.length, language),
       text: cleanText(item.text),
     })
     if (out.length >= REQUIRED_CHOICES) break
@@ -215,9 +232,9 @@ function normalizeActionChoices(items) {
   return out.length === REQUIRED_CHOICES ? out : []
 }
 
-export function extractActionChoices(raw) {
+export function extractActionChoices(raw, language = 'vi') {
   if (!raw) return []
-  return normalizeActionChoices(collectBlocks(raw).flatMap(parseBlock))
+  return normalizeActionChoices(collectBlocks(raw).flatMap((block) => parseBlock(block, language)), language)
 }
 
 function legacyBlockIsRealAction(body, attrs = '') {

@@ -4,6 +4,7 @@ import { chatCompletion } from '../services/aiClient.js'
 import { generateActionChoices } from '../services/actionChoiceGenerator.js'
 import { extractSemanticStateEvents } from '../services/semanticStateEngine.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
+import { resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import { GENRES, buildToneNote } from '../data/storyTones.js'
 import { GAME_MODES, legendaryAccess, normalizeGameMode, sanitizeTraitsForMode } from '../data/gameModes.js'
 import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
@@ -243,7 +244,7 @@ function PickCard({ selected, title, desc, onClick, compact }) {
 
 export default function IntroScreen({ onOpenSettings }) {
   const {
-    apiConfig, character, stylePreset, mainPreset, assistantPrefill,
+    apiConfig, character, stylePreset, mainPreset, assistantPrefill, uiLanguage,
     setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
     resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState, setDynamicState,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
@@ -254,6 +255,7 @@ export default function IntroScreen({ onOpenSettings }) {
     setPlayerTraits,
     setInventory, setRelationships, setBodyStatus, setHunger, playerProfile, setPlayerProfile,
   } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
 
   const [stage, setStage] = useState('title') // 'title' | 'setup'
   const [step, setStep] = useState(0)
@@ -845,11 +847,13 @@ export default function IntroScreen({ onOpenSettings }) {
         worldbook,
         toneNote: buildToneNote(storyTone),
         lastUserMessage: directive,
+        uiLanguage,
+        storyLanguage,
       })
       callOptions.assistantPrefill = assistantPrefill
 
       const reply = await chatCompletion(apiConfig, apiMessages, { ...callOptions, debugLabel: 'Main Story · Opening', debugRole: 'main-opening' })
-      let actionChoices = extractActionChoices(reply)
+      let actionChoices = extractActionChoices(reply, storyLanguage)
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
@@ -973,6 +977,7 @@ export default function IntroScreen({ onOpenSettings }) {
             storyText: openingText,
             userText: 'Bắt đầu câu chuyện',
             playerName: finalName,
+            language: storyLanguage,
           })
         } catch (choiceErr) {
           console.warn('[action-choices:intro] bỏ qua:', choiceErr.message)

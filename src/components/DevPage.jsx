@@ -29,7 +29,7 @@ import { REGION_VILLAINS } from '../data/storyDirector.js'
 // là cùng 1 pipeline (API chính + preset nếu có) — khác nhau chỉ ở nội dung
 // bạn gõ vào để test.
 function SinglePromptTester({ placeholder }) {
-  const { apiConfig, character, playerName, stylePreset, mainPreset, assistantPrefill } = useGame()
+  const { apiConfig, character, playerName, stylePreset, mainPreset, assistantPrefill, uiLanguage } = useGame()
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -49,6 +49,7 @@ function SinglePromptTester({ placeholder }) {
         mainPreset,
         history: [{ role: 'user', content: input.trim() }],
         scanText: input.trim(),
+        uiLanguage,
       })
       callOptions.assistantPrefill = assistantPrefill
 

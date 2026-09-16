@@ -245,7 +245,7 @@ export const ZH_UI_EXTRAS = Object.freeze({
   '· đề xuất': '· 提议',
   '→ nhận': '→ 接受',
   'Tư liệu canon (Bulbapedia)': 'Canon 资料（Bulbapedia）',
-  'Khi truyện nhắc tên nhân vật GỐC của Pokémon (Misty, Cynthia, Giovanni…), app tự tra Bulbapedia lấy tóm tắt chính xác và đưa vào prompt để AI không bịa sai nhân vật canon. Tư liệu tiếng Anh, AI vẫn kể tiếng Việt. Cần mạng; lỗi mạng tự bỏ qua.': '当故事提到宝可梦原作角色（Misty、Cynthia、Giovanni…）时，应用会自动查询 Bulbapedia 获取准确摘要并加入 prompt，避免 AI 胡编 canon 角色。资料为英文；需要联网，网络失败时会自动跳过。',
+  'Khi truyện nhắc tên nhân vật GỐC của Pokémon (Misty, Cynthia, Giovanni…), app tự tra Bulbapedia lấy tóm tắt chính xác và đưa vào prompt để AI không bịa sai nhân vật canon. Tư liệu tiếng Anh; AI vẫn kể theo ngôn ngữ truyện hiện tại. Cần mạng; lỗi mạng tự bỏ qua.': '当故事提到宝可梦原作角色（Misty、Cynthia、Giovanni…）时，应用会自动查询 Bulbapedia 获取准确摘要并加入 prompt，避免 AI 胡编 canon 角色。资料为英文；AI 会继续使用当前故事语言。需要联网，网络失败时会自动跳过。',
   'Bật tra cứu tự động': '开启自动查询',
   'Tư liệu canon đang bật.': 'Canon 资料查询已开启。',
   'Đang tắt — app sẽ không tra Bulbapedia.': '当前关闭——应用不会查询 Bulbapedia。',
@@ -345,6 +345,7 @@ export const EN_UI_EXTRAS = Object.freeze({
   'Quay về tin mới nhất': 'Jump to latest', 'Tin mới': 'New messages', 'Xuống cuối': 'Jump to bottom', 'Gửi': 'Send', 'Chữa trị': 'Heal', 'Máy PC': 'PC', 'Đang viết tiếp câu chuyện...': 'Continuing the story...',
   'Tổng cộng': 'Total', 'Đã chọn': 'Selected', 'Tắt: hệ thống dùng tuyến API dự phòng/mặc định.': 'Off: use the fallback/default API route.', 'Tắt: chỉ dùng một AI soi biến.': 'Off: use only one state-checking AI.', 'Kiểm tra trích xuất': 'Test extraction',
   'Tư liệu canon (Bulbapedia)': 'Canon reference (Bulbapedia)', 'Bật tra cứu tự động': 'Enable automatic lookup', 'Xoá cache': 'Clear cache',
+  'Khi truyện nhắc tên nhân vật GỐC của Pokémon (Misty, Cynthia, Giovanni…), app tự tra Bulbapedia lấy tóm tắt chính xác và đưa vào prompt để AI không bịa sai nhân vật canon. Tư liệu tiếng Anh; AI vẫn kể theo ngôn ngữ truyện hiện tại. Cần mạng; lỗi mạng tự bỏ qua.': 'When the story mentions an original Pokémon character (Misty, Cynthia, Giovanni…), the app automatically looks up an accurate Bulbapedia summary and adds it to the prompt so the AI does not invent canon details. The reference material is in English; the AI keeps using the current story language. Internet required; network errors are skipped automatically.',
   'TIẾN TRÌNH THẾ GIỚI ·': 'WORLD PROGRESS ·', 'Mục tiêu:': 'Objective:', 'Người giao:': 'Giver:', 'Phần thưởng dự kiến:': 'Expected reward:', 'Vùng áp dụng:': 'Region:', 'Đội cố định:': 'Fixed team:',
   'Nhập worldbook (.json)': 'Import worldbook (.json)', 'Xoá worldbook': 'Delete worldbook', '(không tên)': '(unnamed)',
 })

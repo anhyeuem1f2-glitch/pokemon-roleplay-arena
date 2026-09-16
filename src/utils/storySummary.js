@@ -121,7 +121,7 @@ export async function maybeUpdateSummary(apiCfg, messages, { force = false } = {
       .join('\n')
     const prompt = [
       'Bạn là thư ký cốt truyện của một game nhập vai Pokémon. Nhiệm vụ: cập nhật bản TÓM TẮT CỐT TRUYỆN.',
-      'Yêu cầu: viết bằng tiếng Việt, văn xuôi gọn, TỐI ĐA ~350 từ, theo trình tự thời gian; GIỮ LẠI: mục tiêu hiện tại của nhân vật chính, các NPC quan trọng (tên + quan hệ), các Pokémon trong đội, lời hứa/ân oán chưa giải quyết, địa điểm và mốc thời gian chính. BỎ: chi tiết vụn vặt, lời thoại nguyên văn.',
+      'Yêu cầu ngôn ngữ: viết bằng CÙNG NGÔN NGỮ với phần DIỄN BIẾN mới nhất của câu chuyện; tuyệt đối không tự dịch sang tiếng Việt hay ngôn ngữ khác. Văn xuôi gọn, TỐI ĐA ~350 từ, theo trình tự thời gian; GIỮ LẠI: mục tiêu hiện tại của nhân vật chính, các NPC quan trọng (tên + quan hệ), các Pokémon trong đội, lời hứa/ân oán chưa giải quyết, địa điểm và mốc thời gian chính. BỎ: chi tiết vụn vặt, lời thoại nguyên văn.',
       'Chỉ trả về ĐÚNG bản tóm tắt mới, không lời dẫn, không tiêu đề.',
       '',
       s.text ? `TÓM TẮT CŨ:\n${s.text}` : 'TÓM TẮT CŨ: (chưa có — đây là lần tóm tắt đầu tiên)',

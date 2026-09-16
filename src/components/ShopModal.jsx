@@ -4,6 +4,7 @@ import { musicManager } from '../utils/musicManager.js'
 import { SHOP_TRACK_KEYS } from '../data/musicTracks.js'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
+import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import {
   generateShopItems, detectShopType, pickShopkeeperPersonality, GENERATED_CATEGORY_LABELS,
 } from '../data/shopGenerator.js'
@@ -26,7 +27,8 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
   const items = useMemo(() => generateShopItems(shopInfo), [shopInfo.name, shopInfo.type, shopInfo.size])
   const personality = useMemo(() => pickShopkeeperPersonality(shopInfo.name), [shopInfo.name])
   // ===== Nói chuyện với chủ quán (đợt 37) =====
-  const { apiConfig } = useGame()
+  const { apiConfig, uiLanguage, mainPreset, stylePreset } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const [chatLog, setChatLog] = useState([]) // {who:'user'|'npc', text}
   const [talkInput, setTalkInput] = useState('')
   const [talkBusy, setTalkBusy] = useState(false)
@@ -65,7 +67,8 @@ export default function ShopModal({ shop, shopName, money, onFinish, onClose }) 
               : `TRA KHO theo câu khách hỏi — KHÔNG có món nào khớp. Nói thật là không có, có thể gợi ý món gần giống trong mẫu kho.`,
             `Giảm giá đã cho phiên này: ${discount}% (TRẦN tuyệt đối 25%). Số lần đã từ chối giảm: ${refusedRef.current} (khách kỳ kèo dai thì cứng rắn dần).`,
             `QUY TRÌNH SUY NGHĨ (nghĩ thầm, TUYỆT ĐỐI không viết ra): (1) khách đang hỏi hàng, mặc cả, hay tán gẫu? (2) đối chiếu kết quả tra kho; (3) lời mặc cả có lý do chính đáng không (mua nhiều, chỉ đúng khuyết điểm, dễ mến) — cân với TÍNH CÁCH của mình; (4) chốt hành động.`,
-            `Trả lời bằng 1-3 câu thoại ĐÚNG TÍNH CÁCH (tiếng Việt), rồi KẾT THÚC bằng đúng 1 dòng tag:`,
+            buildStoryLanguageInstruction(storyLanguage),
+            `Trả lời bằng 1-3 câu thoại ĐÚNG TÍNH CÁCH theo ngôn ngữ đầu ra ở trên, rồi KẾT THÚC bằng đúng 1 dòng tag:`,
             `[[KETQUA giảm=X]] (X = TỔNG % giảm mới cho phiên, chỉ khi quyết định giảm, ≤25) | [[KETQUA tặng=Tên món đúng trong kho]] (hiếm) | [[KETQUA không]] (mọi trường hợp còn lại, kể cả chỉ hỏi hàng/tán gẫu).`,
           ].join('\n'),
         },

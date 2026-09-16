@@ -1,19 +1,30 @@
 import { chatCompletion } from './aiClient.js'
 import { extractActionChoices } from '../utils/actionChoices.js'
+import { buildSameLanguageInstruction, storyLanguageInfo } from '../i18n/storyLanguage.js'
 
-const SYSTEM = `Bạn tạo lựa chọn hành động cho một web game nhập vai Pokémon bằng tiếng Việt.
-Dựa CHỈ trên ngữ cảnh được cung cấp, tạo đúng 4 hành động mà nhân vật người chơi có thể làm tiếp.
+function buildSystem(language = 'vi') {
+  const lang = storyLanguageInfo(language)
+  const labels = language === 'zh'
+    ? ['谨慎', '主动', '互动', '创意']
+    : language === 'en'
+      ? ['Cautious', 'Proactive', 'Connect', 'Creative']
+      : ['Thận trọng', 'Chủ động', 'Kết nối', 'Sáng tạo']
+  return `Bạn tạo lựa chọn hành động cho một web game nhập vai Pokémon.
+${buildSameLanguageInstruction(language)}
+Dựa CHỈ trên ngữ cảnh được cung cấp, tạo đúng 4 hành động mà nhân vật người chơi có thể làm tiếp. Nếu CHÍNH VĂN MỚI NHẤT đã có ngôn ngữ rõ ràng, mọi lựa chọn và nhãn phải dùng chính ngôn ngữ đó; nếu không rõ, dùng ${lang.label}.
 - A: thận trọng/quan sát; B: chủ động thúc đẩy cốt truyện; C: tương tác NPC hoặc Pokémon; D: sáng tạo, mạo hiểm hoặc tấu hài nhưng hợp logic.
 - Mỗi lựa chọn 1-2 câu, cụ thể, có thể gửi nguyên văn như input tiếp theo.
 - Không quyết định phản ứng hay kết quả thay NPC; không dùng kiến thức nhân vật chưa biết; không bịa vật phẩm/Pokémon/năng lực người chơi chưa có.
 - Đây là INPUT nhập vai của người chơi, KHÔNG phải hướng dẫn cho người viết. Cấm đưa vào lựa chọn các mục như góc nhìn, văn phong, phân đoạn, tag trạng thái, định hướng câu chuyện, prompt, quy tắc hoặc metadata.
 - Không giải thích, không markdown, chỉ xuất đúng:
 <actions>
-[A|Thận trọng] ...
-[B|Chủ động] ...
-[C|Kết nối] ...
-[D|Sáng tạo] ...
+[A|${labels[0]}] ...
+[B|${labels[1]}] ...
+[C|${labels[2]}] ...
+[D|${labels[3]}] ...
 </actions>`
+}
+
 
 function buildPrompt({ recentContext = '', storyText = '', userText = '', playerName = '', retry = false }) {
   return [
@@ -28,10 +39,10 @@ function buildPrompt({ recentContext = '', storyText = '', userText = '', player
 
 async function generateOnce(cfg, args, retry = false) {
   const reply = await chatCompletion(cfg, [
-    { role: 'system', content: SYSTEM },
+    { role: 'system', content: buildSystem(args.language || 'vi') },
     { role: 'user', content: buildPrompt({ ...args, retry }) },
   ], { temperature: retry ? 0.55 : 0.75, maxTokens: 550, debugLabel: retry ? 'Action Choices · retry' : 'Action Choices', debugRole: 'action-choice' })
-  return extractActionChoices(reply)
+  return extractActionChoices(reply, args.language || 'vi')
 }
 
 export async function generateActionChoices(cfg, args) {

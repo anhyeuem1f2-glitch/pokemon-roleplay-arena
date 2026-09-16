@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
+import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import MonAvatar from './MonAvatar.jsx'
 import TypeBadge from './TypeBadge.jsx'
@@ -22,7 +23,8 @@ import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 const SAFARI_BALLS = 30
 
 export default function SafariModal({ onClose, onSafariEnd }) {
-  const { enemyMon, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, apiConfig, playerLocation, storyDate, playerTraits, markPokedexSeen, markPokedexCaught, trainerId } = useGame()
+  const { enemyMon, party, setParty, pcBox, setPcBox, playerMon, setPlayerMon, apiConfig, playerLocation, storyDate, playerTraits, markPokedexSeen, markPokedexCaught, trainerId, uiLanguage, mainPreset, stylePreset } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const [balls, setBalls] = useState(SAFARI_BALLS)
   const [catchScore, setCatchScore] = useState(20) // 0-100, ≥ ngưỡng random thì bắt được
   const [fleeChance, setFleeChance] = useState(15) // % bỏ chạy mỗi lượt sau hành động
@@ -102,7 +104,8 @@ export default function SafariModal({ onClose, onSafariEnd }) {
             `Bạn là trọng tài cho một cảnh DỤ DỖ Pokémon hoang trong khu Safari (KHÔNG đánh nhau).`,
             `Pokémon: ${enemyMon.name} ${genderSymbol(enemyMon.gender)} ${genderLabel(enemyMon.gender)}, hệ ${enemyMon.types.join('/')}. Nature và khí chất: ${describeNatureBehavior(enemyMon)}. Người chơi đang tìm cách nói/hành động để nó tin tưởng và chịu theo về.`,
             `Đọc lời/hành động của người chơi và chấm mức độ THUYẾT PHỤC dựa trên tập tính loài, Nature hiện tại, sự chân thành và cách tiếp cận. Cùng một lời nói có thể hiệu quả khác nhau với Nature Timid, Adamant, Careful hay Naive.`,
-            `Viết 1-2 câu MÔ TẢ phản ứng đúng loài VÀ đúng Nature của Pokémon (tiếng Việt), rồi kết thúc bằng đúng 1 dòng tag: [[DUDO catch=+N flee=-M]] với N (0-20) là mức tăng khả năng bắt, M (0-15) là mức giảm khả năng bỏ chạy. Lời dở/khiến nó sợ thì N nhỏ hoặc 0 và có thể flee=+.`,
+            buildStoryLanguageInstruction(storyLanguage),
+            `Viết 1-2 câu MÔ TẢ phản ứng đúng loài VÀ đúng Nature của Pokémon theo ngôn ngữ đầu ra ở trên, rồi kết thúc bằng đúng 1 dòng tag: [[DUDO catch=+N flee=-M]] với N (0-20) là mức tăng khả năng bắt, M (0-15) là mức giảm khả năng bỏ chạy. Lời dở/khiến nó sợ thì N nhỏ hoặc 0 và có thể flee=+.`,
           ].join('\n'),
         },
         { role: 'user', content: q },

@@ -4,7 +4,7 @@
 // nhân vật canon, app tự tra Bulbapedia (MediaWiki API hỗ trợ CORS qua
 // origin=*) lấy đoạn tóm tắt mở đầu của trang, cache lại, và bơm vào prompt
 // như "tư liệu phải nhất quán". Tiếng Anh — AI được dặn dùng thông tin
-// nhưng kể bằng tiếng Việt.
+// nhưng kể bằng đúng ngôn ngữ chính văn hiện tại.
 //
 // Thiết kế an toàn: có công tắc bật/tắt (mặc định bật), timeout 5s, lỗi
 // mạng chỉ bỏ qua không chặn truyện, cache localStorage TTL 7 ngày + trần
@@ -203,7 +203,7 @@ export async function buildCanonNote(scanText, turn) {
   }
   if (!lines.length) return null
   return [
-    '[Hệ thống — TƯ LIỆU CANON (trích Bulbapedia, tiếng Anh): thông tin CHÍNH XÁC về nhân vật gốc đang được nhắc tới. PHẢI nhất quán với tư liệu này (ngoại hình, vai trò, đội Pokémon, quan hệ) — không bịa khác đi; kể bằng tiếng Việt; không nhắc tới ghi chú này.]',
+    '[Hệ thống — TƯ LIỆU CANON (trích Bulbapedia, tiếng Anh): thông tin CHÍNH XÁC về nhân vật gốc đang được nhắc tới. PHẢI nhất quán với tư liệu này (ngoại hình, vai trò, đội Pokémon, quan hệ) — không bịa khác đi; kể bằng cùng ngôn ngữ với chính văn hiện tại; không nhắc tới ghi chú này.]',
     ...lines,
   ].join('\n')
 }

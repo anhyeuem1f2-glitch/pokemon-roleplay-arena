@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
+import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { buildMonSmart, getMovePool } from '../data/pokemonSpecies.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
@@ -98,12 +99,13 @@ function monBrief(mon) {
   return `${mon.name} Lv${mon.level}, hệ ${mon.types.join('/')}, HP tối đa ${mon.maxHp}. ${poolNote}`
 }
 
-function buildRefereeSystemPrompt(pMon, eMon, arenaName) {
+function buildRefereeSystemPrompt(pMon, eMon, arenaName, storyLanguage = 'vi') {
   const eLore = getLegendLore(eMon)
   const pLore = getLegendLore(pMon)
   const isEnemyBoss = Boolean(eLore)
   return [
-    `Bạn là TRỌNG TÀI kiêm NGƯỜI TƯỜNG THUẬT một trận đấu Pokémon phong cách ANIME thời gian thực. Trả lời hoàn toàn bằng tiếng Việt.`,
+    `Bạn là TRỌNG TÀI kiêm NGƯỜI TƯỜNG THUẬT một trận đấu Pokémon phong cách ANIME thời gian thực.`,
+    buildStoryLanguageInstruction(storyLanguage),
     `SÂN ĐẤU: ${arenaName}. Hệ toạ độ (x,y) từ 0..100 — x tăng từ TRÁI sang PHẢI, y tăng từ TRÊN xuống DƯỚI. Vị trí hiện tại của 2 bên được gửi kèm mỗi lượt.`,
     `Phe NGƯỜI CHƠI: ${monBrief(pMon)}`,
     `Phe ĐỊCH: ${monBrief(eMon)}`,
@@ -202,7 +204,8 @@ const E_START = { x: 80, y: 18 }
 const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
 
 export default function AnimeBattleTester() {
-  const { apiConfig, animeApiConfig, pokedexSpecies, movesDb, playerLocation, inventory, setInventory } = useGame()
+  const { apiConfig, animeApiConfig, pokedexSpecies, movesDb, playerLocation, inventory, setInventory, uiLanguage, mainPreset, stylePreset } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const refereeApi = animeApiConfig?.baseUrl && animeApiConfig?.model
     ? { ...apiConfig, ...animeApiConfig }
     : apiConfig
@@ -455,7 +458,7 @@ export default function AnimeBattleTester() {
 
     try {
       const raw = await chatCompletion(refereeApi, [
-        { role: 'system', content: buildRefereeSystemPrompt(activeP, eMon, arenaName) },
+        { role: 'system', content: buildRefereeSystemPrompt(activeP, eMon, arenaName, storyLanguage) },
         ...nextHistory,
       ])
 

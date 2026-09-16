@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react'
 import { useGame } from '../context/GameContext.jsx'
 import { chatCompletion } from '../services/aiClient.js'
+import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
 import { cleanAiOutput } from '../utils/outputCleanup.js'
 import { ALL_TYPES, getEffectivenessMulti, TYPE_COLORS, TYPE_ICONS, TYPE_LABELS } from '../data/pokemonTypes.js'
 import { getLegendLore, GENERIC_LEGEND_PERSUASION } from '../data/legendLore.js'
@@ -377,7 +378,8 @@ function MenuButton({ label, sub, color, onClick, disabled }) {
 
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null, initialEnemyTeam = null }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId, uiLanguage, mainPreset, stylePreset } = useGame()
+  const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const restoredEnv = initialBattleState?.battleEnvKey
     ? getBattleEnv(initialBattleState.battleEnvKey)
     : (environment ?? getBattleEnv('none'))
@@ -1157,7 +1159,8 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
         {
           role: 'system',
           content: [
-            `Bạn nhập vai một Pokémon ${isBoss ? 'HUYỀN THOẠI (boss)' : isWild ? 'hoang dã' : 'CỦA MỘT HUẤN LUYỆN VIÊN KHÁC'} đang giao chiến với người chơi, kiêm trọng tài. Trả lời hoàn toàn bằng tiếng Việt.`,
+            `Bạn nhập vai một Pokémon ${isBoss ? 'HUYỀN THOẠI (boss)' : isWild ? 'hoang dã' : 'CỦA MỘT HUẤN LUYỆN VIÊN KHÁC'} đang giao chiến với người chơi, kiêm trọng tài.`,
+            buildStoryLanguageInstruction(storyLanguage),
             // Đợt 71: dặn model biết đây là Pokémon có chủ (app vẫn chặn
             // cứng ở dưới, đây chỉ là lớp cho lời kể hợp lý hơn).
             isWild ? '' : 'QUAN TRỌNG: bạn ĐÃ CÓ CHỦ và trung thành với huấn luyện viên của mình. TUYỆT ĐỐI không dùng kết quả "join" — bạn không bao giờ bỏ chủ để theo người lạ. Cùng lắm là "calm" (nguôi giận, ngừng đánh).',

@@ -5,7 +5,8 @@ import { applyPresetRegexToMessages, buildPresetPrompt } from './presetImport.js
 import { buildSystemPrompt, applyPlaceholders, BATTLE_INSTRUCTION } from './promptBuilder.js'
 import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
 import { DIRECTOR_WORLD_INSTRUCTION } from '../data/storyDirector.js'
-import { ACTION_CHOICES_INSTRUCTION } from './actionChoices.js'
+import { buildActionChoicesInstruction } from './actionChoices.js'
+import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
 
 /**
  * Build apiMessages + callOptions cho 1 lượt gọi API CHÍNH — dùng chung giữa
@@ -32,7 +33,11 @@ function buildLoreWikiNote(wbActive, canonNote) {
   return parts.join('\n\n')
 }
 
-export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '', lastUserMessage = '' }) {
+export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '', lastUserMessage = '', uiLanguage = 'vi', storyLanguage = null }) {
+  const resolvedStoryLanguage = storyLanguage || resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
+  const languageInstruction = buildStoryLanguageInstruction(resolvedStoryLanguage)
+  const actionChoicesInstruction = buildActionChoicesInstruction(resolvedStoryLanguage)
+
   // WORLDBOOK (đợt 41) — nguồn thông tin CHÍNH của người dùng; gộp với
   // lorebook cũ của character (nếu có). Đưa vào worldInfoBefore + system.
   const wbActive = getActiveWorldbook(worldbook?.entries ?? [], scanText)
@@ -62,13 +67,14 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       { role: 'system', content: beforeHistory },
       ...presetHistory,
       ...(afterHistory ? [{ role: 'system', content: afterHistory }] : []),
+      { role: 'system', content: languageInstruction },
       { role: 'system', content: BATTLE_INSTRUCTION },
       { role: 'system', content: STORY_STATE_INSTRUCTION },
       // Đạo diễn tình huống (đợt 31): nguyên tắc thế giới sống + thân phận
       // người chơi — chèn cả khi dùng preset để preset không đè mất.
       { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
       { role: 'system', content: PROSE_QUALITY_NOTE },
-      { role: 'system', content: ACTION_CHOICES_INSTRUCTION },
+      { role: 'system', content: actionChoicesInstruction },
       ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
       ...(wbActive.length
         ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — canon người dùng; TÍNH CÁCH & vai trò nhân vật trong đây phải được tôn trọng kể cả khi văn phong preset khác đi):\n${wbActive.join('\n\n')}` }]
@@ -76,6 +82,9 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       ...(wbActive.length || canonNote
         ? [{ role: 'system', content: buildLoreWikiNote(wbActive, canonNote) }]
         : []),
+      // Đợt 133: đặt lại language gate ở CUỐI chuỗi system note để các
+      // ghi chú gameplay tiếng Việt phía trên không vô tình kéo model về VI.
+      { role: 'system', content: languageInstruction },
     ]
     const callOptions = {
       temperature: mainPreset.meta?.temperature,
@@ -85,11 +94,11 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
   }
 
   const apiMessages = [
-    { role: 'system', content: buildSystemPrompt(character, playerName, scanText, stylePreset) },
+    { role: 'system', content: buildSystemPrompt(character, playerName, scanText, stylePreset, resolvedStoryLanguage) },
     // Đạo diễn tình huống (đợt 31) — nhánh mặc định.
     { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
     { role: 'system', content: PROSE_QUALITY_NOTE },
-    { role: 'system', content: ACTION_CHOICES_INSTRUCTION },
+    { role: 'system', content: actionChoicesInstruction },
     ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
     ...(wbActive.length
       ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — đây là canon người dùng thiết lập; TÍNH CÁCH, ngoại hình, vai trò của nhân vật trong đây PHẢI được tôn trọng kể cả khi văn phong preset có xu hướng khác):\n${wbActive.join('\n\n')}` }]
@@ -97,6 +106,8 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
     ...(wbActive.length || canonNote
       ? [{ role: 'system', content: buildLoreWikiNote(wbActive, canonNote) }]
       : []),
+    // Đợt 133: reinforcement cuối cùng trước lịch sử hội thoại.
+    { role: 'system', content: languageInstruction },
     ...history,
   ]
   return { apiMessages, callOptions: {}, regexScripts: undefined }

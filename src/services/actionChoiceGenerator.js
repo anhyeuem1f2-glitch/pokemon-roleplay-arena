@@ -1,39 +1,20 @@
 import { chatCompletion } from './aiClient.js'
-import { extractActionChoices } from '../utils/actionChoices.js'
-import { buildSameLanguageInstruction, storyLanguageInfo } from '../i18n/storyLanguage.js'
+import { actionChoicesMatchLanguage, buildActionChoicesInstruction, extractActionChoices } from '../utils/actionChoices.js'
 
 function buildSystem(language = 'vi') {
-  const lang = storyLanguageInfo(language)
-  const labels = language === 'zh'
-    ? ['谨慎', '主动', '互动', '创意']
-    : language === 'en'
-      ? ['Cautious', 'Proactive', 'Connect', 'Creative']
-      : ['Thận trọng', 'Chủ động', 'Kết nối', 'Sáng tạo']
-  return `Bạn tạo lựa chọn hành động cho một web game nhập vai Pokémon.
-${buildSameLanguageInstruction(language)}
-Dựa CHỈ trên ngữ cảnh được cung cấp, tạo đúng 4 hành động mà nhân vật người chơi có thể làm tiếp. Nếu CHÍNH VĂN MỚI NHẤT đã có ngôn ngữ rõ ràng, mọi lựa chọn và nhãn phải dùng chính ngôn ngữ đó; nếu không rõ, dùng ${lang.label}.
-- A: thận trọng/quan sát; B: chủ động thúc đẩy cốt truyện; C: tương tác NPC hoặc Pokémon; D: sáng tạo, mạo hiểm hoặc tấu hài nhưng hợp logic.
-- Mỗi lựa chọn 1-2 câu, cụ thể, có thể gửi nguyên văn như input tiếp theo.
-- Không quyết định phản ứng hay kết quả thay NPC; không dùng kiến thức nhân vật chưa biết; không bịa vật phẩm/Pokémon/năng lực người chơi chưa có.
-- Đây là INPUT nhập vai của người chơi, KHÔNG phải hướng dẫn cho người viết. Cấm đưa vào lựa chọn các mục như góc nhìn, văn phong, phân đoạn, tag trạng thái, định hướng câu chuyện, prompt, quy tắc hoặc metadata.
-- Không giải thích, không markdown, chỉ xuất đúng:
-<actions>
-[A|${labels[0]}] ...
-[B|${labels[1]}] ...
-[C|${labels[2]}] ...
-[D|${labels[3]}] ...
-</actions>`
+  return `You generate player action suggestions for a Pokémon roleplay web game.
+${buildActionChoicesInstruction(language)}
+IMPORTANT: The selected UI language is authoritative for the <actions> block. Even if the story/preset/context is written in another language, DO NOT copy that language into the suggestions. Output the four suggestion texts in the selected UI language only.`
 }
-
 
 function buildPrompt({ recentContext = '', storyText = '', userText = '', playerName = '', retry = false }) {
   return [
-    playerName ? `NHÂN VẬT NGƯỜI CHƠI: ${playerName}` : '',
-    recentContext ? `NGỮ CẢNH GẦN ĐÂY:\n${recentContext.slice(-5000)}` : '',
-    userText ? `HÀNH ĐỘNG VỪA GỬI:\n${userText.slice(0, 1200)}` : '',
-    `CHÍNH VĂN MỚI NHẤT:\n${storyText.slice(-4000)}`,
-    retry ? 'Lần trước không tạo được 4 input hành động hợp lệ. Hãy làm lại, tuyệt đối không chép quy tắc/prompt/scaffold.' : '',
-    'Tạo đúng 4 lựa chọn hành động tiếp theo:',
+    playerName ? `PLAYER CHARACTER: ${playerName}` : '',
+    recentContext ? `RECENT CONTEXT:\n${recentContext.slice(-5000)}` : '',
+    userText ? `LAST PLAYER INPUT:\n${userText.slice(0, 1200)}` : '',
+    `LATEST STORY TEXT:\n${storyText.slice(-4000)}`,
+    retry ? 'The previous attempt did not produce four valid choices in the selected UI language. Retry from scratch and obey CHOICE OUTPUT LANGUAGE exactly.' : '',
+    'Generate exactly 4 next-player action choices now:',
   ].filter(Boolean).join('\n\n')
 }
 
@@ -42,7 +23,9 @@ async function generateOnce(cfg, args, retry = false) {
     { role: 'system', content: buildSystem(args.language || 'vi') },
     { role: 'user', content: buildPrompt({ ...args, retry }) },
   ], { temperature: retry ? 0.55 : 0.75, maxTokens: 550, debugLabel: retry ? 'Action Choices · retry' : 'Action Choices', debugRole: 'action-choice' })
-  return extractActionChoices(reply, args.language || 'vi')
+  const language = args.language || 'vi'
+  const choices = extractActionChoices(reply, language)
+  return actionChoicesMatchLanguage(choices, language) ? choices : []
 }
 
 export async function generateActionChoices(cfg, args) {

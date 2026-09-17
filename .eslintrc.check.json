@@ -1,0 +1,8 @@
+{
+  "root": true,
+  "env": { "browser": true, "es2022": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module", "ecmaFeatures": { "jsx": true } },
+  "globals": { "React": "readonly" },
+  "reportUnusedDisableDirectives": false,
+  "rules": { "no-undef": "error" }
+}

@@ -11,32 +11,43 @@ const ACTION_LABELS = Object.freeze({
   zh: ['谨慎', '主动', '互动', '创意'],
 })
 
-export function buildActionChoicesInstruction(language = 'vi') {
-  const labels = ACTION_LABELS[language] ?? ACTION_LABELS.vi
-  const languageLine = language === 'zh'
-    ? 'Tạo đúng 4 lựa chọn bằng 简体中文.'
-    : language === 'en'
-      ? 'Create exactly 4 choices in English.'
-      : 'Tạo đúng 4 lựa chọn bằng tiếng Việt.'
-  return `LỰA CHỌN HÀNH ĐỘNG CHO NGƯỜI CHƠI (bắt buộc sau mỗi lượt kể bình thường):
-- Sau khi hoàn tất CHÍNH VĂN, xuất thêm đúng một khối <actions>...</actions>. Nếu preset dùng <content>, đặt <actions> SAU </content>, không nhét vào chính văn.
-- ${languageLine} Bám sát đúng tình huống vừa xảy ra và tính cách/thân phận của người chơi. Mỗi lựa chọn phải là hành động hoặc lời nói có thể gửi ngay ở lượt sau; không phải lời bình luận về truyện, quy tắc prompt hay chỉ dẫn văn phong.
-- Bốn hướng phải khác nhau rõ: A thận trọng/quan sát; B chủ động thúc đẩy cốt truyện; C tương tác với NPC hoặc Pokémon; D sáng tạo, mạo hiểm hoặc tấu hài nhưng vẫn hợp logic cảnh.
-- Không dùng kiến thức mà nhân vật chưa biết. Không quyết định phản ứng/kết quả thay NPC, không tự tuyên bố hành động đã thành công, không ép người chơi phạm luật game.
-- Viết gọn, cụ thể, mỗi lựa chọn 1-2 câu; có thể kèm lời thoại trong dấu ngoặc kép.
-- Tuyệt đối không đưa các câu kiểu "góc nhìn", "văn phong", "phân đoạn", "tag trạng thái", "định hướng câu chuyện", "quy tắc", "prompt" vào lựa chọn.
-- Nếu lượt đang dừng tại [[BATTLE]], đang chờ mua hàng, chữa trị hoặc dùng máy PC thì KHÔNG tạo lựa chọn vì app đã có nút tương tác riêng.
-Định dạng duy nhất:
-<actions>
-[A|${labels[0]}] Nội dung hành động
-[B|${labels[1]}] Nội dung hành động
-[C|${labels[2]}] Nội dung hành động
-[D|${labels[3]}] Nội dung hành động
-</actions>
-Khối này chỉ là dữ liệu cho giao diện; không nhắc tới các quy tắc trên trong chính văn.`
+const ACTION_LANGUAGE_NAMES = Object.freeze({
+  vi: 'Vietnamese (Tiếng Việt)',
+  en: 'English',
+  zh: 'Simplified Chinese (简体中文)',
+})
+
+function normalizeActionLanguage(language = 'vi') {
+  return ACTION_LABELS[language] ? language : 'vi'
 }
 
-export const ACTION_CHOICES_INSTRUCTION = buildActionChoicesInstruction('vi')
+export function actionChoiceLabel(index, language = 'vi') {
+  const lang = normalizeActionLanguage(language)
+  return ACTION_LABELS[lang][index] ?? `${String.fromCharCode(65 + index)}`
+}
+
+export function buildActionChoicesInstruction(language = 'vi') {
+  const lang = normalizeActionLanguage(language)
+  const labels = ACTION_LABELS[lang]
+  const languageName = ACTION_LANGUAGE_NAMES[lang]
+  return `PLAYER ACTION CHOICES — UI LANGUAGE RULE:
+- After the narrative, output exactly one <actions>...</actions> block unless the turn is stopped at [[BATTLE]] or waiting for a dedicated shop/heal/PC interaction.
+- CHOICE OUTPUT LANGUAGE: ${languageName}. This comes from the language selected in the app UI. It applies ONLY to the <actions> block and overrides the story/preset language inside this block. Do not copy another language from the narrative when the UI language differs.
+- Create exactly 4 choices. Each choice must be a concrete action or line the player can send next, grounded in the scene and the player character.
+- The four directions must be distinct: A cautious/observe; B proactive/advance the scene; C interact with an NPC or Pokémon; D creative/risky/comedic while remaining logically valid.
+- Do not use knowledge the character does not have. Do not decide NPC reactions/results for them. Do not claim success before it happens. Do not invent items, Pokémon or powers the player does not possess.
+- Keep each choice concise (1-2 sentences). Never include prompt rules, writing directions, point-of-view notes, state tags, metadata or story-planning commentary.
+- The labels are fixed by the UI language. Use these exact labels and do not translate them to the narrative language.
+Required format:
+<actions>
+[A|${labels[0]}] ...
+[B|${labels[1]}] ...
+[C|${labels[2]}] ...
+[D|${labels[3]}] ...
+</actions>
+The <actions> block is UI data. Do not mention these rules in the narrative.`
+}
+
 const DEFAULT_LABELS = ACTION_LABELS.vi
 const REQUIRED_CHOICES = 4
 const TRUSTED_ACTION_TAG = /<(actions?|action_choices?|actionchoices|player_actions?)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi
@@ -70,13 +81,11 @@ function fold(text) {
     .toLowerCase().replace(/đ/g, 'd')
 }
 
-function normalizeLabel(label, index, language = 'vi') {
-  const cleaned = cleanText(label)
-    .replace(/^tùy\s*chọn\s*\d+\s*[·:|\-–—]?\s*/i, '')
-    .replace(/^[A-D](?:\s*[·:|\-–—]\s*|\s+)/i, '')
-    .trim()
-  const labels = ACTION_LABELS[language] ?? DEFAULT_LABELS
-  return cleaned.slice(0, 28) || labels[index] || `Lựa chọn ${index + 1}`
+function normalizeLabel(_label, index, language = 'vi') {
+  // Dot134: the four category labels are UI chrome, not model-authored prose.
+  // Always render them in the language selected in the app instead of trusting
+  // whatever language the model/preset happened to emit inside [A|...].
+  return actionChoiceLabel(index, language)
 }
 
 function splitLabelAndText(body, index, language = 'vi') {
@@ -230,6 +239,48 @@ function normalizeActionChoices(items, language = 'vi') {
   // Fail closed: 1-3 lựa chọn lẻ thường là parser ăn nhầm scaffold. Lúc này
   // RoleplayChat sẽ gọi API chuyên sinh lựa chọn thay vì đem rác lên UI.
   return out.length === REQUIRED_CHOICES ? out : []
+}
+
+
+const VIETNAMESE_MARKS = /[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]/giu
+const HAN_CHARACTERS = /[\u3400-\u9fff\uf900-\ufaff]/gu
+
+function countMatches(text, regex) {
+  return String(text ?? '').match(regex)?.length ?? 0
+}
+
+/**
+ * Fail-closed language guard for model-generated suggestions.
+ * It intentionally uses lightweight script/stop-word evidence instead of a
+ * remote translator or language API. If the main model ignores the selected
+ * UI language, RoleplayChat can discard the block and ask the dedicated
+ * action-choice generator to retry in the correct language.
+ */
+export function actionChoicesMatchLanguage(choices, language = 'vi') {
+  if (!Array.isArray(choices) || choices.length !== REQUIRED_CHOICES) return false
+  const lang = normalizeActionLanguage(language)
+  const text = choices.map((choice) => cleanText(choice?.text)).join(' ').trim()
+  if (!text) return false
+
+  const hanCount = countMatches(text, HAN_CHARACTERS)
+  const viMarkCount = countMatches(text, VIETNAMESE_MARKS)
+  const folded = ` ${fold(text)} `
+
+  if (lang === 'zh') {
+    // Four 1-2 sentence Chinese choices should contain clear Han evidence even
+    // when Pokémon/proper names remain Latin.
+    return hanCount >= 8
+  }
+
+  if (lang === 'en') {
+    if (hanCount > 0 || viMarkCount > 0) return false
+    const englishSignals = countMatches(folded, /\b(?:the|a|an|to|and|with|ask|look|watch|check|try|go|talk|tell|wait|approach|follow|investigate|use|move|stay|help|search|observe)\b/gi)
+    return englishSignals >= 3
+  }
+
+  if (hanCount > 0) return false
+  const vietnameseSignals = countMatches(folded, /\b(?:toi|minh|ban|cau|anh|chi|em|khong|mot|voi|va|de|cho|den|vao|ra|nhin|thu|hoi|noi|danh|choi|doi|tiep|quan sat|kiem tra)\b/gi)
+  return viMarkCount >= 2 || vietnameseSignals >= 4
 }
 
 export function extractActionChoices(raw, language = 'vi') {

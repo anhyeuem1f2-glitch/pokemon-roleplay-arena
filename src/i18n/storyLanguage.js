@@ -102,7 +102,7 @@ export function storyLanguageInfo(language = 'vi') {
  */
 export function buildStoryLanguageInstruction(language = 'vi') {
   const lang = storyLanguageInfo(language)
-  return `OUTPUT LANGUAGE: ${lang.label} (${lang.nativeLabel}). Write ALL player-visible narrative, dialogue and generated action-choice text in ${lang.label}. Internal control tags such as [[BATTLE]] and XML-like <actions> wrappers must keep their exact machine-readable syntax. Do not translate the user's proper names, Pokémon names or custom item names unless the supplied canon/preset already does so.`
+  return `STORY OUTPUT LANGUAGE: ${lang.label} (${lang.nativeLabel}). Write ALL player-visible narrative and dialogue in ${lang.label}. The <actions> suggestion block is governed by a separate UI-language instruction and MUST NOT be forced to this story language. Internal control tags such as [[BATTLE]] and XML wrappers must keep their exact machine-readable syntax. Do not translate the user's proper names, Pokémon names or custom item names unless the supplied canon/preset already does so.`
 }
 
 /**

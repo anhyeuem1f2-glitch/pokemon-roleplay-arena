@@ -1,6 +1,9 @@
 import React from 'react'
+import { useGame } from '../context/GameContext.jsx'
+import { actionChoiceLabel } from '../utils/actionChoices.js'
 
 export default function ActionChoices({ choices = [], pending = false, disabled = false, onChoose, onRefresh }) {
+  const { uiLanguage } = useGame()
   if (!pending && !choices.length) return null
   return (
     <section className="action-choices" aria-label="Lựa chọn hành động gợi ý">
@@ -39,7 +42,7 @@ export default function ActionChoices({ choices = [], pending = false, disabled 
             >
               <span className="action-choice__badge">{choice.id ?? String.fromCharCode(65 + index)}</span>
               <span className="action-choice__body">
-                <span className="action-choice__label">{choice.label || `Lựa chọn ${index + 1}`}</span>
+                <span className="action-choice__label">{actionChoiceLabel(index, uiLanguage)}</span>
                 <span className="action-choice__text">{choice.text}</span>
               </span>
               <span className="action-choice__arrow" aria-hidden="true">↗</span>

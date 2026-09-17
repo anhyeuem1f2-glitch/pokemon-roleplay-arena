@@ -20,7 +20,7 @@ import { loadCharacterPresets, saveCharacterPreset, deleteCharacterPreset } from
 import AvatarPicker from './AvatarPicker.jsx'
 import MonAvatar from './MonAvatar.jsx'
 import { cleanAiOutput, extractStateTags } from '../utils/outputCleanup.js'
-import { extractActionChoices } from '../utils/actionChoices.js'
+import { actionChoicesMatchLanguage, extractActionChoices } from '../utils/actionChoices.js'
 import { REGIONS, getRegion, getArea } from '../data/regions.js'
 import { applyStoryState, parseStoryStateTags } from '../utils/storyStateProtocol.js'
 import { clearMemory, rememberExchange } from '../utils/storyMemory.js'
@@ -256,6 +256,7 @@ export default function IntroScreen({ onOpenSettings }) {
     setInventory, setRelationships, setBodyStatus, setHunger, playerProfile, setPlayerProfile,
   } = useGame()
   const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
+  const actionChoiceLanguage = uiLanguage || 'vi'
 
   const [stage, setStage] = useState('title') // 'title' | 'setup'
   const [step, setStep] = useState(0)
@@ -853,7 +854,10 @@ export default function IntroScreen({ onOpenSettings }) {
       callOptions.assistantPrefill = assistantPrefill
 
       const reply = await chatCompletion(apiConfig, apiMessages, { ...callOptions, debugLabel: 'Main Story · Opening', debugRole: 'main-opening' })
-      let actionChoices = extractActionChoices(reply, storyLanguage)
+      let actionChoices = extractActionChoices(reply, actionChoiceLanguage)
+      if (actionChoices.length && !actionChoicesMatchLanguage(actionChoices, actionChoiceLanguage)) {
+        actionChoices = []
+      }
       const cleaned = cleanAiOutput(reply, regexScripts)
       if (!cleaned) {
         throw new Error('AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset ở trang Cài đặt API.')
@@ -977,7 +981,7 @@ export default function IntroScreen({ onOpenSettings }) {
             storyText: openingText,
             userText: 'Bắt đầu câu chuyện',
             playerName: finalName,
-            language: storyLanguage,
+            language: actionChoiceLanguage,
           })
         } catch (choiceErr) {
           console.warn('[action-choices:intro] bỏ qua:', choiceErr.message)

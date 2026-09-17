@@ -17,7 +17,7 @@ import {
   sharesBattleExpWithParty, syncTraitGrantedItems, canRewritePokemonAbility,
 } from '../data/playerPerks.js'
 import { cleanAiOutput, extractPresetUiVariables, extractStateTags, extractThinking, truncateAfterInteractiveMarker } from '../utils/outputCleanup.js'
-import { extractActionChoices } from '../utils/actionChoices.js'
+import { actionChoicesMatchLanguage, extractActionChoices } from '../utils/actionChoices.js'
 import { normalizeMonTarget, monIdentityMatches, resolveOwnedMonTarget } from '../utils/ownedMonTarget.js'
 import { storyClaimsEvolution, inferEvolutionDirectives, findEvolutionSpeciesEntry } from '../utils/evolutionProtocol.js'
 import { buildMonSmart, buildWildMon, detectBattleOpponentSpecies, detectBattleOpponentSpeciesList, detectMentionedSpecies, detectMentionedSpeciesList, applyEvGain, applyExpGain, expGainFrom, expFromDays, expFromTraining, buildPartyBehaviorNote, isSameMon, normalizeAcquiredMon, raiseMonToLevel, applyLevelDirective, evolveOwnedMon, isDirectEvolution, validateEvolutionRequirements, recomputeMonStats } from '../data/pokemonSpecies.js'
@@ -770,6 +770,7 @@ export default function RoleplayChat() {
     trainerId,
   } = useGame()
   const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
+  const actionChoiceLanguage = uiLanguage || 'vi'
   const originRegion = getRegion(playerCharacter?.originRegionKey)
   const originArea = getArea(playerCharacter?.originRegionKey, playerCharacter?.originAreaKey)
   const identityContext = buildIdentityContext({
@@ -2704,7 +2705,12 @@ export default function RoleplayChat() {
       }
       // Đợt 79: preset có thể dùng <choice>, <selection> hoặc <details>. Bóc
       // từ reply GỐC trước khi outputCleanup vứt scaffold hậu kỳ.
-      const replyActionChoices = extractActionChoices(reply, storyLanguage)
+      let replyActionChoices = extractActionChoices(reply, actionChoiceLanguage)
+      if (replyActionChoices.length && !actionChoicesMatchLanguage(replyActionChoices, actionChoiceLanguage)) {
+        // Dot134: never show suggestions in a stale/preset language. Let the
+        // dedicated generator retry them in the language selected in the UI.
+        replyActionChoices = []
+      }
       if (!cleaned) {
         throw new Error(
           'AI chỉ trả về phần suy nghĩ (CoT), chưa kịp viết chính văn. Thử tăng "Max tokens" của preset (mục Preset chính văn) hoặc kiểm tra lại preset ở nút Debug.',
@@ -3111,7 +3117,7 @@ export default function RoleplayChat() {
             storyText: displayText,
             userText: stateUserText,
             playerName: playerName || playerProfile?.name || '',
-            language: storyLanguage,
+            language: actionChoiceLanguage,
           }))
             .then((generated) => {
               setMessages((msgs) => {
@@ -3656,7 +3662,7 @@ export default function RoleplayChat() {
         storyText,
         userText,
         playerName: playerName || playerProfile?.name || '',
-        language: storyLanguage,
+        language: actionChoiceLanguage,
       }))
       setMessages((current) => current.map((message) => (
         message.id === messageId && message.content === storyText

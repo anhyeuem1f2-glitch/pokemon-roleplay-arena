@@ -7,6 +7,7 @@ import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
 import { DIRECTOR_WORLD_INSTRUCTION } from '../data/storyDirector.js'
 import { buildActionChoicesInstruction } from './actionChoices.js'
 import { buildStoryLanguageInstruction, resolveStoryLanguage } from '../i18n/storyLanguage.js'
+import { normalizeUiLanguage } from '../i18n/uiLanguage.js'
 
 /**
  * Build apiMessages + callOptions cho 1 lượt gọi API CHÍNH — dùng chung giữa
@@ -36,7 +37,8 @@ function buildLoreWikiNote(wbActive, canonNote) {
 export function buildMainApiMessages({ character, playerName, stylePreset, mainPreset, history, scanText, identityContext = '', worldbook = null, canonNote = '', toneNote = '', lastUserMessage = '', uiLanguage = 'vi', storyLanguage = null }) {
   const resolvedStoryLanguage = storyLanguage || resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const languageInstruction = buildStoryLanguageInstruction(resolvedStoryLanguage)
-  const actionChoicesInstruction = buildActionChoicesInstruction(resolvedStoryLanguage)
+  const actionChoiceLanguage = normalizeUiLanguage(uiLanguage)
+  const actionChoicesInstruction = buildActionChoicesInstruction(actionChoiceLanguage)
 
   // WORLDBOOK (đợt 41) — nguồn thông tin CHÍNH của người dùng; gộp với
   // lorebook cũ của character (nếu có). Đưa vào worldInfoBefore + system.
@@ -74,7 +76,6 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       // người chơi — chèn cả khi dùng preset để preset không đè mất.
       { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
       { role: 'system', content: PROSE_QUALITY_NOTE },
-      { role: 'system', content: actionChoicesInstruction },
       ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
       ...(wbActive.length
         ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — canon người dùng; TÍNH CÁCH & vai trò nhân vật trong đây phải được tôn trọng kể cả khi văn phong preset khác đi):\n${wbActive.join('\n\n')}` }]
@@ -82,9 +83,11 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       ...(wbActive.length || canonNote
         ? [{ role: 'system', content: buildLoreWikiNote(wbActive, canonNote) }]
         : []),
-      // Đợt 133: đặt lại language gate ở CUỐI chuỗi system note để các
-      // ghi chú gameplay tiếng Việt phía trên không vô tình kéo model về VI.
+      // Dot134: story language and action-choice language are separate.
+      // Narrative can still follow an explicit preset language, while the
+      // suggestion cards always follow the language selected in the UI.
       { role: 'system', content: languageInstruction },
+      { role: 'system', content: actionChoicesInstruction },
     ]
     const callOptions = {
       temperature: mainPreset.meta?.temperature,
@@ -98,7 +101,6 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
     // Đạo diễn tình huống (đợt 31) — nhánh mặc định.
     { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
     { role: 'system', content: PROSE_QUALITY_NOTE },
-    { role: 'system', content: actionChoicesInstruction },
     ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
     ...(wbActive.length
       ? [{ role: 'system', content: `THÔNG TIN WORLDBOOK (ưu tiên TUYỆT ĐỐI — đây là canon người dùng thiết lập; TÍNH CÁCH, ngoại hình, vai trò của nhân vật trong đây PHẢI được tôn trọng kể cả khi văn phong preset có xu hướng khác):\n${wbActive.join('\n\n')}` }]
@@ -106,8 +108,9 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
     ...(wbActive.length || canonNote
       ? [{ role: 'system', content: buildLoreWikiNote(wbActive, canonNote) }]
       : []),
-    // Đợt 133: reinforcement cuối cùng trước lịch sử hội thoại.
+    // Dot134: keep narrative and suggestion languages independent.
     { role: 'system', content: languageInstruction },
+    { role: 'system', content: actionChoicesInstruction },
     ...history,
   ]
   return { apiMessages, callOptions: {}, regexScripts: undefined }

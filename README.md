@@ -1,3 +1,49 @@
+## Đợt 134 — Action Choices đi theo ngôn ngữ UI, tách khỏi ngôn ngữ preset (17/09/2026)
+
+### Lỗi đã sửa
+
+Người dùng Trung Quốc báo chính văn đã là tiếng Trung nhưng 4 **gợi ý hành động** vẫn có thể hiện tiếng Việt (`THẬN TRỌNG / CHỦ ĐỘNG / KẾT NỐI / SÁNG TẠO` và nội dung lựa chọn tiếng Việt).
+
+Nguyên nhân là Dot133 mới tách ngôn ngữ truyện khỏi UI chưa triệt để: `storyLanguage` vẫn được dùng để sinh/parse Action Choices, language gate cuối của chính văn còn bao gồm cả `action-choice text`, và API phụ sinh gợi ý vẫn dùng prompt nền tiếng Việt nên provider có thể bị kéo trở lại VI.
+
+### Hành vi mới
+
+- **Ngôn ngữ chính văn** và **ngôn ngữ gợi ý hành động** là hai kênh độc lập.
+- Chính văn vẫn giữ luật Dot133: mặc định đi theo UI nhưng preset được quyền chỉ định rõ ngôn ngữ khác.
+- Riêng bảng **Action Choices luôn đi theo ngôn ngữ đang chọn trong UI** (`vi` / `en` / `zh`), không ăn theo ngôn ngữ preset hay ngôn ngữ chính văn.
+- `buildStoryLanguageInstruction()` không còn quyền ép ngôn ngữ của `<actions>`.
+- Prompt Action Choices được viết trung tính bằng English và chèn `CHOICE OUTPUT LANGUAGE` động; không còn prompt nền khóa chết tiếng Việt.
+- Nếu Main Story vẫn trả `<actions>` sai ngôn ngữ UI, app **fail-closed**: bỏ block đó và gọi generator chuyên dụng để sinh lại đúng ngôn ngữ.
+- Generator chuyên dụng cũng kiểm tra ngôn ngữ sau khi model trả về; sai thì retry một lần, vẫn sai thì không hiển thị gợi ý sai ngôn ngữ.
+- 4 nhãn A/B/C/D là UI chrome và luôn được app render theo ngôn ngữ đang chọn, không tin nhãn model trả về. Vì vậy cả message cũ mang label tiếng Việt cũng không còn hiện `THẬN TRỌNG...` khi UI đang là 中文/English.
+
+### Regression đợt 134
+
+- `test-dot133.mjs`: **7/7 PASS**.
+- `test-dot134.mjs`: **9/9 PASS**.
+- Regression liên quan `100, 105, 106, 117, 120, 121, 124, 125, 126, 128, 129, 130`: **PASS**.
+- **78/78 file `.js`** qua `node --check`.
+- 3 file JSX thay đổi (`RoleplayChat`, `IntroScreen`, `ActionChoices`) không có lỗi parse/syntax theo TypeScript parser.
+- `npm ci` trong môi trường bàn giao bị timeout nên chưa xác nhận lại `npm run lint` / `npm run build` ở đây.
+
+### File cần cập nhật lên GitHub sau đợt 134
+
+Upload/ghi đè:
+
+- `src/i18n/storyLanguage.js`
+- `src/utils/actionChoices.js`
+- `src/utils/buildMainMessages.js`
+- `src/services/actionChoiceGenerator.js`
+- `src/components/RoleplayChat.jsx`
+- `src/components/IntroScreen.jsx`
+- `src/components/ActionChoices.jsx`
+- `README.md`
+- `BAN_GIAO_DU_AN.md`
+
+`test-dot134.mjs` là regression mới; không bắt buộc cho website chạy.
+
+---
+
 ## Đợt 131 — fix crash `uiLanguage is not defined`
 
 - Sửa runtime crash ở `RightHUD.jsx`: component đã gọi `translateUiText(..., uiLanguage)` cho ngày/giờ và thời tiết nhưng quên lấy `uiLanguage` từ `GameContext`.

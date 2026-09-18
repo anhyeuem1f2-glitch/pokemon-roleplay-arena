@@ -330,7 +330,14 @@ const ACQUIRE = [
   'gia nhập', 'đi theo', 'nhận nuôi', 'được tặng', 'trao cho',
   'trở thành pokemon của', 'trở thành bạn đồng hành', 'vào đội', 'về đội',
   'đồng ý theo', 'chấp nhận đi cùng',
-  '捕获成功', '成功捕捉', '抓到了', '收服', '加入队伍', '加入了队伍', '进入队伍', '成为我的宝可梦', '成为玩家的宝可梦', '成为伙伴', '成为同伴', '同意同行', '跟随玩家',
+  'caught', 'joined the team', 'joined your team', 'became your pokemon', 'became your pokémon', 'became your partner', 'became your companion',
+  '捕获成功', '成功捕捉', '抓到了', '收服', '领取', '领到', '收下', '接过', '加入队伍', '加入了队伍', '进入队伍', '成为我的宝可梦', '成为玩家的宝可梦', '成为伙伴', '成为同伴', '同意同行', '跟随玩家',
+  // Dot135: tiếng Trung tự nhiên thường chen 了/你的/第一只 giữa động từ và
+  // danh từ, nên chuỗi cố định "成为伙伴" hoặc "加入队伍" không bắt được.
+  /(?:正式)?成为(?:了)?(?:你|玩家|我)?(?:的)?(?:第一只|首只|初始)?宝可梦/u,
+  /(?:正式)?成为(?:了)?(?:你|玩家|我)?(?:的)?(?:伙伴|同伴|搭档)/u,
+  /(?:正式)?(?:加入|进入)(?:了)?(?:你|玩家|我)?(?:的)?队伍/u,
+  /(?:选择|领取|领到|收下|接过|获得|得到)(?:了)?[^。！？；，]{0,18}(?:作为|成为)?(?:你|玩家|我)?(?:的)?(?:第一只|首只|初始)?宝可梦/u,
 ]
 // Mua/nhận qua PC không nhất thiết có câu máy móc “Ralts gia nhập đội”.
 // Tách riêng khỏi ACQUIRE để “Ralts đã nhận một đòn” không bị hiểu nhầm là
@@ -340,6 +347,7 @@ const OWNERSHIP_ACQUIRE = [
   'đã tiếp nhận', 'tiếp nhận thành công', 'chuyển quyền sở hữu',
   'quyền sở hữu đã chuyển', 'đã sang tên', 'chuyển giao hoàn tất',
   '已经购买', '购买成功', '已经收到', '收到', '接过', '接收成功', '所有权转移', '完成过户', '转交完成',
+  '领取', '领到', '收下', '正式拥有', '归你所有', '成为你的',
 ]
 const OWNERSHIP_CONTEXT = [
   'poké ball', 'poke ball', 'quả bóng', 'quả cầu', 'pc', 'box',

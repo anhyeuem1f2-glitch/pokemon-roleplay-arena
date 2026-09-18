@@ -1,3 +1,47 @@
+## Đợt 135 — State tiếng Trung: failover API + nhận diện sở hữu Pokémon tự nhiên (18/09/2026)
+
+### Lỗi đã sửa
+
+Người dùng Trung Quốc báo **Cập nhật biến** thất bại; trong chi tiết lượt, các Semantic Auditor hiện `Failed to fetch / CORS`, và sau khi chính văn xác nhận nhận Pokémon đầu tiên thì đội hình vẫn trống.
+
+Có hai nguyên nhân kết hợp:
+
+1. Semantic State trước đây chọn một State API phụ làm đường chính. Nếu endpoint/key đó chết vì network/CORS, pipeline rơi quá sớm về parser tag legacy. Chính văn hiện đại không bắt buộc có `[[POKEMON]]`, nên một lượt kể đúng vẫn có thể không ghi được state.
+2. Ownership firewall tiếng Trung đã có hỗ trợ nhưng còn quá cứng với văn phong tự nhiên như `正式成为了你的第一只宝可梦`, `加入了你的队伍`, `收下了皮卡丘，作为你的初始宝可梦`. Model có thể extract đúng `pokemon_acquired` nhưng evidence gate vẫn từ chối.
+
+### Hành vi mới
+
+- Semantic State dùng **API failover theo lượt** thay vì phụ thuộc một endpoint:
+  `State API 1 → State API 2 → auxiliary khả dụng → Main API`.
+- Main API luôn là fallback cuối cùng; nếu API kể chuyện vẫn chạy thì cập nhật biến không còn phải chết chỉ vì State API phụ bị CORS.
+- Endpoint/key đã fail trong lượt hiện tại được ghi nhận và bỏ qua ở các pass tiếp theo, tránh Auditor/focus/background liên tục gọi lại cùng proxy chết.
+- Dedupe API dùng cả endpoint + model + API key, tránh một key phụ lỗi làm vô tình loại luôn main key hợp lệ trên cùng endpoint/model.
+- Immediate auditor, focus shards, background recovery và nút **Quét lại biến thật** đều dùng cùng cơ chế failover.
+- Evidence gate tiếng Trung nhận thêm các cách diễn đạt sở hữu tự nhiên: `领取/领到/收下/接过`, `加入了你的队伍`, `成为你的伙伴/同伴/搭档`, `正式成为了你的第一只宝可梦`, câu nhận starter qua nhiều vế...
+- Vẫn chặn câu tương lai/chưa xảy ra như `明天皮卡丘会成为你的宝可梦`, nên việc nới Chinese evidence không biến thành auto-add bừa.
+
+### Regression đợt 135
+
+- `test-dot135.mjs`: **8/8 PASS**.
+- Regression hiện hành từ Dot73+ PASS, ngoại trừ `test-dot122`, `test-dot123`, `test-dot127` là test lịch sử đã stale vì còn đòi Google Translate runtime bị xóa từ Dot128.
+- `test-dot114.mjs` đã cập nhật expectation theo scheduler failover mới và PASS.
+- **78/78 file `.js`** qua `node --check`.
+- `RoleplayChat.jsx` parse PASS bằng TypeScript parser.
+- Chưa xác nhận `npm run lint` / `npm run build` trong môi trường bàn giao vì dependency chưa được cài đầy đủ.
+
+### File cần cập nhật lên GitHub sau đợt 135
+
+Chỉ upload/ghi đè:
+
+- `src/components/RoleplayChat.jsx`
+- `src/utils/stateEvidence.js`
+- `src/utils/stateScanPlan.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md`, `test-dot114.mjs`, `test-dot135.mjs` được giữ trong gói bàn giao/local để tiếp quản và regression, **không cần push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 134 — Action Choices đi theo ngôn ngữ UI, tách khỏi ngôn ngữ preset (17/09/2026)
 
 ### Lỗi đã sửa

@@ -812,7 +812,6 @@ export default function RoleplayChat() {
   // Đợt 77/102: khi không có slot API cập nhật biến riêng, luân phiên API
   // phụ đang rảnh. Lượt mật độ cao có thể chạy nhiều pass độc lập trên cùng
   // provider; ledger giữa các pass ngăn áp trùng.
-  const stateApiRoundRobinRef = useRef(0)
   const actionChoiceApiRoundRobinRef = useRef(0)
   const stateScanLocksRef = useRef(new Set())
   // Đợt 114: các tác vụ AI phụ (state/action/item metadata) dùng chung một
@@ -824,11 +823,16 @@ export default function RoleplayChat() {
   const itemDescriptionFailureRef = useRef(new Map())
 
   const apiLeaseKey = (cfg) => `${String(cfg?.baseUrl ?? '').replace(/\/+$/, '')}|${String(cfg?.model ?? '')}`
+  // Cùng endpoint/model nhưng key khác vẫn là hai cấu hình failover khác nhau.
+  // Lease vẫn dùng endpoint/model để tránh bắn song song vào cùng provider,
+  // còn dedupe/failure memo phải tính cả credential để key phụ hỏng không
+  // vô tình loại luôn API chính đang hoạt động.
+  const apiConfigKey = (cfg) => `${apiLeaseKey(cfg)}|${String(cfg?.apiKey ?? '')}`
   const uniqueApiConfigs = (configs) => {
     const seen = new Set()
     return (configs ?? []).filter((cfg) => {
       if (!cfg?.baseUrl || !cfg?.model) return false
-      const key = apiLeaseKey(cfg)
+      const key = apiConfigKey(cfg)
       if (seen.has(key)) return false
       seen.add(key)
       return true
@@ -860,6 +864,32 @@ export default function RoleplayChat() {
       await waitForApiLeaseChange()
     }
   }
+
+  // Dot135: State API phụ là tuỳ chọn tăng độ chắc, KHÔNG được trở thành
+  // điểm chết duy nhất. Người dùng Trung Quốc có proxy phụ bị CORS trong khi
+  // API chính vẫn kể chuyện bình thường; bản cũ chọn stateApiConfig đầu tiên
+  // rồi nếu slot đó lỗi thì rơi thẳng về parser tag legacy => chính văn 中文
+  // không có [[TAG]] bị mất toàn bộ state (đặc biệt Pokémon đầu tiên).
+  // Helper này thử lần lượt các endpoint đã cấu hình và luôn cho phép API
+  // chính làm fallback cuối, nhưng không lặp vô hạn hay để một lỗi chặn lượt.
+  async function runWithApiFailover(configs, task, { skipKeys = null } = {}) {
+    const pool = uniqueApiConfigs(configs).filter((cfg) => !skipKeys?.has(apiConfigKey(cfg)))
+    if (!pool.length) throw new Error('Không có API hợp lệ để cập nhật state.')
+    const failures = []
+    let lastError = null
+    for (const cfg of pool) {
+      try {
+        const value = await withApiLease(cfg, () => task(cfg))
+        return { value, config: cfg, failures }
+      } catch (error) {
+        lastError = error
+        failures.push({ key: apiConfigKey(cfg), message: String(error?.message ?? error) })
+      }
+    }
+    const error = new Error(lastError?.message || 'Tất cả API cập nhật state đều thất bại.')
+    error.failures = failures
+    throw error
+  }
   useEffect(() => { latestPlayerMonRef.current = playerMon }, [playerMon])
   useEffect(() => { latestPartyRef.current = party }, [party])
   useEffect(() => { latestPcBoxRef.current = pcBox }, [pcBox])
@@ -867,6 +897,16 @@ export default function RoleplayChat() {
   useEffect(() => { latestPlayerLocationRef.current = playerLocation }, [playerLocation])
   useEffect(() => { latestDynamicStateRef.current = dynamicState }, [dynamicState])
   useEffect(() => { latestMessagesRef.current = messages }, [messages])
+
+  function semanticStateApiPool() {
+    return uniqueApiConfigs([
+      stateApiConfig ? { ...apiConfig, ...stateApiConfig } : null,
+      stateApiConfig2 ? { ...apiConfig, ...stateApiConfig2 } : null,
+      outcomeApiConfig?.escaped ? { ...apiConfig, ...outcomeApiConfig.escaped } : null,
+      outcomeApiConfig?.lose ? { ...apiConfig, ...outcomeApiConfig.lose } : null,
+      apiConfig,
+    ])
+  }
 
   function itemDescriptionApiPool() {
     const auxiliary = uniqueApiConfigs([
@@ -2824,12 +2864,12 @@ export default function RoleplayChat() {
 
       let primarySemanticAudit = null
       let immediateAuditorAudit = null
-      const semanticPrimaryCfg = [stateApiConfig, stateApiConfig2, outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
-        .find((cfg) => cfg?.baseUrl && cfg?.model)
-      const resolvedSemanticCfg = semanticPrimaryCfg ? { ...apiConfig, ...semanticPrimaryCfg } : apiConfig
-      if (resolvedSemanticCfg?.baseUrl && resolvedSemanticCfg?.model) {
+      const semanticPrimaryPool = semanticStateApiPool()
+      const semanticFailedApiKeys = new Set()
+      let resolvedSemanticCfg = semanticPrimaryPool[0] ?? apiConfig
+      if (semanticPrimaryPool.length) {
         try {
-          const semantic = await withApiLease(resolvedSemanticCfg, () => extractSemanticStateEvents(resolvedSemanticCfg, {
+          const primaryRun = await runWithApiFailover(semanticPrimaryPool, (cfg) => extractSemanticStateEvents(cfg, {
             storyText: displayText,
             userText: stateUserText,
             stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
@@ -2837,6 +2877,9 @@ export default function RoleplayChat() {
             mode: normalizeGameMode(storyTone),
             scanMode: 'extractor',
           }))
+          const semantic = primaryRun.value
+          resolvedSemanticCfg = primaryRun.config
+          for (const failure of primaryRun.failures) semanticFailedApiKeys.add(failure.key)
           semanticPrimarySucceeded = true
           let semanticParsed = filterUiPreAppliedState(semantic.parsed, preAppliedState)
           semanticParsed = gateSemanticOwnership(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -2847,31 +2890,30 @@ export default function RoleplayChat() {
           semanticParsed = filterSupplementalDuplicates(semanticParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
           stateParsed = mergeStateManifests(stateParsed, semanticParsed)
 
-          // Đợt 106: nếu có State API 2, dùng nó như AUDITOR đồng bộ NGAY trong
-          // lượt thay vì chờ idle. Một extractor có thể bỏ sót cách diễn đạt lạ;
-          // auditor chỉ nhìn ledger đã có và bổ sung phần thiếu. Với lượt phức
-          // tạp/malformed mà không có API 2, cho chính extractor tự audit lần 2.
-          const dedicatedAuditorRaw = stateApiConfig2?.baseUrl && stateApiConfig2?.model
-            ? stateApiConfig2
-            : null
-          // Đợt 106: luôn audit đồng bộ. Nếu extractor bỏ sót toàn bộ một
-          // sự kiện thì proposedCount/rejectedCount đều có thể bằng 0, vì vậy
-          // dùng chính các con số đó để quyết định audit là một vòng lặp logic.
-          // Ưu tiên độ đúng state hơn tiết kiệm một call phụ.
+          // Dot135: auditor vẫn ưu tiên slot phụ, nhưng slot phụ chết/CORS thì
+          // tự rơi qua endpoint còn sống (cuối cùng là API chính). Một API phụ
+          // lỗi không còn biến toàn bộ lượt 中文 thành "không cập nhật biến".
           const shouldImmediateAudit = true
           if (shouldImmediateAudit) {
             try {
-              const auditorCfg = dedicatedAuditorRaw
-                ? { ...apiConfig, ...dedicatedAuditorRaw }
-                : resolvedSemanticCfg
-              const auditor = await withApiLease(auditorCfg, () => extractSemanticStateEvents(auditorCfg, {
+              const auditorPool = uniqueApiConfigs([
+                stateApiConfig2 ? { ...apiConfig, ...stateApiConfig2 } : null,
+                stateApiConfig ? { ...apiConfig, ...stateApiConfig } : null,
+                outcomeApiConfig?.escaped ? { ...apiConfig, ...outcomeApiConfig.escaped } : null,
+                outcomeApiConfig?.lose ? { ...apiConfig, ...outcomeApiConfig.lose } : null,
+                resolvedSemanticCfg,
+                apiConfig,
+              ])
+              const auditorRun = await runWithApiFailover(auditorPool, (cfg) => extractSemanticStateEvents(cfg, {
                 storyText: displayText,
                 userText: stateUserText,
                 stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
                 appliedState: mergeStateManifests(preAppliedState ?? {}, stateParsed),
                 mode: normalizeGameMode(storyTone),
                 scanMode: 'auditor',
-              }))
+              }), { skipKeys: semanticFailedApiKeys })
+              for (const failure of auditorRun.failures) semanticFailedApiKeys.add(failure.key)
+              const auditor = auditorRun.value
               let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
               auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
               auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -2884,16 +2926,16 @@ export default function RoleplayChat() {
                 malformed: Boolean(auditor.malformed),
                 salvaged: Boolean(auditor.salvaged),
                 repaired: Boolean(auditor.repaired),
+                failoverAttempts: auditorRun.failures.length,
               }
             } catch (auditorError) {
               immediateAuditorAudit = { proposed: 0, accepted: 0, error: auditorError.message }
             }
           }
 
-          // Lượt dày state: chạy 4 focus shard SONG SONG trước commit. Đây
-          // không phải giới hạn biến; mỗi shard vẫn được trả vô hạn event. Mục
-          // tiêu là không bắt một response JSON duy nhất phải giữ chú ý cho tiền,
-          // Pokémon, NPC và quest cùng lúc.
+          // Lượt dày state: chạy 4 focus shard SONG SONG trước commit. Mỗi
+          // shard cũng có failover; các endpoint đã biết hỏng trong lượt bị
+          // bỏ qua để không lặp 4 lần cùng một lỗi CORS như ảnh tester Trung.
           const focusSpecs = buildStateScanPlan({
             storyText: displayText,
             explicitOperationCount: Math.max(countParsedStateOperations(stateParsed), semantic.proposedCount),
@@ -2901,15 +2943,21 @@ export default function RoleplayChat() {
           }).filter((spec) => spec.focus)
           const focusedAudit = []
           if (focusSpecs.length) {
-            const focusCfgPoolRaw = [stateApiConfig, stateApiConfig2, outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
-              .filter((cfg) => cfg?.baseUrl && cfg?.model)
-            const focusCfgPool = focusCfgPoolRaw.length
-              ? focusCfgPoolRaw.map((cfg) => ({ ...apiConfig, ...cfg }))
-              : [resolvedSemanticCfg]
+            const baseFocusPool = uniqueApiConfigs([
+              stateApiConfig ? { ...apiConfig, ...stateApiConfig } : null,
+              stateApiConfig2 ? { ...apiConfig, ...stateApiConfig2 } : null,
+              outcomeApiConfig?.escaped ? { ...apiConfig, ...outcomeApiConfig.escaped } : null,
+              outcomeApiConfig?.lose ? { ...apiConfig, ...outcomeApiConfig.lose } : null,
+              resolvedSemanticCfg,
+              apiConfig,
+            ])
             const focusedResults = await Promise.all(focusSpecs.map(async (spec, index) => {
-              const focusCfg = focusCfgPool[index % focusCfgPool.length]
+              const usable = baseFocusPool.filter((cfg) => !semanticFailedApiKeys.has(apiConfigKey(cfg)))
+              const pool = usable.length ? usable : [resolvedSemanticCfg]
+              const at = index % pool.length
+              const rotated = [...pool.slice(at), ...pool.slice(0, at)]
               try {
-                const result = await withApiLease(focusCfg, () => extractSemanticStateEvents(focusCfg, {
+                const focusRun = await runWithApiFailover(rotated, (cfg) => extractSemanticStateEvents(cfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   stateSnapshot: buildStateScanSnapshot(spec.focus, Number(playerProfile?.money) || 0),
@@ -2917,8 +2965,9 @@ export default function RoleplayChat() {
                   mode: normalizeGameMode(storyTone),
                   scanMode: 'auditor',
                   focus: spec.focus,
-                }))
-                return { spec, result }
+                }), { skipKeys: semanticFailedApiKeys })
+                for (const failure of focusRun.failures) semanticFailedApiKeys.add(failure.key)
+                return { spec, result: focusRun.value, failoverAttempts: focusRun.failures.length }
               } catch (error) {
                 return { spec, error }
               }
@@ -2942,6 +2991,7 @@ export default function RoleplayChat() {
                 malformed: Boolean(row.result.malformed),
                 salvaged: Boolean(row.result.salvaged),
                 repaired: Boolean(row.result.repaired),
+                failoverAttempts: row.failoverAttempts ?? 0,
               })
             }
           }
@@ -2954,6 +3004,8 @@ export default function RoleplayChat() {
             salvaged: semantic.salvaged,
             repaired: Boolean(semantic.repaired),
             repairAttempted: Boolean(semantic.repairAttempted),
+            failoverAttempts: primaryRun.failures.length,
+            usedMainFallback: apiConfigKey(resolvedSemanticCfg) === apiConfigKey(apiConfig) && primaryRun.failures.length > 0,
             auditor: immediateAuditorAudit,
             focused: focusedAudit,
             events: semantic.acceptedEvents.slice(0, 40).map((event) => ({
@@ -2965,7 +3017,7 @@ export default function RoleplayChat() {
             })),
           }
         } catch (semanticError) {
-          console.warn('[semantic-state] primary pass lỗi, dùng fallback legacy đã xác minh:', semanticError.message)
+          console.warn('[semantic-state] mọi API semantic đều lỗi, dùng fallback legacy đã xác minh:', semanticError.message)
           primarySemanticAudit = { proposed: 0, accepted: 0, rejected: 0, error: semanticError.message, fallbackLegacy: true }
         }
       }
@@ -3140,24 +3192,10 @@ export default function RoleplayChat() {
         })
       }
 
-      // SEMANTIC RECOVERY nền: đọc lại chính văn canon và bổ sung SỰ KIỆN còn
-      // thiếu theo ledger. Không tạo/đòi tag; mỗi pass độc lập nên một lỗi không
-      // làm mất các nhóm state khác. Có API phụ riêng thì dùng, không thì fallback.
-      // Có API phụ riêng (model rẻ) thì dùng, không thì fallback API CHÍNH.
-      const dedicatedStateCfgs = [stateApiConfig, stateApiConfig2]
-        .filter((cfg) => cfg?.baseUrl && cfg?.model)
-        .map((cfg) => ({ ...apiConfig, ...cfg }))
-      const spareStateApis = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
-        .filter((cfg) => cfg?.baseUrl && cfg?.model)
-        .map((cfg) => ({ ...apiConfig, ...cfg }))
-      let stateCfgs = dedicatedStateCfgs
-      if (!stateCfgs.length) {
-        // Có API phụ 1/2 thì chỉ luân phiên hai slot đó khi trình duyệt rảnh;
-        // API chính không bị chen thêm một lượt gọi nền ngoài việc kể chuyện.
-        const pool = spareStateApis.length ? spareStateApis : [apiConfig]
-        stateCfgs = [pool[stateApiRoundRobinRef.current % pool.length]]
-        stateApiRoundRobinRef.current += 1
-      }
+      // SEMANTIC RECOVERY nền: luôn giữ API chính ở cuối pool làm phao cứu
+      // sinh. Slot State/Auditor vẫn được ưu tiên trước; nếu proxy phụ CORS,
+      // pass đó tự chuyển sang endpoint còn sống thay vì chỉ ghi lỗi rồi bỏ state.
+      const stateCfgs = semanticStateApiPool()
       if (stateCfgs.some((cfg) => cfg?.baseUrl && cfg?.model)) {
         // Đợt 102: lượt ít biến giữ 1-2 pass rộng như cũ. Lượt có mật độ
         // state cao tự mở thêm các shard chuyên môn. Mỗi shard KHÔNG có giới
@@ -3173,13 +3211,16 @@ export default function RoleplayChat() {
           try {
             for (let scanIndex = 0; scanIndex < scanPlan.length; scanIndex += 1) {
               const passSpec = scanPlan[scanIndex]
-              const stateCfg = stateCfgs[scanIndex % stateCfgs.length]
-              if (!stateCfg?.baseUrl || !stateCfg?.model) continue
+              const usableStateCfgs = stateCfgs.filter((cfg) => !semanticFailedApiKeys.has(apiConfigKey(cfg)))
+              const passPool = usableStateCfgs.length ? usableStateCfgs : stateCfgs
+              if (!passPool.length) continue
+              const at = scanIndex % passPool.length
+              const rotatedPool = [...passPool.slice(at), ...passPool.slice(0, at)]
               let scanResult = null
               let parsedExtra = null
               let passAuditBase = null
               try {
-                scanResult = await withApiLease(stateCfg, () => extractSemanticStateEvents(stateCfg, {
+                const scanRun = await runWithApiFailover(rotatedPool, (cfg) => extractSemanticStateEvents(cfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   appliedState: scanLedger,
@@ -3190,7 +3231,9 @@ export default function RoleplayChat() {
                   mode: normalizeGameMode(storyTone),
                   scanMode: passSpec.role,
                   focus: passSpec.focus,
-                }))
+                }), { skipKeys: semanticFailedApiKeys })
+                for (const failure of scanRun.failures) semanticFailedApiKeys.add(failure.key)
+                scanResult = scanRun.value
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
                 parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
                 parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
@@ -3206,6 +3249,7 @@ export default function RoleplayChat() {
                   repairAttempted: Boolean(scanResult?.repairAttempted),
                   proposed: scanResult?.proposedCount ?? 0,
                   semanticRejected: scanResult?.rejectedCount ?? 0,
+                  failoverAttempts: scanRun.failures.length,
                 }
                 if (!countParsedStateOperations(parsedExtra)) {
                   setMessages((msgs) => msgs.map((message) => message.id === turnMessageId ? {
@@ -3341,12 +3385,7 @@ export default function RoleplayChat() {
     const rawBaseline = compactStateManifest(parseStoryStateTags(source.meta?.raw ?? ''))
     let applied = source.meta?.appliedState ?? rawBaseline
 
-    const dedicated = [stateApiConfig, stateApiConfig2]
-      .filter((config) => config?.baseUrl && config?.model)
-      .map((config) => ({ ...apiConfig, ...config }))
-    const spare = [outcomeApiConfig?.escaped, outcomeApiConfig?.lose]
-      .find((cfg) => cfg?.baseUrl && cfg?.model)
-    const cfgs = dedicated.length ? dedicated : [spare ? { ...apiConfig, ...spare } : apiConfig]
+    const cfgs = semanticStateApiPool()
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
@@ -3390,12 +3429,14 @@ export default function RoleplayChat() {
       })
       for (let scanIndex = 0; scanIndex < rerollPlan.length; scanIndex += 1) {
         const passSpec = rerollPlan[scanIndex]
-        const cfg = cfgs[scanIndex % cfgs.length]
-        if (!cfg?.baseUrl || !cfg?.model) continue
+        if (!cfgs.length) continue
+        const at = scanIndex % cfgs.length
+        const passPool = [...cfgs.slice(at), ...cfgs.slice(0, at)]
         let scanResult = null
         let parsed = null
+        let scanFailoverAttempts = 0
         try {
-          scanResult = await withApiLease(cfg, () => extractSemanticStateEvents(cfg, {
+          const scanRun = await runWithApiFailover(passPool, (cfg) => extractSemanticStateEvents(cfg, {
             storyText,
             userText,
             appliedState: applied,
@@ -3404,6 +3445,8 @@ export default function RoleplayChat() {
             scanMode: passSpec.role,
             focus: passSpec.focus,
           }))
+          scanFailoverAttempts = scanRun.failures.length
+          scanResult = scanRun.value
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
           parsed = gateSemanticOwnership(parsed, storyText)
           parsed = gatePokecenterInteraction(parsed, storyText)
@@ -3434,6 +3477,7 @@ export default function RoleplayChat() {
           repairAttempted: Boolean(scanResult?.repairAttempted),
           proposed: scanResult?.proposedCount ?? 0,
           semanticRejected: scanResult?.rejectedCount ?? 0,
+          failoverAttempts: scanFailoverAttempts,
           reroll: true,
         }
         if (!countParsedStateOperations(parsed)) {

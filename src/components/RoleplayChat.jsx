@@ -728,6 +728,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
 export default function RoleplayChat() {
   const {
     adminMode,
+    gameStarted,
     uiLanguage,
     apiConfig,
     character,

@@ -1,3 +1,31 @@
+## Đợt 137 — hotfix crash `gameStarted is not defined` sau Dot136 (19/09/2026)
+
+### Lỗi thực tế
+
+Sau khi deploy Dot136, người chơi mở game bị Error Boundary ngay từ màn roleplay với lỗi `gameStarted 未定义 / gameStarted is not defined`, nên không thể vào game.
+
+### Nguyên nhân
+
+Dot136 thêm `empty-roster historical repair` trong `RoleplayChat.jsx` và dùng `gameStarted` ở `useEffect`, nhưng quên destructure `gameStarted` từ `useGame()`. Dependency array của effect được evaluate ngay trong render nên ReferenceError xảy ra trước khi người chơi có thể thao tác.
+
+### Sửa trong Dot137
+
+- Bổ sung `gameStarted` vào destructuring của `useGame()` trong `RoleplayChat.jsx`.
+- Thêm regression `test-dot137.mjs` để chặn tái diễn đúng lỗi class này.
+- Chạy static undefined-name scan cho `RoleplayChat.jsx` và `IntroScreen.jsx`; không còn lỗi `TS2304/TS2552` ở hai file Dot136 thay đổi.
+- `test-dot137.mjs`: **3/3 PASS**; `test-dot136.mjs`: **10/10 PASS**.
+- **36 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–137`).
+- **78/78 file `.js`** qua `node --check`; **55/55 file `.jsx`** parse PASS.
+
+### File runtime cần cập nhật GitHub sau đợt 137
+
+- `src/components/RoleplayChat.jsx`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot137.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 136 — sửa tận gốc party trống / Semantic State tiếng Trung không commit (19/09/2026)
 
 ### Lỗi thực tế

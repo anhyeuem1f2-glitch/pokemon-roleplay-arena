@@ -1,3 +1,50 @@
+## Đợt 136 — sửa tận gốc party trống / Semantic State tiếng Trung không commit (19/09/2026)
+
+### Lỗi thực tế
+
+Sau Dot135, người dùng Trung Quốc vẫn có thể đi tới cảnh battle trong khi **party vẫn là 6 ô trống**, dù transcript trước đó đã có câu xác nhận Pokémon đầu tiên thuộc về người chơi. Dot135 mới chữa lỗi CORS/failover ở lượt roleplay thường; chưa bao phủ toàn bộ đường mở đầu và save đã hỏng từ trước.
+
+### Nguyên nhân đã xác định
+
+1. `IntroScreen.jsx` vẫn gọi Semantic State bằng **một API cố định**, không dùng pool failover của Dot135. HTTP 200 nhưng `events=[]` còn bị coi là thành công và vô hiệu legacy fallback.
+2. Ở lượt thường, một endpoint có thể trả **một event khác** (ITEM/MOVE...) nhưng bỏ `pokemon_acquired`; pipeline thấy `acceptedCount > 0` rồi dừng failover, nên event Pokémon quan trọng vẫn rơi.
+3. Semantic model thường chuẩn hoá `皮卡丘/水跃鱼/...` thành tên canonical English (`Pikachu/Mudkip`). Nếu model quên `details.storyName`, ownership firewall có thể không nối được canonical target với tên tiếng Trung trong chính văn.
+4. Focus recovery trước đây chỉ bật khi mật độ state >= 3. Một event đơn nhưng quan trọng như “Pokémon đầu tiên gia nhập đội” không được cấp Pokémon-focused shard.
+5. Save đời cũ có message không có `id`; khi quét lại, source fallback có thể không khớp orphan-sweeper. Ngoài ra có save đã ghi ledger “đã áp Pokémon” nhưng roster thật vẫn rỗng, khiến reroll bị dedupe và không thể tự cứu.
+
+### Sửa trong Dot136
+
+- Opening dùng cùng tuyến **State API 1 → State API 2 → auxiliary → Main API** và chạy extractor/auditor failover.
+- Nếu canon có acquisition Pokémon, một response chỉ có event khác hoặc `events=[]` **không còn được chấp nhận**; failover phải tiếp tục cho tới khi có `pokemon_acquired` hoặc hết endpoint.
+- Semantic acquisition giữ/khôi phục `storyName` bản địa từ evidence; ownership gate nhận canonical-English event dựa trên canon tiếng Trung mà vẫn giữ future/negation firewall.
+- Một câu acquisition đơn giờ tự bật **Pokémon-focused recovery shard**, không cần chờ lượt có >=3 biến.
+- Background scan và `Quét lại biến thật` dùng soft-failover tương tự; chế độ repair có thể bỏ riêng ledger Pokémon sai khi roster thật hoàn toàn rỗng.
+- Message save cũ được gắn `id` deterministic khi load; opening mới cũng tạo `id` ngay từ đầu để state source/orphan repair có nguồn ổn định.
+- Thêm **empty-roster historical repair**: chỉ khi `playerMon + party + PC` đều rỗng, transcript có acquisition đã hoàn tất và không có ledger `pokemon_removed` về sau, app tự quét lại đúng lượt canon và phục hồi Pokémon bị hụt. Cảnh chỉ có đối thủ/Riolu xuất hiện không đủ điều kiện kích hoạt repair.
+
+### Regression đợt 136
+
+- `test-dot136.mjs`: **10/10 PASS**.
+- **35 file regression hiện hành** (`73, 74, 99–121, 124–126, 128–130, 133–136`) PASS.
+- `test-dot122`, `test-dot123`, `test-dot127` vẫn là test lịch sử stale vì còn đòi Google Translate runtime đã xóa từ Dot128; không dùng làm gate hiện tại.
+- **78/78 file `.js`** qua `node --check`.
+- **55/55 file `.jsx`** parse PASS bằng TypeScript parser.
+- Chưa xác nhận `npm run lint` / `npm run build` trong môi trường bàn giao vì dependency Vite/ESLint chưa được cài đầy đủ.
+
+### File runtime cần cập nhật GitHub sau đợt 136
+
+- `src/components/RoleplayChat.jsx`
+- `src/components/IntroScreen.jsx`
+- `src/services/semanticStateEngine.js`
+- `src/utils/stateEvidence.js`
+- `src/utils/stateScanPlan.js`
+- `src/utils/storageOptimizer.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot136.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 135 — State tiếng Trung: failover API + nhận diện sở hữu Pokémon tự nhiên (18/09/2026)
 
 ### Lỗi đã sửa

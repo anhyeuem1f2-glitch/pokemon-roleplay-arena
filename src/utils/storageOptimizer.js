@@ -8,6 +8,35 @@ const KEEP_DEBUG_TURNS = 24
 const RECENT_RAW_LIMIT = 5000
 const RECENT_THINKING_LIMIT = 3500
 
+
+
+function legacyMessageHash(value) {
+  const text = String(value ?? '')
+  let hash = 2166136261
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+/**
+ * Dot136: các save mở đầu đời cũ có message không có id. State repair dùng id
+ * làm acquisitionSourceId và orphan sweeper cũng đối chiếu id; fallback kiểu
+ * assistant-legacy-N không tồn tại trong transcript khiến Pokémon vừa cứu xong
+ * bị coi là orphan rồi xóa. Gắn id deterministic ngay lúc load để repair/state
+ * callback luôn có một source thật và id này được persist ở lần migration kế.
+ */
+export function ensureStoredMessageIds(messages) {
+  const list = Array.isArray(messages) ? messages : []
+  return list.map((message, index) => {
+    if (!message || typeof message !== 'object' || message.id) return message
+    const role = message.role === 'assistant' ? 'assistant' : message.role === 'user' ? 'user' : 'message'
+    const seed = `${role}|${index}|${message.content ?? ''}|${message.resultLabel ?? ''}`
+    return { ...message, id: `${role}-legacy-${index}-${legacyMessageHash(seed)}` }
+  })
+}
+
 export const LEGACY_LARGE_CACHE_KEYS = [
   'trainer-arena:pokedex-cache-v9',
   'trainer-arena:pokedex-cache-v10',
@@ -91,7 +120,7 @@ export function loadStoredMessages() {
     const saved = localStorage.getItem(MESSAGE_STORAGE_KEY)
     if (!saved) return []
     const parsed = JSON.parse(saved)
-    return Array.isArray(parsed) ? parsed : []
+    return ensureStoredMessageIds(Array.isArray(parsed) ? parsed : [])
   } catch {
     return []
   }

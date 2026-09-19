@@ -7,7 +7,7 @@
 import { chatCompletion } from './aiClient.js'
 import { normalizePokemonGender } from '../data/pokemonGender.js'
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
-import { proseSupportsPokemonAcquisition } from '../utils/stateEvidence.js'
+import { inferPokemonAcquisitionStoryName, proseSupportsPokemonAcquisition, proseSupportsSemanticPokemonAcquisition } from '../utils/stateEvidence.js'
 import { craftedPokemonAccessoryName, resolveItemByName } from '../data/shopItems.js'
 
 const KIND_ALIASES = {
@@ -343,6 +343,8 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       case 'pokemon_acquired': {
         const species = String(event.species ?? target).trim()
         if (!species) { accepted = false; break }
+        const explicitStoryName = String(event.storyName ?? event.localName ?? event.displayName ?? details.storyName ?? '').trim()
+        const inferredStoryName = explicitStoryName || inferPokemonAcquisitionStoryName('', event.evidence ?? '')
         const mon = {
           species,
           level: clamp(event.level ?? details.level ?? 1, 1, 100),
@@ -352,7 +354,8 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
           confidence: event.confidence,
           evidence: event.evidence,
           owner: event.owner ?? 'player',
-          details: { ...details },
+          details: { ...details, ...(inferredStoryName ? { storyName: inferredStoryName } : {}) },
+          ...(inferredStoryName ? { storyName: inferredStoryName } : {}),
         }
         const gender = normalizePokemonGender(event.gender ?? details.gender)
         if (gender) mon.gender = gender
@@ -597,7 +600,14 @@ export function enrichNarrativePokemonAppearance(events, storyText, stateSnapsho
   for (const event of rows) {
     if (normalizeKind(event.kind ?? event.type) !== 'pokemon_acquired') continue
     const label = String(event.species ?? event.target ?? event.name ?? '').trim()
-    if (!label || proseSupportsPokemonAcquisition(storyText, label)) continue
+    const semanticProbe = {
+      species: label,
+      storyName: event.storyName,
+      details: event.details ?? {},
+      evidence: event.evidence,
+      confidence: event.confidence,
+    }
+    if (!label || proseSupportsSemanticPokemonAcquisition(storyText, semanticProbe)) continue
     const key = normalizeSearchText(label)
     const existing = owned.find((mon) => [mon.nickname, mon.name, mon.species, mon.pokemonId, mon.uid]
       .filter(Boolean).some((value) => normalizeSearchText(value) === key))

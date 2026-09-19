@@ -56,6 +56,36 @@ const CUE_GROUPS = [
   /\b(?:quy[eề]n\s*(?:truy\s*c[aậ]p|vip)|th[eẻ]\s*vip|v[eé]\s*vip|gi[aấ]y\s*ph[eé]p|ch[iì]a\s*kh[oó]a|danh\s*hi[eệ]u|thi[eế]t\s*b[iị]|k[ií]ch\s*ho[aạ]t|v[oô]\s*hi[eệ]u\s*h[oó]a|tr[aạ]ng\s*th[aá]i|m[aậ]t\s*m[aã]|quy[eề]n\s*s[oở]\s*h[uữ]u)\b/iu,
 ]
 
+
+
+// Dot136: một event đơn nhưng quan trọng (đặc biệt "Pokémon đầu tiên") không
+// được chờ tới ngưỡng mật độ >= 3 mới có focus shard. Model tổng quát có thể
+// đọc ra ITEM/MOVE nhưng bỏ đúng ownership; shard theo domain giúp cứu event
+// đơn mà không phải chạy cả bốn shard cho mọi lượt.
+const FOCUS_CUE_MAP = {
+  economy: [
+    /(?:支付|付款|扣款|余额|账户|总计|合计|账单|转账|退款|奖励|奖金|收到|获得|购买|捡到|背包|物品|道具)/u,
+    /\b(?:thanh\s*to[aá]n|tr[aả]\s*ti[eề]n|mua|nh[aậ]n|v[aậ]t\s*ph[aẩ]m|t[uú]i\s*[dđ][oồ]|money|paid|bought|received|item|inventory)\b/iu,
+  ],
+  pokemon: [
+    /(?:捕获成功|成功捕捉|收服|加入(?:了)?(?:你|玩家|我)?(?:的)?队伍|成为(?:了)?(?:你|玩家|我)?(?:的)?(?:第一只|首只|初始)?宝可梦|成为(?:了)?(?:你|玩家|我)?(?:的)?(?:伙伴|同伴|搭档)|领取|领到|收下|升级|等级提升|进化|亲密度|羁绊)/u,
+    /\b(?:b[aắ]t\s*[dđ][uư][oợ]c|thu\s*ph[uụ]c|gia\s*nh[aậ]p|v[aà]o\s*[dđ][oộ]i|l[eê]n\s*c[aấ]p|ti[eế]n\s*h[oó]a|caught|joined\s+(?:your\s+)?team|became\s+your\s+(?:pokemon|pokémon|partner)|level\s*up|evolv)\b/iu,
+  ],
+  world: [
+    /(?:信任|亲近|好感|关系|受伤|流血|恢复|治愈|前往|到达|抵达|进入|离开|饥饿|喂食|训练|锻炼|特训)/u,
+    /\b(?:tin\s*t[uư][oở]ng|quan\s*h[eệ]|b[iị]\s*th[uư][oơ]ng|h[oồ]i\s*ph[uụ]c|[dđ]i\s*[dđ][eế]n|r[oờ]i\s*kh[oỏ]i|[dđ][oó]i|luy[eệ]n\s*t[aậ]p|relationship|injur|heal|arriv|leave|train)\b/iu,
+  ],
+  progress: [
+    /(?:第二天|一夜过去|时间过去|徽章|任务|声望|通缉|权限|许可证|称号)/u,
+    /\b(?:nhi[eệ]m\s*v[uụ]|huy\s*hi[eệ]u|danh\s*ti[eế]ng|truy\s*n[aã]|quy[eề]n|gi[aấ]y\s*ph[eé]p|quest|badge|reputation|wanted|license)\b/iu,
+  ],
+}
+
+export function matchingStateFocusGroups(storyText) {
+  const text = String(storyText ?? '')
+  return STATE_FOCUS_GROUPS.filter((group) => (FOCUS_CUE_MAP[group.id] ?? []).some((pattern) => pattern.test(text)))
+}
+
 const STATE_TAG_RE = /\[\[\s*(?:MONEY|REL|BODY|POKEMON|EVOLVE|EVOLUTION|LEVEL|LV|FRIEND|FRIENDSHIP|ITEM|EQUIP|UNEQUIP|SHOP|LOOT|POKECENTER|HUNGER|DATE|TRAIN|MOVE|NPC|FACT|BADGE|QUEST|REP|WANTED|LEGENDARY_ACCESS|RIBBON|MARK)\b/giu
 
 function sentenceLikeSegments(text) {
@@ -100,10 +130,11 @@ export function buildStateScanPlan({ storyText = '', explicitOperationCount = 0,
   const safeBroad = Math.max(1, Math.min(2, Math.trunc(Number(broadPasses) || 1)))
   const plan = [{ role: 'extractor', focus: null, label: 'Toàn bộ state' }]
   if (safeBroad > 1) plan.push({ role: 'auditor', focus: null, label: 'Audit toàn bộ' })
-  if (shouldUseFocusedStateRecovery(storyText, explicitOperationCount)) {
-    for (const group of STATE_FOCUS_GROUPS) {
-      plan.push({ role: 'auditor', focus: group, label: group.label })
-    }
+  const focusedGroups = shouldUseFocusedStateRecovery(storyText, explicitOperationCount)
+    ? STATE_FOCUS_GROUPS
+    : matchingStateFocusGroups(storyText)
+  for (const group of focusedGroups) {
+    plan.push({ role: 'auditor', focus: group, label: group.label })
   }
   return plan
 }

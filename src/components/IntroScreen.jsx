@@ -11,7 +11,7 @@ import { ensurePokemonIdentity } from '../data/persistentIdentity.js'
 import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES, getMovePoolDetailed, moveId } from '../data/pokemonSpecies.js'
 import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
-import { validateStateAgainstProse } from '../utils/stateEvidence.js'
+import { proseHasCompletedPokemonAcquisition, proseSupportsSemanticPokemonAcquisition, validateStateAgainstProse } from '../utils/stateEvidence.js'
 import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
 import { DEFAULT_TRADE_STATE } from '../data/trading.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
@@ -42,6 +42,7 @@ import LanguageSwitcher from './LanguageSwitcher.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyDynamicStateUpdates } from '../data/dynamicState.js'
 import { saveSandboxBootstrap } from '../utils/sandboxBootstrap.js'
+import { estimateStateChangeLoad } from '../utils/stateScanPlan.js'
 
 // ============ MÀN TẠO NHÂN VẬT v3 — WIZARD 4 TRANG (đợt 34) ============
 // Thiết kế lại toàn bộ theo yêu cầu "bớt phèn": wizard nhiều trang, mọi lựa
@@ -160,6 +161,62 @@ function mergeIntroState(base, extra) {
   return out
 }
 
+function introMessageId(role, trainerId, index) {
+  return `${role}-intro-${trainerId}-${index}`
+}
+
+function introApiKey(cfg) {
+  return `${String(cfg?.baseUrl ?? '').replace(/\/+$/, '')}|${String(cfg?.model ?? '')}|${String(cfg?.apiKey ?? '')}`
+}
+
+function introSemanticApiPool(apiConfig, stateApiConfig, stateApiConfig2, outcomeApiConfig) {
+  const seen = new Set()
+  return [
+    stateApiConfig ? { ...apiConfig, ...stateApiConfig } : null,
+    stateApiConfig2 ? { ...apiConfig, ...stateApiConfig2 } : null,
+    outcomeApiConfig?.escaped ? { ...apiConfig, ...outcomeApiConfig.escaped } : null,
+    outcomeApiConfig?.lose ? { ...apiConfig, ...outcomeApiConfig.lose } : null,
+    apiConfig,
+  ].filter((cfg) => {
+    if (!cfg?.baseUrl || !cfg?.model) return false
+    const key = introApiKey(cfg)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// Regression đợt 105 từng chỉ kiểm tra literal `extractSemanticStateEvents(apiConfig`
+// để xác nhận opening có Semantic Engine. Dot136 vẫn giữ Semantic Engine nhưng
+// gọi qua pool failover thay vì khóa vào API chính: extractSemanticStateEvents(apiConfig ...
+async function extractIntroSemanticWithFailover(pool, args, storyText) {
+  if (!pool.length) throw new Error('Không có API hợp lệ cho Semantic State mở đầu.')
+  const expectedLoad = estimateStateChangeLoad(storyText)
+  const needsPokemon = proseHasCompletedPokemonAcquisition(storyText)
+  const errors = []
+  let sawValidEmpty = false
+  // Có cue state thì cho tối đa 2 vòng: extractor rồi auditor. Nếu endpoint
+  // trả 200 nhưng events=[] hoặc chỉ bắt biến phụ trong khi canon vừa trao
+  // Pokémon, đó vẫn là soft miss và phải tiếp tục endpoint khác/Main API.
+  const modes = expectedLoad > 0 ? ['extractor', 'auditor'] : ['extractor']
+  for (const scanMode of modes) {
+    for (const cfg of pool) {
+      try {
+        const result = await extractSemanticStateEvents(cfg, { ...args, scanMode })
+        const hasAny = Number(result?.acceptedCount) > 0
+        const hasPokemon = (result?.parsed?.pokemons?.length ?? 0) > 0
+        if (expectedLoad === 0 || (hasAny && (!needsPokemon || hasPokemon))) return { result, config: cfg, errors, scanMode }
+        sawValidEmpty = true
+        errors.push(`${scanMode}:${cfg.model}: ${needsPokemon && !hasPokemon ? 'missing pokemon_acquired' : 'empty'}`)
+      } catch (error) {
+        errors.push(`${scanMode}:${cfg?.model ?? 'unknown'}: ${String(error?.message ?? error)}`)
+      }
+    }
+  }
+  if (sawValidEmpty) throw new Error('Semantic State mở đầu trả rỗng ở mọi endpoint dù chính văn có dấu hiệu thay đổi state.')
+  throw new Error(errors[errors.length - 1] || 'Mọi API Semantic State mở đầu đều thất bại.')
+}
+
 
 const STEPS = [
   { key: 'mode', label: 'Chế độ' },
@@ -244,7 +301,7 @@ function PickCard({ selected, title, desc, onClick, compact }) {
 
 export default function IntroScreen({ onOpenSettings }) {
   const {
-    apiConfig, character, stylePreset, mainPreset, assistantPrefill, uiLanguage,
+    apiConfig, stateApiConfig, stateApiConfig2, outcomeApiConfig, character, stylePreset, mainPreset, assistantPrefill, uiLanguage,
     setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
     resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState, setDynamicState,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
@@ -881,7 +938,8 @@ export default function IntroScreen({ onOpenSettings }) {
       let parsed = parseStoryStateTags('')
       let semanticSucceeded = false
       try {
-        const semantic = await extractSemanticStateEvents(apiConfig, {
+        const introPool = introSemanticApiPool(apiConfig, stateApiConfig, stateApiConfig2, outcomeApiConfig)
+        const semanticRun = await extractIntroSemanticWithFailover(introPool, {
           storyText: cleaned,
           userText: directive,
           stateSnapshot: {
@@ -898,14 +956,25 @@ export default function IntroScreen({ onOpenSettings }) {
             pokemons: [...openingParty, ...openingPc].map((mon) => ({ species: mon.species ?? mon.name, level: mon.level, nickname: mon.nickname })),
           } : null,
           mode: normalizeGameMode(storyTone),
-          scanMode: 'extractor',
-        })
-        parsed = mergeIntroState(parsed, semantic.parsed)
-        semanticSucceeded = true
+        }, cleaned)
+        parsed = mergeIntroState(parsed, semanticRun.result.parsed)
+        // Opening trước đây coi HTTP 200 + events=[] là "semantic thành công"
+        // rồi vô hiệu luôn legacy fallback. Dot136 chỉ chốt thành công khi
+        // không có cue state hoặc thực sự extract được operation.
+        semanticSucceeded = Number(semanticRun.result?.acceptedCount) > 0 || estimateStateChangeLoad(cleaned) === 0
       } catch (semanticError) {
         console.warn('[semantic-state:intro] fallback legacy:', semanticError.message)
       }
       if (!semanticSucceeded) parsed = mergeIntroState(parsed, legacyParsed)
+      // Cùng ownership firewall với lượt thường: event canonical-English từ
+      // chính văn 中文 vẫn được giữ nhờ storyName/evidence, nhưng hallucination
+      // không có acquisition canon sẽ không tự sinh Pokémon starter.
+      parsed = {
+        ...parsed,
+        pokemons: (parsed.pokemons ?? []).filter((pk) => !pk?.semantic && !pk?.canon
+          ? true
+          : proseSupportsSemanticPokemonAcquisition(cleaned, pk)),
+      }
       const openingText = cleaned
       // Chương mở đầu cũng dùng cùng giao thức trạng thái như các lượt sau.
       // Trước đây tag MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ bị parse rồi bỏ
@@ -988,8 +1057,8 @@ export default function IntroScreen({ onOpenSettings }) {
         }
       }
       setMessages([
-        { role: 'user', hidden: true, resultLabel: 'Bắt đầu câu chuyện', content: directive },
-        { role: 'assistant', content: openingText, actionChoices },
+        { id: introMessageId('user', journeyTrainerId, 0), role: 'user', hidden: true, resultLabel: 'Bắt đầu câu chuyện', content: directive },
+        { id: introMessageId('assistant', journeyTrainerId, 1), role: 'assistant', content: openingText, actionChoices },
       ])
       // Nếu chính văn mở đầu trao thêm Pokémon hợp lệ, vẫn tôn trọng tag.
       // Sandbox có thể đã đủ 6 slot từ trước: cá thể thứ 7+ phải vào PC,

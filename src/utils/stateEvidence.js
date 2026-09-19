@@ -345,6 +345,7 @@ const ACQUIRE = [
 const OWNERSHIP_ACQUIRE = [
   'đã mua', 'mua được', 'mua thành công', 'đã nhận', 'nhận được', 'nhận lấy', 'đón lấy',
   'đã tiếp nhận', 'tiếp nhận thành công', 'chuyển quyền sở hữu',
+  'received', 'obtained', 'accepted', 'was given', 'was handed', 'took ownership',
   'quyền sở hữu đã chuyển', 'đã sang tên', 'chuyển giao hoàn tất',
   '已经购买', '购买成功', '已经收到', '收到', '接过', '接收成功', '所有权转移', '完成过户', '转交完成',
   '领取', '领到', '收下', '正式拥有', '归你所有', '成为你的',
@@ -353,7 +354,8 @@ const OWNERSHIP_CONTEXT = [
   'poké ball', 'poke ball', 'quả bóng', 'quả cầu', 'pc', 'box',
   'storage system', 'giao dịch', 'thanh toán', 'quyền sở hữu',
   'sang tên', 'vào đội', 'bạn đồng hành',
-  '精灵球', '宝可球', '宝可梦球', '电脑', '盒子', '储存系统', '交易', '付款', '所有权', '队伍', '伙伴',
+  'pokemon', 'pokémon', 'poké ball', 'poke ball', 'team', 'party', 'partner', 'companion', 'ownership',
+  '精灵球', '宝可球', '宝可梦球', '宝可梦', '电脑', '盒子', '储存系统', '交易', '付款', '所有权', '队伍', '伙伴',
 ]
 const EXPLICIT_POKEMON_RECEIVE = [
   'nhận pokemon', 'nhận pokémon', 'nhận được pokemon', 'nhận được pokémon',
@@ -973,6 +975,67 @@ function proseSupportsItemChange(text, entry) {
  * nhiều câu. Nhánh liên câu cố ý yêu cầu ba mắt xích độc lập để không biến
  * lời hứa “sẽ gửi” hoặc một tin rao bán thành Pokémon thật trong save.
  */
+
+/**
+ * Cứu alias Pokémon khi Semantic Engine chuẩn hoá loài sang tên database
+ * (English) nhưng chính văn/evidence dùng tên bản địa. Đây KHÔNG phải mapper
+ * species: chỉ lấy lại cụm tên nằm sát một hành động sở hữu Pokémon đã hoàn tất,
+ * để ownership firewall vẫn kiểm tra canon hiển thị thay vì phụ thuộc model nhớ
+ * nhét details.storyName ở đúng field.
+ */
+export function inferPokemonAcquisitionStoryName(text, evidence = '') {
+  const sources = [String(evidence ?? ''), String(text ?? '')].filter(Boolean)
+  const patterns = [
+    /(?:^|[，,。！？；;])\s*([\p{Script=Han}A-Za-z0-9·.'’\-]{2,24})\s*(?:正式|主动|终于|就此|开心地|高兴地)?\s*成为(?:了)?(?:你|玩家|我)?(?:的)?(?:第一只|首只|初始)?宝可梦/u,
+    /(?:^|[，,。！？；;])\s*([\p{Script=Han}A-Za-z0-9·.'’\-]{2,24})\s*(?:正式|主动|终于|就此|开心地|高兴地)?\s*(?:加入|进入)(?:了)?(?:你|玩家|我)?(?:的)?队伍/u,
+    /(?:^|[，,。！？；;])\s*([\p{Script=Han}A-Za-z0-9·.'’\-]{2,24})\s*(?:正式|主动|终于|就此)?\s*成为(?:了)?(?:你|玩家|我)?(?:的)?(?:伙伴|同伴|搭档)/u,
+    /(?:收下|接过|领取|领到|获得|得到|接收)(?:了)?\s*([\p{Script=Han}A-Za-z0-9·.'’\-]{2,24}?)(?=[，,。！？；;\s]|作为|成为|并|$)/u,
+  ]
+  for (const source of sources) {
+    for (const pattern of patterns) {
+      const match = source.match(pattern)
+      let candidate = String(match?.[1] ?? '').trim()
+      if (!candidate) continue
+      candidate = candidate.replace(/(?:开心地|高兴地|主动地?|正式地?|终于|就此)$/u, '').trim()
+      // Loại đại từ/cụm quá chung. Tên Latin giữ nguyên; tên Han cần ít nhất 2 ký tự.
+      if (/^(?:它们?|他|她|这只|那只|宝可梦|精灵)$/u.test(candidate)) continue
+      if (!String(text ?? '').includes(candidate) && String(text ?? '').trim()) continue
+      if (proseSupportsPokemonAcquisition(text || source, candidate)) return candidate
+    }
+  }
+  return ''
+}
+
+/**
+ * Fallback cuối cho event semantic đã map species sang canonical English nhưng
+ * không giữ alias bản địa. Vẫn đòi chính văn + evidence đều có hành động sở hữu
+ * Pokémon đã hoàn tất và confidence cao; không mở cửa cho câu tương lai/phủ định.
+ */
+export function proseHasCompletedPokemonAcquisition(text) {
+  return storySentences(text).some((line) => (
+    (hasAny(line, ACQUIRE) || hasAny(line, EXPLICIT_POKEMON_RECEIVE)
+      || (hasAny(line, OWNERSHIP_ACQUIRE) && hasAny(line, OWNERSHIP_CONTEXT)))
+    && Boolean(completedActionClause(line, [...ACQUIRE, ...OWNERSHIP_ACQUIRE, ...EXPLICIT_POKEMON_RECEIVE]))
+  ))
+}
+
+export function proseSupportsSemanticPokemonAcquisition(text, entry) {
+  const species = entry?.species ?? entry?.name ?? ''
+  const storyName = entry?.details?.storyName ?? entry?.storyName ?? entry?.localName ?? ''
+  if (storyName && proseSupportsPokemonAcquisition(text, storyName)) return true
+  if (species && proseSupportsPokemonAcquisition(text, species)) return true
+
+  const inferred = inferPokemonAcquisitionStoryName(text, entry?.evidence ?? '')
+  if (inferred && proseSupportsPokemonAcquisition(text, inferred)) return true
+
+  const confidence = Number(entry?.confidence ?? 0)
+  if (confidence < 0.78) return false
+  const storyHasCompletedCue = proseHasCompletedPokemonAcquisition(text)
+  const evidence = String(entry?.evidence ?? '')
+  const evidenceHasCompletedCue = proseHasCompletedPokemonAcquisition(evidence)
+  return storyHasCompletedCue && evidenceHasCompletedCue
+}
+
 export function proseSupportsPokemonAcquisition(text, target) {
   if (!target) return false
   if (sentenceEvidence(text, target, ACQUIRE)) return true

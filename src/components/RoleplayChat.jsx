@@ -31,8 +31,8 @@ import { isHoldableItem, normalizeHeldItem, resolveHeldItemByName } from '../dat
 import ShopModal from './ShopModal.jsx'
 import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
-import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseSupportsPokemonAcquisition, reconcileMoneyDirectives, filterMoneyEntriesAgainstCanon, reconcileAppliedMoneyLedger } from '../utils/stateEvidence.js'
-import { buildStateScanPlan } from '../utils/stateScanPlan.js'
+import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseHasCompletedPokemonAcquisition, proseSupportsPokemonAcquisition, proseSupportsSemanticPokemonAcquisition, reconcileMoneyDirectives, filterMoneyEntriesAgainstCanon, reconcileAppliedMoneyLedger } from '../utils/stateEvidence.js'
+import { buildStateScanPlan, estimateStateChangeLoad } from '../utils/stateScanPlan.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
@@ -96,8 +96,9 @@ function gateSemanticOwnership(parsed, storyText, { reroll = false, priorText = 
     // được yêu cầu giữ exact mention trong details.storyName để ownership gate
     // vẫn kiểm được canon mà không phải bỏ firewall chống Pokémon hallucinated.
     const storyName = pk?.details?.storyName ?? pk?.storyName ?? species
-    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, storyName)
-      || (storyName !== species && proseSupportsPokemonAcquisition(storyText, species))
+    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, species)
+      || (storyName !== species && proseSupportsPokemonAcquisition(storyText, storyName))
+      || proseSupportsSemanticPokemonAcquisition(storyText, pk)
     // Reroll chỉ được tái hiện Pokémon có liên hệ trực tiếp với nhánh trước đó.
     // Nếu model tự bịa một loài hoàn toàn mới trong biến thể reroll, dù chính
     // câu nó vừa viết có nói "nhận được", app vẫn không cho side-effect đó
@@ -126,6 +127,19 @@ function gateSemanticOwnership(parsed, storyText, { reroll = false, priorText = 
       ...rejected,
     ],
   }
+}
+
+
+function semanticResultCoversStoryCues(result, storyText, appliedState = null) {
+  const expectedLoad = estimateStateChangeLoad(storyText)
+  if (expectedLoad <= 0) return true
+  if (Number(result?.acceptedCount) <= 0) return false
+  // Event "nhận Pokémon" là side effect cốt lõi. Một endpoint trả ITEM/MOVE
+  // nhưng bỏ Pokémon không được phép chặn failover chỉ vì acceptedCount > 0.
+  const needsPokemon = proseHasCompletedPokemonAcquisition(storyText)
+    && !(appliedState?.pokemons?.length)
+  if (needsPokemon && !(result?.parsed?.pokemons?.length)) return false
+  return true
 }
 
 function rerollPriorSupportsPokecenter(priorText) {
@@ -814,6 +828,10 @@ export default function RoleplayChat() {
   // provider; ledger giữa các pass ngăn áp trùng.
   const actionChoiceApiRoundRobinRef = useRef(0)
   const stateScanLocksRef = useRef(new Set())
+  // Dot136: một số save đã bị hụt Pokémon đầu tiên trước khi state commit.
+  // Chỉ thử tự cứu khi toàn bộ roster thật đang rỗng và transcript có canon
+  // acquisition rõ; Set tránh lặp request vô tận trong cùng phiên.
+  const emptyRosterRecoveryRef = useRef(new Set())
   // Đợt 114: các tác vụ AI phụ (state/action/item metadata) dùng chung một
   // scheduler theo provider. Item description chỉ lấy API đang rảnh; nếu tất
   // cả API phụ đều bận thì chờ slot được nhả rồi mới chạy, không chen ngang
@@ -872,7 +890,7 @@ export default function RoleplayChat() {
   // không có [[TAG]] bị mất toàn bộ state (đặc biệt Pokémon đầu tiên).
   // Helper này thử lần lượt các endpoint đã cấu hình và luôn cho phép API
   // chính làm fallback cuối, nhưng không lặp vô hạn hay để một lỗi chặn lượt.
-  async function runWithApiFailover(configs, task, { skipKeys = null } = {}) {
+  async function runWithApiFailover(configs, task, { skipKeys = null, acceptValue = null } = {}) {
     const pool = uniqueApiConfigs(configs).filter((cfg) => !skipKeys?.has(apiConfigKey(cfg)))
     if (!pool.length) throw new Error('Không có API hợp lệ để cập nhật state.')
     const failures = []
@@ -880,6 +898,12 @@ export default function RoleplayChat() {
     for (const cfg of pool) {
       try {
         const value = await withApiLease(cfg, () => task(cfg))
+        if (acceptValue && !acceptValue(value, cfg)) {
+          const softError = new Error('Semantic API trả rỗng dù chính văn có dấu hiệu thay đổi state; thử endpoint kế tiếp.')
+          lastError = softError
+          failures.push({ key: apiConfigKey(cfg), message: softError.message, soft: true })
+          continue
+        }
         return { value, config: cfg, failures }
       } catch (error) {
         lastError = error
@@ -2869,6 +2893,7 @@ export default function RoleplayChat() {
       let resolvedSemanticCfg = semanticPrimaryPool[0] ?? apiConfig
       if (semanticPrimaryPool.length) {
         try {
+          const expectedStateLoad = estimateStateChangeLoad(displayText)
           const primaryRun = await runWithApiFailover(semanticPrimaryPool, (cfg) => extractSemanticStateEvents(cfg, {
             storyText: displayText,
             userText: stateUserText,
@@ -2876,7 +2901,14 @@ export default function RoleplayChat() {
             appliedState: preAppliedState,
             mode: normalizeGameMode(storyTone),
             scanMode: 'extractor',
-          }))
+          }), {
+            // Dot136: HTTP 200 + events=[] không còn được coi là thành công nếu
+            // chính văn có cue state rõ. Một model phụ "im lặng" phải nhường
+            // cho endpoint kế tiếp/Main API thay vì làm cả lượt đứng biến.
+            acceptValue: expectedStateLoad > 0
+              ? (result) => semanticResultCoversStoryCues(result, displayText, preAppliedState)
+              : null,
+          })
           const semantic = primaryRun.value
           resolvedSemanticCfg = primaryRun.config
           for (const failure of primaryRun.failures) semanticFailedApiKeys.add(failure.key)
@@ -3231,7 +3263,14 @@ export default function RoleplayChat() {
                   mode: normalizeGameMode(storyTone),
                   scanMode: passSpec.role,
                   focus: passSpec.focus,
-                }), { skipKeys: semanticFailedApiKeys })
+                }), {
+                  skipKeys: semanticFailedApiKeys,
+                  // Nếu canon vừa nhận Pokémon mà ledger pass hiện tại chưa có,
+                  // HTTP 200 + event khác/empty vẫn phải nhường endpoint kế tiếp.
+                  acceptValue: estimateStateChangeLoad(displayText) > 0
+                    ? (result) => semanticResultCoversStoryCues(result, displayText, scanLedger)
+                    : null,
+                })
                 for (const failure of scanRun.failures) semanticFailedApiKeys.add(failure.key)
                 scanResult = scanRun.value
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
@@ -3370,10 +3409,11 @@ export default function RoleplayChat() {
 
   // Quét lại BIẾN THẬT từ chính văn đã lưu. Đây là luồng có validator và
   // ledger chống áp trùng; khác hoàn toàn bảng biến preset chỉ để trình bày.
-  async function rerollStateForMessage(messageIndex) {
+  async function rerollStateForMessage(messageIndex, options = {}) {
     const source = latestMessagesRef.current[messageIndex]
     if (!source || source.role !== 'assistant') throw new Error('Không tìm thấy lượt AI cần quét.')
-    const sourceKey = source.id || `assistant-legacy-${messageIndex}`
+    const sourceKey = source.id || `legacy-message-${messageIndex}`
+    const repairEmptyRoster = Boolean(options?.repairEmptyRoster)
     if (stateScanLocksRef.current.has(sourceKey)) {
       return { ok: true, message: 'Lượt này đang được hệ thống tự quét nền; hãy đợi vài giây rồi mở lại để xem kết quả.' }
     }
@@ -3384,11 +3424,23 @@ export default function RoleplayChat() {
     // Tin mới có ledger chính xác. Tin cũ lấy tag từ văn gốc làm mốc bảo thủ.
     const rawBaseline = compactStateManifest(parseStoryStateTags(source.meta?.raw ?? ''))
     let applied = source.meta?.appliedState ?? rawBaseline
+    const needsPokemonRepair = repairEmptyRoster
+      && !latestPlayerMonRef.current
+      && !(latestPartyRef.current ?? []).length
+      && !(latestPcBoxRef.current ?? []).length
+      && proseHasCompletedPokemonAcquisition(storyText)
+    // Save lỗi có thể đã ghi ledger "pokemons" dù roster thật không hề commit.
+    // Khi đang chạy repair chuyên biệt, bỏ riêng ledger acquisition để semantic
+    // event được phép tái áp; các ledger khác vẫn giữ nguyên chống trùng.
+    if (needsPokemonRepair && (applied?.pokemons?.length ?? 0) > 0) {
+      applied = { ...applied, pokemons: [] }
+    }
 
     const cfgs = semanticStateApiPool()
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
+      let repairedRoster = false
       // Đợt 118: “Quét lại biến thật” sửa được cả ledger MONEY đời cũ đã
       // commit sai. Ví dụ canon trừ 600 nhưng bản cũ ghi -98.800: hoàn lại
       // đúng phần chênh +98.200 rồi thay ledger bằng transaction canon -600.
@@ -3444,7 +3496,13 @@ export default function RoleplayChat() {
             mode: normalizeGameMode(storyTone),
             scanMode: passSpec.role,
             focus: passSpec.focus,
-          }))
+          }), {
+            acceptValue: needsPokemonRepair
+              ? (result) => (result?.parsed?.pokemons?.length ?? 0) > 0
+              : estimateStateChangeLoad(storyText) > 0
+                ? (result) => semanticResultCoversStoryCues(result, storyText, applied)
+                : null,
+          })
           scanFailoverAttempts = scanRun.failures.length
           scanResult = scanRun.value
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
@@ -3491,6 +3549,7 @@ export default function RoleplayChat() {
         }
         const report = applyParsedState(extra, messageIndex, storyText, sourceKey)
         const extraLedger = ledgerManifestFromApplyReport(extra, report)
+        if ((extraLedger.pokemons?.length ?? 0) > 0) repairedRoster = true
         const movedTo = resolveMoveLocation(extra, latestPlayerLocationRef.current)
         if (movedTo) {
           latestPlayerLocationRef.current = movedTo
@@ -3541,6 +3600,7 @@ export default function RoleplayChat() {
       } : message))
       return {
         ok: true,
+        repairedRoster,
         message: lines.length
           ? `Đã quét và xử lý ${lines.length} thay đổi. Xem danh sách bên dưới.`
           : 'Đã quét xong: không có thay đổi hợp lệ nào còn thiếu.',
@@ -3549,6 +3609,56 @@ export default function RoleplayChat() {
       stateScanLocksRef.current.delete(sourceKey)
     }
   }
+
+
+  // Dot136 — cứu save đã hụt Pokémon đầu tiên. Chỉ hoạt động khi active/party/PC
+  // đều rỗng, transcript có một acquisition đã hoàn tất, và sau đó không có
+  // ledger pokemon_removed. Đây là repair dữ liệu, không tự tạo Pokémon từ một
+  // encounter/battle đơn thuần (ví dụ Riolu đối thủ không kích hoạt cue này).
+  useEffect(() => {
+    if (!gameStarted || playerMon || (party ?? []).length || (pcBox ?? []).length) return
+    const transcript = messages ?? []
+    let candidateIndex = -1
+    for (let i = transcript.length - 1; i >= 0; i -= 1) {
+      const message = transcript[i]
+      if (message?.role !== 'assistant') continue
+      const story = message.meta?.evidenceText || message.content || ''
+      if (proseHasCompletedPokemonAcquisition(story)) {
+        candidateIndex = i
+        break
+      }
+    }
+    if (candidateIndex < 0) return
+    const candidate = transcript[candidateIndex]
+    const laterHasRecordedRemoval = transcript.slice(candidateIndex + 1).some((message) =>
+      (message?.meta?.appliedState?.pokemonRemovals?.length ?? 0) > 0,
+    )
+    if (laterHasRecordedRemoval) return
+    const sourceKey = candidate.id || `legacy-message-${candidateIndex}`
+    if (emptyRosterRecoveryRef.current.has(sourceKey)) return
+    emptyRosterRecoveryRef.current.add(sourceKey)
+
+    const attempt = async (retry = 0) => {
+      if (stateScanLocksRef.current.has(sourceKey)) {
+        if (retry < 4) setTimeout(() => { void attempt(retry + 1) }, 900)
+        else emptyRosterRecoveryRef.current.delete(sourceKey)
+        return
+      }
+      try {
+        const result = await rerollStateForMessage(candidateIndex, { repairEmptyRoster: true })
+        if (result?.repairedRoster) console.warn('[state-repair] đã phục hồi Pokémon sở hữu bị hụt từ transcript canon')
+      } catch (repairError) {
+        console.warn('[state-repair] không thể tự phục hồi roster:', repairError.message)
+        // Cho phép một lần thử lại ở render/reload sau thay vì khóa vĩnh viễn.
+        emptyRosterRecoveryRef.current.delete(sourceKey)
+      }
+    }
+    const timer = setTimeout(() => { void attempt(0) }, 700)
+    return () => clearTimeout(timer)
+  // Chỉ chạy lại khi roster/transcript thực sự đổi; API config được đọc mới nhất
+  // qua semanticStateApiPool ở thời điểm attempt.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameStarted, playerMon, party, pcBox, messages])
 
   function savePresetUiVariables(messageIndex, variables) {
     setMessages((currentMessages) => currentMessages.map((message, index) => index === messageIndex ? {

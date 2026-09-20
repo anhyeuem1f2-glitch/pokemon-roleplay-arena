@@ -93,8 +93,8 @@ export default function ApiSetup() {
         <small>
           Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS
           được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh
-          trình duyệt chặn mixed content. HTTP local/LAN không thể đi qua cầu nối. Nên ưu tiên HTTPS nếu
-          provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.
+          trình duyệt chặn mixed content. localhost/127.0.0.1/LAN luôn gọi trực tiếp từ trình duyệt và không
+          bao giờ đi qua server bridge. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.
         </small>
       </div>
 

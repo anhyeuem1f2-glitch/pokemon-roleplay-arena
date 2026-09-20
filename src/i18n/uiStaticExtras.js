@@ -3,7 +3,7 @@
 // already excludes those surfaces and only rewrites interface chrome.
 
 export const ZH_UI_EXTRAS = Object.freeze({
-  'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. HTTP local/LAN không thể đi qua cầu nối. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': '填写基础 Endpoint，不要在末尾加 /chat/completions（例如 https://.../v1 或 http://.../v1）。HTTPS 会直接请求；在 HTTPS 网页中使用公网 HTTP Endpoint 时，会自动通过服务器桥接，以避开浏览器的 mixed content 阻止。localhost/局域网 HTTP 无法通过服务器桥接。若 provider 支持，仍建议优先 HTTPS，因为 HTTP 在 bridge → provider 这一段不会加密。',
+  'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. localhost/127.0.0.1/LAN luôn gọi trực tiếp từ trình duyệt và không bao giờ đi qua server bridge. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': '填写基础 Endpoint，不要在末尾加 /chat/completions（例如 https://.../v1 或 http://.../v1）。HTTPS 会直接请求；在 HTTPS 网页中使用公网 HTTP Endpoint 时，会自动通过服务器桥接，以避开浏览器的 mixed content 阻止。localhost/127.0.0.1/局域网地址始终由当前浏览器直接访问，绝不会经过服务器 bridge。若 provider 支持，仍建议优先 HTTPS，因为 HTTP 在 bridge → provider 这一段不会加密。',
   'Mở lại bảng:': '重新打开面板：',
   'Bấm để tải ảnh lên (hoặc kéo-thả ảnh vào đây)': '点击上传图片（或将图片拖放到这里）',
   'Đang xử lý…': '正在处理…',
@@ -319,7 +319,7 @@ export const ZH_UI_EXTRAS = Object.freeze({
 })
 
 export const EN_UI_EXTRAS = Object.freeze({
-  'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. HTTP local/LAN không thể đi qua cầu nối. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': 'Enter the base endpoint without /chat/completions (for example https://.../v1 or http://.../v1). HTTPS is called directly; a public HTTP endpoint used from the HTTPS web app is automatically routed through the server bridge to avoid the browser mixed-content block. Local/LAN HTTP cannot go through the bridge. Prefer HTTPS when the provider supports it because HTTP leaves the bridge → provider hop unencrypted.',
+  'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. localhost/127.0.0.1/LAN luôn gọi trực tiếp từ trình duyệt và không bao giờ đi qua server bridge. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': 'Enter the base endpoint without /chat/completions (for example https://.../v1 or http://.../v1). HTTPS is called directly; a public HTTP endpoint used from the HTTPS web app is automatically routed through the server bridge to avoid the browser mixed-content block. localhost/127.0.0.1/LAN addresses are always called directly by the current browser and never sent through the server bridge. Prefer HTTPS when the provider supports it because HTTP leaves the bridge → provider hop unencrypted.',
   'Mở lại bảng:': 'Reopen panel:',
   'Bấm để tải ảnh lên (hoặc kéo-thả ảnh vào đây)': 'Click to upload an image (or drag and drop it here)',
   'Đang xử lý…': 'Processing…',

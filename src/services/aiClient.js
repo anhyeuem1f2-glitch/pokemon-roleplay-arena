@@ -30,29 +30,6 @@ import { buildSameLanguageInstruction, storyLanguageInfo } from '../i18n/storyLa
 // dính lỗi mạng/CORS mới tự chuyển sang cầu nối, rồi GHI NHỚ để các lượt sau
 // đi thẳng đường đã chạy được.
 const BRIDGE_PATH = '/api-bridge'
-// Đợt 68: nhớ qua CÁC PHIÊN (localStorage). Trước đây chỉ nhớ trong phiên
-// → lượt gọi ĐẦU TIÊN mỗi lần mở lại trang luôn đi đường trực tiếp, thất
-// bại, rồi mới rơi sang cầu nối — và lượt đó KHÔNG bật stream nên hay dính
-// lỗi 524 (Cloudflare cắt kết nối nếu 100s chưa thấy phản hồi).
-const BRIDGE_MEMO_KEY = 'trainer-arena:bridge-needed'
-function loadBridgeMemo() {
-  try {
-    const raw = localStorage.getItem(BRIDGE_MEMO_KEY)
-    return new Set(raw ? JSON.parse(raw) : [])
-  } catch { return new Set() }
-}
-const bridgeNeeded = loadBridgeMemo() // các baseUrl đã xác định phải đi qua cầu nối
-function rememberBridgeNeeded(baseUrl) {
-  bridgeNeeded.add(baseUrl)
-  try { localStorage.setItem(BRIDGE_MEMO_KEY, JSON.stringify([...bridgeNeeded])) } catch { /* ignore */ }
-}
-// null = chưa biết; false = host chưa deploy cầu nối (thiếu file cấu hình).
-let bridgeDeployed = null
-
-function bridgeAvailable() {
-  // Chỉ có trên bản deploy (localhost `npm run dev` không chạy edge function).
-  return typeof window !== 'undefined' && /^https?:/.test(window.location.origin)
-}
 
 function isLocalOrPrivateHttpHost(hostname) {
   const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
@@ -74,6 +51,55 @@ function isLocalOrPrivateHttpHost(hostname) {
     /^fe[89ab][0-9a-f]:/i.test(h) ||
     /^::ffff:(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(h)
   )
+}
+
+function isLocalOrPrivateEndpoint(targetUrl) {
+  try {
+    return isLocalOrPrivateHttpHost(new URL(targetUrl).hostname)
+  } catch {
+    return false
+  }
+}
+
+// Đợt 139: bridge nằm trên server nên TUYỆT ĐỐI không dùng cho localhost/LAN.
+// Dot138 từng có một nhánh fallback ghi nhầm endpoint local vào bridge memo:
+// browser nào dính memo đó sẽ bị 400 vĩnh viễn, trong khi browser mới vẫn gọi
+// trực tiếp được. Khi load, tự dọn các entry local/private cũ để chữa cache.
+const BRIDGE_MEMO_KEY = 'trainer-arena:bridge-needed'
+function persistBridgeMemo(set) {
+  try { localStorage.setItem(BRIDGE_MEMO_KEY, JSON.stringify([...set])) } catch { /* ignore */ }
+}
+function loadBridgeMemo() {
+  try {
+    const raw = localStorage.getItem(BRIDGE_MEMO_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    const all = Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []
+    const cleaned = all.filter((baseUrl) => !isLocalOrPrivateEndpoint(baseUrl))
+    if (cleaned.length !== all.length) persistBridgeMemo(new Set(cleaned))
+    return new Set(cleaned)
+  } catch { return new Set() }
+}
+const bridgeNeeded = loadBridgeMemo() // chỉ chứa endpoint public có thể bridge
+function forgetBridgeNeeded(baseUrl) {
+  if (!bridgeNeeded.delete(baseUrl)) return
+  persistBridgeMemo(bridgeNeeded)
+}
+function rememberBridgeNeeded(baseUrl) {
+  // Server bridge không thể nhìn thấy 127.0.0.1/LAN của thiết bị người chơi.
+  if (isLocalOrPrivateEndpoint(baseUrl)) {
+    forgetBridgeNeeded(baseUrl)
+    return
+  }
+  bridgeNeeded.add(baseUrl)
+  persistBridgeMemo(bridgeNeeded)
+}
+
+// null = chưa biết; false = host chưa deploy cầu nối (thiếu file cấu hình).
+let bridgeDeployed = null
+
+function bridgeAvailable() {
+  // Chỉ có trên bản deploy (localhost `npm run dev` không chạy edge function).
+  return typeof window !== 'undefined' && /^https?:/.test(window.location.origin)
 }
 
 // Trang production chạy HTTPS. Browser sẽ chặn fetch trực tiếp tới HTTP công
@@ -120,8 +146,10 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
       // baseUrl đã biết bị CORS chặn HOẶC endpoint là HTTP public trên
       // trang HTTPS → đi thẳng cầu nối. Trường hợp thứ hai tránh mixed-content
       // block của browser, vốn xảy ra trước khi request chạm provider.
+      const localOrPrivate = isLocalOrPrivateEndpoint(url)
+      if (localOrPrivate) forgetBridgeNeeded(baseUrl)
       const forceBridge = shouldForceServerBridge(url)
-      const useBridge = (bridgeNeeded.has(baseUrl) || forceBridge) && bridgeAvailable()
+      const useBridge = !localOrPrivate && (bridgeNeeded.has(baseUrl) || forceBridge) && bridgeAvailable()
       const res = useBridge ? await fetchViaBridge(url, init) : await fetch(url, init)
       if (useBridge && res.ok) rememberBridgeNeeded(baseUrl)
       // 404 = sai route → thử biến thể kế tiếp (không tốn token).
@@ -132,7 +160,9 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
       // Lỗi mạng/CORS ở lần gọi TRỰC TIẾP → thử lại qua cầu nối máy chủ.
       // HTTP public trên trang HTTPS đã đi bridge ngay ở nhánh trên nên không
       // cần ném một request mixed-content vô ích trước.
-      if (bridgeAvailable() && !bridgeNeeded.has(baseUrl) && !shouldForceServerBridge(url)) {
+      const localOrPrivate = isLocalOrPrivateEndpoint(url)
+      if (localOrPrivate) forgetBridgeNeeded(baseUrl)
+      if (!localOrPrivate && bridgeAvailable() && !bridgeNeeded.has(baseUrl) && !shouldForceServerBridge(url)) {
         try {
           const res = await fetchViaBridge(url, init)
           // Cầu nối CHƯA ĐƯỢC DEPLOY: host trả về trang 404/HTML của SPA chứ
@@ -153,6 +183,14 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
       lastErr = netErr
       if (!isLast) continue
       const origin = typeof window !== 'undefined' ? window.location.origin : 'trang web này'
+      if (localOrPrivate) {
+        throw new Error(
+          `Không gọi được API local/LAN trực tiếp: ${netErr.message}. ` +
+          `Endpoint ${url} chỉ tồn tại trên thiết bị/mạng của bạn nên Trainer Arena không đưa nó qua server bridge. ` +
+          `Hãy bảo đảm proxy local đang chạy trên đúng thiết bị, cho phép CORS từ ${origin}, và trình duyệt được phép truy cập mạng cục bộ. ` +
+          `Nếu một trình duyệt khác dùng được cùng URL thì hãy tải lại trang sau Dot139; cache bridge sai của Dot138 sẽ được tự dọn.`
+        )
+      }
       throw new Error(
         `Không gọi được tới API (lỗi mạng/CORS): ${netErr.message}. ` +
         `Kiểm tra: (1) Base URL có đúng dạng http(s)://.../v1 không; ` +

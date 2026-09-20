@@ -1,3 +1,40 @@
+## Đợt 139 — sửa proxy local `127.0.0.1` bị bridge cache sai (20/09/2026)
+
+### Báo lỗi thực tế
+
+Người dùng Trung Quốc dùng proxy OpenAI-compatible local tại `http://127.0.0.1:8050/v1`. Trên một browser nút tải model báo `400`, trong khi mở cùng endpoint bằng browser dự phòng lại tải được **22 model**.
+
+### Root cause
+
+Dot138 cố hỗ trợ HTTP public qua `/api-bridge`, nhưng nhánh fallback vẫn có thể thử bridge sau khi direct fetch tới localhost/LAN lỗi. Bridge phía server cố ý chặn private host nên trả `400`, nhưng client lại **ghi nhớ baseUrl local vào `trainer-arena:bridge-needed`**. Từ đó browser đã dính memo luôn gửi `127.0.0.1` qua server bridge và thất bại, còn browser mới chưa có cache vẫn gọi local trực tiếp nên hoạt động.
+
+### Sửa trong Dot139
+
+- `localhost`, `127.0.0.1`, LAN/private IP luôn là **direct-only**: không bao giờ gửi qua server bridge.
+- Tự dọn các local/private Base URL bị lưu nhầm trong `trainer-arena:bridge-needed` từ Dot138; người dùng chỉ cần reload sau khi deploy Dot139, không cần xóa cache thủ công.
+- Khi direct local proxy lỗi, app báo đúng nguyên nhân cần kiểm tra: proxy có đang chạy trên thiết bị đó, CORS, quyền truy cập mạng cục bộ của browser.
+- HTTP **public** trên trang HTTPS vẫn tiếp tục dùng server bridge như Dot138; không làm mất tương thích provider HTTP công khai.
+- UI API VI/EN/ZH nói rõ localhost/127.0.0.1/LAN được gọi trực tiếp từ browser và không đi bridge.
+
+### Regression Dot139
+
+- `test-dot139.mjs`: **6/6 PASS** (dọn stale memo 127.0.0.1, direct-only localhost/LAN, direct failure không thử bridge, HTTP public vẫn bridge, source guard, UI i18n).
+- **38 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–139`).
+- `78/78` file `src/**/*.js` + `2/2` bridge/worker `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript transpile parser.
+- `npm ci` tiếp tục timeout trong môi trường bàn giao nên chưa chạy lại `npm run lint/build`.
+
+### File runtime cần cập nhật GitHub sau đợt 139
+
+- `src/services/aiClient.js`
+- `src/components/ApiSetup.jsx`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot139.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 138 — hỗ trợ API HTTP công khai qua server bridge (20/09/2026)
 
 ### Báo lỗi thực tế

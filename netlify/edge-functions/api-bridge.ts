@@ -12,7 +12,9 @@
 // AN TOÀN:
 // - Chỉ nhận request có Origin đúng bằng chính site này (chặn người ngoài
 //   mượn làm proxy mở).
-// - Chỉ cho phép đích https.
+// - Chỉ cho phép đích HTTP/HTTPS công khai; chặn local/LAN.
+// - HTTP chỉ để tương thích proxy cũ; ưu tiên HTTPS vì bridge → provider sẽ
+//   không được mã hoá khi dùng HTTP.
 // - KHÔNG ghi log, KHÔNG lưu API key: key chỉ đi xuyên qua trong bộ nhớ và
 //   được chuyển thẳng tới đích người dùng tự chọn.
 
@@ -64,27 +66,60 @@ export default async (request: Request): Promise<Response> => {
       headers: { 'Content-Type': 'application/json', ...corsHeaders(selfOrigin) },
     })
   }
-  if (targetUrl.protocol !== 'https:') {
-    return new Response(JSON.stringify({ error: { message: 'Chỉ hỗ trợ đích https.' } }), {
+  const isPrivateHost = (host: string) => {
+    const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '')
+    return (
+      h === 'localhost' || h === 'localhost.' || h === '0.0.0.0' || /^0\./.test(h) || /^127\./.test(h) || h === '::1' ||
+      h.endsWith('.local') || h.endsWith('.internal') || /^10\./.test(h) ||
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) || /^192\.168\./.test(h) ||
+      /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+      /^(?:fc|fd)[0-9a-f]{2}:/i.test(h) || /^fe[89ab][0-9a-f]:/i.test(h) ||
+      /^::ffff:(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(h)
+    )
+  }
+  const targetError = (url: URL) => {
+    if (!['http:', 'https:'].includes(url.protocol)) return 'Chỉ hỗ trợ đích http hoặc https.'
+    if (url.username || url.password) return 'Không cho phép thông tin đăng nhập nằm trực tiếp trong URL.'
+    if (isPrivateHost(url.hostname)) return 'Đích nội bộ/local không được phép đi qua cầu nối.'
+    return ''
+  }
+  const problem = targetError(targetUrl)
+  if (problem) {
+    return new Response(JSON.stringify({ error: { message: problem } }), {
       status: 400,
       headers: { 'Content-Type': 'application/json', ...corsHeaders(selfOrigin) },
     })
   }
-  // Chặn địa chỉ nội bộ (SSRF cơ bản).
-  const host = targetUrl.hostname
-  if (
-    host === 'localhost' ||
-    host === '127.0.0.1' ||
-    host.endsWith('.local') ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^169\.254\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
-  ) {
-    return new Response(JSON.stringify({ error: { message: 'Đích không được phép.' } }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders(selfOrigin) },
-    })
+
+  const fetchPublicTarget = async (startUrl: URL, init: RequestInit, maxRedirects = 4) => {
+    let current = startUrl
+    let requestInit: RequestInit = { ...init }
+    for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      const currentProblem = targetError(current)
+      if (currentProblem) throw new Error(currentProblem)
+      const upstream = await fetch(current.toString(), { ...requestInit, redirect: 'manual' })
+      if (![301, 302, 303, 307, 308].includes(upstream.status)) return upstream
+      const location = upstream.headers.get('location')
+      if (!location) return upstream
+      if (hop === maxRedirects) throw new Error('Đích chuyển hướng quá nhiều lần.')
+      const next = new URL(location, current)
+      const redirectProblem = targetError(next)
+      if (redirectProblem) throw new Error(`Chuyển hướng bị chặn: ${redirectProblem}`)
+      if (next.origin !== current.origin) {
+        const headers = new Headers(requestInit.headers || {})
+        headers.delete('authorization')
+        headers.delete('x-api-key')
+        requestInit = { ...requestInit, headers }
+      }
+      const method = String(requestInit.method || 'GET').toUpperCase()
+      if (upstream.status === 303 || ((upstream.status === 301 || upstream.status === 302) && method === 'POST')) {
+        const headers = new Headers(requestInit.headers || {})
+        headers.delete('content-type')
+        requestInit = { ...requestInit, method: 'GET', body: undefined, headers }
+      }
+      current = next
+    }
+    throw new Error('Đích chuyển hướng quá nhiều lần.')
   }
 
   // Chuyển tiếp: giữ nguyên method, body và thông tin xác thực của người dùng.
@@ -98,7 +133,7 @@ export default async (request: Request): Promise<Response> => {
   forwardHeaders.set('accept', 'application/json')
 
   try {
-    const upstream = await fetch(targetUrl.toString(), {
+    const upstream = await fetchPublicTarget(targetUrl, {
       method: request.method,
       headers: forwardHeaders,
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer(),

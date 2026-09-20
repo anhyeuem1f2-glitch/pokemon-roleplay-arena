@@ -91,9 +91,10 @@ export default function ApiSetup() {
           placeholder="https://api.openai.com/v1"
         />
         <small>
-          Endpoint gốc, không kèm /chat/completions ở cuối (thường có dạng https://.../v1). Nếu proxy
-          của bạn không cho trình duyệt gọi thẳng (lỗi CORS), trang sẽ TỰ chuyển tiếp qua máy chủ —
-          bạn không phải cấu hình gì thêm.
+          Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS
+          được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh
+          trình duyệt chặn mixed content. HTTP local/LAN không thể đi qua cầu nối. Nên ưu tiên HTTPS nếu
+          provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.
         </small>
       </div>
 

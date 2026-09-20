@@ -54,6 +54,43 @@ function bridgeAvailable() {
   return typeof window !== 'undefined' && /^https?:/.test(window.location.origin)
 }
 
+function isLocalOrPrivateHttpHost(hostname) {
+  const h = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  return (
+    h === 'localhost' ||
+    h === 'localhost.' ||
+    h === '0.0.0.0' ||
+    /^0\./.test(h) ||
+    /^127\./.test(h) ||
+    h === '::1' ||
+    h.endsWith('.local') ||
+    h.endsWith('.internal') ||
+    /^10\./.test(h) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(h) ||
+    /^192\.168\./.test(h) ||
+    /^169\.254\./.test(h) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(h) ||
+    /^(?:fc|fd)[0-9a-f]{2}:/i.test(h) ||
+    /^fe[89ab][0-9a-f]:/i.test(h) ||
+    /^::ffff:(?:0\.|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/i.test(h)
+  )
+}
+
+// Trang production chạy HTTPS. Browser sẽ chặn fetch trực tiếp tới HTTP công
+// khai dưới dạng mixed content trước cả CORS. Với endpoint HTTP public, bỏ qua
+// lần gọi trực tiếp vô ích và đi thẳng qua /api-bridge (server → provider).
+// Localhost/LAN không được đưa qua bridge vì bridge nằm trên server, không thể
+// nhìn thấy mạng nội bộ của người chơi và cũng không được phép SSRF vào đó.
+function shouldForceServerBridge(targetUrl) {
+  if (typeof window === 'undefined' || window.location?.protocol !== 'https:') return false
+  try {
+    const url = new URL(targetUrl)
+    return url.protocol === 'http:' && !isLocalOrPrivateHttpHost(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 async function fetchViaBridge(targetUrl, init) {
   const headers = new Headers(init.headers || {})
   headers.set('x-target-url', targetUrl)
@@ -80,16 +117,22 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
     const url = candidates[i]
     const isLast = i === candidates.length - 1
     try {
-      // baseUrl này đã biết là bị CORS chặn → đi thẳng cầu nối, khỏi thử lại.
-      const useBridge = bridgeNeeded.has(baseUrl) && bridgeAvailable()
+      // baseUrl đã biết bị CORS chặn HOẶC endpoint là HTTP public trên
+      // trang HTTPS → đi thẳng cầu nối. Trường hợp thứ hai tránh mixed-content
+      // block của browser, vốn xảy ra trước khi request chạm provider.
+      const forceBridge = shouldForceServerBridge(url)
+      const useBridge = (bridgeNeeded.has(baseUrl) || forceBridge) && bridgeAvailable()
       const res = useBridge ? await fetchViaBridge(url, init) : await fetch(url, init)
+      if (useBridge && res.ok) rememberBridgeNeeded(baseUrl)
       // 404 = sai route → thử biến thể kế tiếp (không tốn token).
       if (res.status === 404 && !isLast) continue
       endpointMemo.set(memoKey, url)
       return { res, url }
     } catch (netErr) {
       // Lỗi mạng/CORS ở lần gọi TRỰC TIẾP → thử lại qua cầu nối máy chủ.
-      if (bridgeAvailable() && !bridgeNeeded.has(baseUrl)) {
+      // HTTP public trên trang HTTPS đã đi bridge ngay ở nhánh trên nên không
+      // cần ném một request mixed-content vô ích trước.
+      if (bridgeAvailable() && !bridgeNeeded.has(baseUrl) && !shouldForceServerBridge(url)) {
         try {
           const res = await fetchViaBridge(url, init)
           // Cầu nối CHƯA ĐƯỢC DEPLOY: host trả về trang 404/HTML của SPA chứ
@@ -112,7 +155,7 @@ async function fetchWithEndpointFallback(baseUrl, path, init) {
       const origin = typeof window !== 'undefined' ? window.location.origin : 'trang web này'
       throw new Error(
         `Không gọi được tới API (lỗi mạng/CORS): ${netErr.message}. ` +
-        `Kiểm tra: (1) Base URL có đúng dạng https://.../v1 không; ` +
+        `Kiểm tra: (1) Base URL có đúng dạng http(s)://.../v1 không; ` +
         `(2) proxy có cho phép gọi từ trình duyệt (CORS) tại ${origin} không — ` +
         `nhiều proxy chạy được trong SillyTavern vì ST gọi từ máy chủ, còn web thì bị trình duyệt chặn nếu proxy thiếu header Access-Control-Allow-Origin. ` +
         (bridgeDeployed === false
@@ -195,7 +238,8 @@ async function chatCompletionCore(config, messages, options = {}) {
 
   // Chỉ bật stream khi ĐI QUA CẦU NỐI (nơi có giới hạn 40s). Gọi trực tiếp
   // giữ nguyên cách cũ để không đụng vào những proxy không hỗ trợ stream.
-  const willUseBridge = bridgeNeeded.has(baseUrl) && bridgeAvailable()
+  const firstCandidate = endpointCandidates(baseUrl, 'chat/completions')[0]
+  const willUseBridge = (bridgeNeeded.has(baseUrl) || shouldForceServerBridge(firstCandidate)) && bridgeAvailable()
   const { res, url } = await fetchWithEndpointFallback(baseUrl, 'chat/completions', {
     method: 'POST',
     headers: {
@@ -424,17 +468,16 @@ export async function embedTexts(config, texts) {
   const { baseUrl, apiKey, model } = config ?? {}
   if (!baseUrl || !model) throw new Error('Thiếu Base URL hoặc Model của API embedding.')
   if (!texts?.length) return []
-  const url = `${baseUrl.replace(/\/+$/, '')}/embeddings`
   let res
   try {
-    res = await fetch(url, {
+    ;({ res } = await fetchWithEndpointFallback(baseUrl, 'embeddings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({ model, input: texts }),
-    })
+    }))
   } catch (networkErr) {
     throw new Error(`Không gọi được API embedding (lỗi mạng/CORS): ${networkErr.message}`)
   }
@@ -486,10 +529,9 @@ export async function rerankDocs(config, query, documents, topN) {
   const { baseUrl, apiKey, model } = config ?? {}
   if (!baseUrl || !model) throw new Error('Thiếu Base URL hoặc Model của API rerank.')
   if (!documents?.length) return []
-  const url = `${baseUrl.replace(/\/+$/, '')}/rerank`
   let res
   try {
-    res = await fetch(url, {
+    ;({ res } = await fetchWithEndpointFallback(baseUrl, 'rerank', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -501,7 +543,7 @@ export async function rerankDocs(config, query, documents, topN) {
         documents,
         top_n: Math.min(topN ?? documents.length, documents.length),
       }),
-    })
+    }))
   } catch (networkErr) {
     throw new Error(`Không gọi được API rerank (lỗi mạng/CORS): ${networkErr.message}`)
   }

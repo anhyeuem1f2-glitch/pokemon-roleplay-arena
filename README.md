@@ -1,3 +1,42 @@
+## Đợt 138 — hỗ trợ API HTTP công khai qua server bridge (20/09/2026)
+
+### Báo lỗi thực tế
+
+Người dùng Trung Quốc báo một API khuyến mãi chỉ có `http://` trước đây dùng được trong công cụ khác nhưng Trainer Arena production chỉ chấp nhận `https://`.
+
+### Nguyên nhân đã xác định
+
+Đây **không phải regression do Dot133–137**. Production chạy trên `https://...workers.dev`, nên trình duyệt chặn request từ trang HTTPS tới endpoint HTTP công khai dưới dạng **mixed content** trước cả CORS. App có `/api-bridge` từ đợt 56–57 để vượt CORS, nhưng bridge lại hard-code chỉ cho `https:` (`targetUrl.protocol !== 'https:'`). Vì vậy đường direct bị browser chặn, còn đường fallback server lại tự từ chối HTTP.
+
+### Sửa trong Dot138
+
+- `aiClient.js`: khi trang đang chạy HTTPS và Base URL là **HTTP công khai**, bỏ qua direct fetch bị mixed-content và đi thẳng qua `/api-bridge`. HTTPS vẫn ưu tiên gọi trực tiếp như cũ.
+- Cloudflare/Workers bridge (`functions/api-bridge.js`) và Netlify bridge (`netlify/edge-functions/api-bridge.ts`) chấp nhận **HTTP hoặc HTTPS công khai**.
+- Bridge vẫn chặn localhost/LAN/private IP, URL chứa username/password và kiểm tra lại từng redirect; redirect sang private network bị chặn. Khi redirect đổi origin, bridge bỏ `Authorization`/`x-api-key` để tránh rò credential.
+- `embeddings` và `rerank` dùng chung transport bridge-capable thay vì fetch trực tiếp, nên endpoint HTTP hoạt động nhất quán ở cả main API và memory APIs.
+- Cài đặt API giải thích rõ HTTP public được bridge tự động; UI Trung/Anh có bản dịch offline tương ứng. HTTP chỉ là compatibility fallback: nếu provider có HTTPS thì vẫn nên dùng HTTPS vì đoạn bridge → provider của HTTP không được mã hoá.
+
+### Regression Dot138
+
+- `test-dot138.mjs`: **8/8 PASS** (HTTP public bridge, private/LAN block, redirect SSRF guard, forced bridge từ HTTPS page, embedding/rerank transport, Netlify parity, UI i18n).
+- **37 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–138`).
+- `78/78` file `src/**/*.js` + `2/2` bridge/worker `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript CLI; Netlify bridge `.ts` parse PASS.
+- `npm ci` trong môi trường bàn giao bị timeout nên chưa chạy lại `npm run lint/build`.
+
+### File runtime cần cập nhật GitHub sau đợt 138
+
+- `functions/api-bridge.js`
+- `netlify/edge-functions/api-bridge.ts`
+- `src/services/aiClient.js`
+- `src/components/ApiSetup.jsx`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot138.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 137 — hotfix crash `gameStarted is not defined` sau Dot136 (19/09/2026)
 
 ### Lỗi thực tế

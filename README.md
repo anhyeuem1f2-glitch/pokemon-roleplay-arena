@@ -1,3 +1,46 @@
+## Đợt 140 — cứu battle tiếng Trung + nối lại trần level Legendary 120/150/200 (21/09/2026)
+
+### Báo lỗi thực tế
+
+Người dùng Trung Quốc có chính văn đi tới cảnh Pokémon **rõ ràng phát động thách đấu** (`发起了挑战`, `摆出战斗姿态`...) nhưng không xuất hiện Poké Ball/BattleModal. Đồng thời khi soi live battle path, bảng Legendary tier vẫn còn `120/150/200` trong `bossTiers.js` nhưng một số nhánh trong `RoleplayChat.jsx` lại clamp level về `100` trước khi gọi `buildMonSmart()`, nên trần tier cao hơn 100 không còn được tôn trọng đầy đủ ở story battle.
+
+### Root cause
+
+- Battle trigger/gate chủ yếu nhận cue VI/EN. Chính văn 中文 có thể bị model quên `[[BATTLE]]`; app không có deterministic repair nên cả cảnh trôi qua như văn thường.
+- `battleOwnership`, `detectTrainerBattle`, `detectBattleOpponentSpecies` thiếu cue 中文 nên cảnh hợp lệ dễ bị bỏ hoặc không resolve được đúng context.
+- Tên Pokémon 中文 như `肯泰罗`, `烈空坐`, `利欧路` không trùng canonical English trong Pokédex runtime. Khi battle mở mà detector local không tìm thấy species, app có thể fallback ecology và sinh sai đối thủ.
+- Một số nhánh story battle vẫn dùng `Math.min(100, ...)`, vô tình phủ định trần Legendary đã thiết kế từ các đợt cũ.
+
+### Sửa trong Dot140
+
+- Thêm deterministic battle-marker repair đa ngôn ngữ: nếu chính văn VI/EN/ZH có setup chiến đấu rõ, trận thuộc người chơi và chưa có kết quả hoàn tất, app tự chèn `[[BATTLE]]` khi model quên marker.
+- Bổ sung cue 中文 cho ownership/trainer/wild/active-vs-spectator để không nhầm trận NPC với trận của người chơi.
+- Khi chính văn 中文 dùng tên Pokémon bản địa và detector canonical không resolve được, lúc người chơi mở battle app gọi **một resolver AI cực ngắn** để đổi đúng tên bản địa -> canonical English Showdown; chỉ dùng khi fallback thật sự cần, tránh random sai đối thủ.
+- `BATTLE_INSTRUCTION` nhấn mạnh dù chính văn là 简体中文 vẫn phải giữ nguyên machine marker `[[BATTLE]]`.
+- Story battle không còn clamp mọi Pokémon về 100 trước `buildMonSmart()`. Trần thực tế trở lại theo `BOSS_TIERS`: low `120`, mid `150`, high `200`; Pokémon thường vẫn cap `100`.
+- Không thay đổi việc `wildLevel()` tự sinh level nền theo khu vực. `120/150/200` là **trần** theo tier, không có nghĩa mọi Legendary tự động spawn đúng max level.
+
+### Regression Dot140
+
+- `test-dot140.mjs`: **9/9 PASS**.
+- **39 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–140`).
+- `80` file `.js` trong `src/functions/worker` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript JSX parser.
+- `npm ci` chưa chạy lại trong môi trường bàn giao; vì vậy chưa xác nhận `npm run lint/build` ở đây.
+
+### File runtime cần cập nhật GitHub sau đợt 140
+
+- `src/components/RoleplayChat.jsx`
+- `src/utils/battleOwnership.js`
+- `src/data/storyScenes.js`
+- `src/data/pokemonSpecies.js`
+- `src/utils/promptBuilder.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot140.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 139 — sửa proxy local `127.0.0.1` bị bridge cache sai (20/09/2026)
 
 ### Báo lỗi thực tế

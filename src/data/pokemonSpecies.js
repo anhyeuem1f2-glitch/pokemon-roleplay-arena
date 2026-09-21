@@ -1077,11 +1077,12 @@ const BATTLE_ACTIVE_CUES = [
   'bước ra sân', 'lao ra sân', 'đối thủ', 'đối phương', 'pokemon đối phương',
   'pokémon đối phương', 'sẽ dùng', 'chọn dùng', 'cử ra', 'triệu hồi', 'battle begins',
   'xuất hiện giữa sân', 'xuất hiện trên sân', 'hiện ra giữa sân', 'hiện ra trên sân', 'sent out', 'sends out', 'entered the field',
+  '出战', '派出', '放出', '登场', '进入战场', '对手', '对方', '发起挑战', '发动攻击', '摆出战斗姿态',
 ]
 const BATTLE_SPECTATOR_CUES = [
   'khán đài', 'khán giả', 'đứng xem', 'ngồi xem', 'xem trận', 'cổ vũ', 'đứng ngoài',
   'ngoài sân', 'bên ngoài sân', 'trong tay', 'trên vai', 'ôm trong lòng', 'theo dõi trận',
-  'spectator', 'watching from', 'in the stands',
+  'spectator', 'watching from', 'in the stands', '旁观', '观战', '观众席', '站在一旁', '看着对战', '看着战斗',
 ]
 
 function battleMentionScore(lower, at, nameLen) {
@@ -1097,7 +1098,7 @@ function battleMentionScore(lower, at, nameLen) {
   // Cụm ngay sát tên hỗ trợ văn không có dấu câu, nhưng không cho cue của
   // câu spectator kế tiếp làm bẩn mention active trước đó.
   const tight = lower.slice(Math.max(start, at - 55), Math.min(end, at + nameLen + 75))
-  if (/\b(?:vs\.?|versus)\b|đánh với|đấu với|giao đấu với|đối đầu với/.test(tight)) score += 8
+  if (/\b(?:vs\.?|versus)\b|đánh với|đấu với|giao đấu với|đối đầu với|对战|交战|迎战|挑战/.test(tight)) score += 8
   score += Math.min(5, (at / Math.max(1, lower.length)) * 5)
   return score
 }

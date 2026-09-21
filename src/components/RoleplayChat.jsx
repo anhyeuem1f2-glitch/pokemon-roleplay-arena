@@ -56,6 +56,7 @@ import { envFromWeather } from '../data/battleEnvironments.js'
 import { buildFestivalLine } from '../data/festivals.js'
 import { buildCanonNote } from '../services/wikiLookup.js'
 import { buildModeRulesNote, legendaryAccess, normalizeGameMode } from '../data/gameModes.js'
+import { getBossTier } from '../data/bossTiers.js'
 import { restoreBranchStateCheckpoint, restoreTurnCheckpoint, saveBranchStateCheckpoint, saveTurnCheckpoint } from '../utils/saveManager.js'
 import { applyWorldDirectives, buildWorldProgressNote, directorPriority } from '../data/worldProgress.js'
 import { addCollectionAward } from '../data/pokemonLife.js'
@@ -162,7 +163,56 @@ function gatePokecenterInteraction(parsed, storyText, { reroll = false, priorTex
     : { ...parsed, pokecenter: null, _rejectedPokecenter: parsed.pokecenter }
 }
 
-const STRONG_BATTLE_CUE_RE = /(xuất\s*trận|ra\s*sân|tung\s+ra|sent\s+out|thách\s*đấu|khiêu\s*chiến|giao\s*đấu|đấu\s+pokemon|đấu\s+pokémon|chiến\s*đấu|bắt\s*đầu\s+trận|trận\s+đấu\s+bắt\s*đầu|lao\s+(?:vào|tới)|tấn\s*công|đánh\s+(?:nó|hắn|cậu|cô|pok[eé]mon|trận)|attack(?:ed|s)?|battle\s+begins?|wild\s+pokemon|wild\s+pokémon|pok[eé]mon\s+hoang|hoang\s+dã)/iu
+const STRONG_BATTLE_CUE_RE = /(xuất\s*trận|ra\s*sân|tung\s+ra|sent\s+out|thách\s*đấu|khiêu\s*chiến|giao\s*đấu|đấu\s+pokemon|đấu\s+pokémon|chiến\s*đấu|bắt\s*đầu\s+trận|trận\s+đấu\s+bắt\s+đầu|lao\s+(?:vào|tới)|tấn\s*công|đánh\s+(?:nó|hắn|cậu|cô|pok[eé]mon|trận)|attack(?:ed|s)?|battle\s+begins?|wild\s+pokemon|wild\s+pokémon|pok[eé]mon\s+hoang|hoang\s+dã|发起(?:了)?挑战|向(?:你|玩家|主角)挑战|接受(?:了)?挑战|进入(?:了)?战斗|开始(?:了)?战斗|战斗(?:正式)?开始|准备(?:开始)?战斗|摆出(?:了)?战斗姿态|迎战|应战|出战|派出(?:了)?|放出(?:了)?|野生宝可梦|野生精灵|发动(?:了)?攻击|发起(?:了)?攻击|冲(?:向|了)|扑(?:向|了))/iu
+
+// Dot140: nếu model viết bằng 中文/English mà quên machine marker, app tự cứu
+// một battle setup RÕ RÀNG thay vì để cả cảnh chiến đấu trôi qua như văn thường.
+// Chỉ sửa khi trận thuộc người chơi và chưa có câu kết quả rõ ràng để tránh
+// mở lại một trận đã được kể xong trong hồi tưởng.
+const BATTLE_RESULT_CUE_RE = /(đã\s+thắng|chiến\s+thắng|bị\s+đánh\s+bại|đã\s+thua|gục\s+ngã|mất\s+khả\s+năng\s+chiến\s+đấu|battle\s+(?:was\s+)?won|defeated|fainted|victory|取得(?:了)?胜利|赢得(?:了)?.{0,12}(?:战斗|对战)|输掉(?:了)?.{0,12}(?:战斗|对战)|被击败|失去战斗能力|战斗结束|对战结束)/iu
+const EXPLICIT_ZH_BATTLE_START_RE = /(发起(?:了)?挑战|向(?:你|玩家|主角)挑战|接受(?:了)?挑战|进入(?:了)?战斗|开始(?:了)?战斗|战斗(?:正式)?开始|准备(?:开始)?战斗|摆出(?:了)?战斗姿态|迎战|应战)/u
+
+function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames = []) {
+  const text = String(storyText ?? '')
+  if (!text.trim() || text.includes(BATTLE_MARKER)) return text
+  if (BATTLE_RESULT_CUE_RE.test(text)) return text
+  if (!battleBelongsToPlayer({ storyText: text, userText, ownNames })) return text
+  if (!STRONG_BATTLE_CUE_RE.test(`${String(userText ?? '')}\n${text}`)) return text
+
+  const activeOpponent = detectBattleOpponentSpecies(text, pokedex ?? [], { excludeNames: ownNames })
+  const trainer = detectTrainerBattle(`${String(userText ?? '')}\n${text}`)
+  // Với 中文, tên Pokémon thường được localize nên detector canonical English
+  // có thể chưa resolve được loài. Chỉ cho phép fallback khi câu thách đấu là
+  // cực kỳ rõ; những câu chỉ nhắc “攻击/战斗” chung chung vẫn cần opponent/trainer.
+  if (!activeOpponent && !trainer.isTrainer && !EXPLICIT_ZH_BATTLE_START_RE.test(text)) return text
+  return `${text.trimEnd()}\n\n${BATTLE_MARKER}`
+}
+
+
+async function resolveLocalizedBattleOpponent(apiConfig, storyText, pokedex, ownNames = []) {
+  if (!apiConfig?.baseUrl || !apiConfig?.model || !String(storyText ?? '').trim()) return null
+  try {
+    const reply = await chatCompletion(apiConfig, [
+      {
+        role: 'system',
+        content: `Identify the Pokémon species that is ACTIVELY opposing the player in this battle scene. The narrative may be Vietnamese, English, or Simplified Chinese and may use localized Pokémon names. Reply with ONLY the canonical English Pokémon species name used by Pokémon Showdown (example: Tauros). If no active opponent can be identified, reply NONE. Do not choose the player's own Pokémon or a spectator.`,
+      },
+      { role: 'user', content: String(storyText).slice(-2600) },
+    ], { temperature: 0, maxTokens: 40 })
+    const candidate = String(cleanAiOutput(reply) ?? '').trim().split(/[\n,;|]/)[0].replace(/^[`"']+|[`"'.]+$/g, '').trim()
+    if (!candidate || /^none$/i.test(candidate)) return null
+    const wanted = normalizeMonTarget(candidate)
+    const excluded = new Set((ownNames ?? []).map(normalizeMonTarget).filter(Boolean))
+    return (pokedex ?? []).find((entry) => {
+      const keys = [entry?.name, entry?.species].map(normalizeMonTarget).filter(Boolean)
+      return keys.includes(wanted) && !keys.some((key) => excluded.has(key))
+    }) ?? null
+  } catch (error) {
+    console.warn('[battle-target] không resolve được tên Pokémon bản địa:', error?.message ?? error)
+    return null
+  }
+}
+
 function rerollPriorSupportsBattle(priorText) {
   const text = String(priorText ?? '')
   if (!text.trim()) return false
@@ -2846,10 +2896,13 @@ export default function RoleplayChat() {
       // đôi khi nhả [[BATTLE]] trong reroll dù chính văn không hề có đối thủ
       // đang ra sân/thách đấu. Khi marker không có setup canon độc lập, bỏ marker
       // trước khi hiển thị để không xuất hiện Poké Ball ngẫu nhiên.
-      if (displayText.includes(BATTLE_MARKER)) {
+      {
         const ownNames = [...(latestPartyRef.current ?? []).map((mon) => mon?.name), latestPlayerMonRef.current?.name]
           .filter(Boolean)
-        if (!battleMarkerHasCanonSetup(displayText, stateUserText, pokedexSpecies, ownNames, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })) {
+        // Dot140: cứu marker bị model bỏ quên ở cả VI/EN/ZH trước khi gate canon.
+        displayText = ensureBattleMarkerFromNarrative(displayText, stateUserText, pokedexSpecies, ownNames)
+        if (displayText.includes(BATTLE_MARKER)
+          && !battleMarkerHasCanonSetup(displayText, stateUserText, pokedexSpecies, ownNames, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })) {
           displayText = displayText.split(BATTLE_MARKER).join('').trim()
           console.warn('[battle-marker] bỏ marker không có setup canon độc lập')
         }
@@ -4184,7 +4237,7 @@ export default function RoleplayChat() {
               <StoryParagraph
                 content={m.content}
                 used={Boolean(m.battleUsed)}
-                onOpenBattle={() => {
+                onOpenBattle={async () => {
                   if (!playerMon) {
                     window.alert('Bạn chưa có Pokémon nào — hãy để câu chuyện dẫn tới việc nhận Pokémon đầu tiên đã.')
                     return
@@ -4227,7 +4280,14 @@ ${m.content}`
                     // vì tên của nó xuất hiện muộn hơn trong chính văn.
                     const battleOpponent = detectBattleOpponentSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
                       || detectBattleOpponentSpecies(battleSource, pokedexSpecies, { excludeNames: ownNames })
-                    const mentioned = battleOpponent || detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
+                    let mentioned = battleOpponent || detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
+                    if (!mentioned && !battleCtx.isTrainer) {
+                      // Dot140: 中文 thường dùng tên bản địa (肯泰罗/烈空坐/利欧路...),
+                      // trong khi Pokédex runtime dùng canonical English. Chỉ khi detector
+                      // local không resolve được mới gọi 1 lượt AI cực ngắn để nối alias ->
+                      // species Showdown, tránh mở đúng battle nhưng random nhầm đối thủ.
+                      mentioned = await resolveLocalizedBattleOpponent(apiConfig, m.content, pokedexSpecies, ownNames)
+                    }
                     const ecologyOptions = {
                       pokedex: pokedexSpecies,
                       location: playerLocation,
@@ -4259,7 +4319,10 @@ ${m.content}`
                     const levelFor = (entry, offset = 0) => {
                       if (battleCtx.isTrainer) {
                         const savedSlot = persistentRoster.find((slot) => slot.entry === entry)
-                        if (savedSlot) return Math.max(1, Math.min(100, savedSlot.level))
+                        if (savedSlot) {
+                          const cap = getBossTier(entry?.name)?.maxLevel ?? 100
+                          return Math.max(1, Math.min(cap, savedSlot.level))
+                        }
                         // League dùng đúng bảng 6 ô: Elite 85/85/90/90/95/95,
                         // Champion 98/98/99/99/100/100. Trainer thường giữ
                         // logic cũ; Pokémon thứ hai trong đấu đôi chỉ nhỉnh +1.
@@ -4276,10 +4339,12 @@ ${m.content}`
                           location: playerLocation,
                           realTeam: battleCtx.realTeam,
                         })
-                        return Math.max(1, Math.min(100, base + offset))
+                        const cap = getBossTier(entry?.name)?.maxLevel ?? 100
+                        return Math.max(1, Math.min(cap, base + offset))
                       }
                       const base = wildLevel({ location: playerLocation, entry }).level
-                      return Math.max(1, Math.min(100, base + offset))
+                      const cap = getBossTier(entry?.name)?.maxLevel ?? 100
+                      return Math.max(1, Math.min(cap, base + offset))
                     }
                     const decorateTrainer = (mon) => {
                       if (!battleCtx.isTrainer) return mon
@@ -4328,7 +4393,7 @@ ${m.content}`
                         ? persistentRoster.map((_, offset) => persistentRoster[(persistentStart + offset) % persistentRoster.length])
                         : []
                       const fullEnemyTeam = orderedPersistentTeam.map((slot) => decorateTrainer(buildMonSmart(
-                        slot.entry, Math.max(1, Math.min(100, slot.level)), movesDb, playerMon?.types, true,
+                        slot.entry, Math.max(1, Math.min(getBossTier(slot.entry?.name)?.maxLevel ?? 100, slot.level)), movesDb, playerMon?.types, true,
                       )))
                       const mon = fullEnemyTeam[0] ?? decorateTrainer(buildMonSmart(
                         speciesEntry, levelFor(speciesEntry), movesDb, playerMon?.types, battleCtx.isTrainer,

@@ -35,15 +35,15 @@ function lastHit(hay, words) {
 const TRAINER_RULES = [
   {
     tier: 'champion', label: 'Nhà vô địch',
-    words: ['nhà vô địch', 'champion', 'ngôi vô địch', 'quán quân'],
+    words: ['nhà vô địch', 'champion', 'ngôi vô địch', 'quán quân', '冠军', '联盟冠军'],
   },
   {
     tier: 'elite', label: 'Tứ Đại Thiên Vương',
-    words: ['tứ đại thiên vương', 'tứ thiên vương', 'elite four', 'elite 4', 'thiên vương'],
+    words: ['tứ đại thiên vương', 'tứ thiên vương', 'elite four', 'elite 4', 'thiên vương', '四天王'],
   },
   {
     tier: 'gym', label: 'Chủ Gym',
-    words: ['gym leader', 'chủ gym', 'thủ lĩnh phòng tập', 'trận gym', 'thử thách gym', 'giành huy hiệu', 'huy hiệu gym'],
+    words: ['gym leader', 'chủ gym', 'thủ lĩnh phòng tập', 'trận gym', 'thử thách gym', 'giành huy hiệu', 'huy hiệu gym', '道馆馆主', '馆主', '道馆挑战', '徽章战'],
   },
   {
     tier: 'boss', label: 'Trùm tổ chức',
@@ -81,7 +81,7 @@ const TRAINER_RULES = [
     words: [
       'huấn luyện viên khác', 'một huấn luyện viên', 'nhà huấn luyện khác',
       'thách đấu bạn', 'thách đấu cậu', 'khiêu chiến', 'so tài', 'đấu tập',
-      'trận đấu trainer', 'giao đấu với', 'đối thủ của bạn', 'kình địch', 'rival',
+      'trận đấu trainer', 'giao đấu với', 'đối thủ của bạn', 'kình địch', 'rival', '训练家', '向你挑战', '发起挑战', '进行对战', '宝可梦对战',
     ],
   },
   {
@@ -95,7 +95,7 @@ const TRAINER_RULES = [
 const WILD_WORDS = [
   'hoang dã', 'hoang dại', 'wild pokémon', 'wild pokemon', 'pokémon hoang', 'pokemon hoang',
   'từ bụi rậm lao ra', 'nhảy ra từ bụi', 'con vật hoang', 'chưa có chủ', 'không ai thuần hoá',
-  'lang thang trong rừng', 'sống hoang',
+  'lang thang trong rừng', 'sống hoang', '野生宝可梦', '野生精灵', '野生的宝可梦', '没有训练家的宝可梦',
 ]
 
 // ---------- EASTER EGG: ĐỘI HÌNH THẬT CỦA CHỦ GYM (đợt 72) ----------

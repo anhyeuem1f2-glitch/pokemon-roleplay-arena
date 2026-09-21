@@ -3,21 +3,21 @@
 // thách đấu Gym trong khi người chơi chỉ đứng xem không được biến thành trận
 // của party người chơi chỉ vì model đặt marker ở cuối response.
 
-const PLAYER_BATTLE_RE = /(?:\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|(?<!của\s)cậu)\b.{0,28}(?:thách\s*đấu|khiêu\s*chiến|giao\s*đấu|tham\s*gia\s*(?:trận|đấu)|bước\s*(?:ra|vào)\s*sân|vào\s*trận|đấu\s+với|đánh\s+với|sẽ\s+đấu|muốn\s+đấu)|(?:đối\s*thủ|trận\s*đấu)\s+của\s+(?:tôi|mình|cậu))/iu
+const PLAYER_BATTLE_RE = /(?:\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|(?<!của\s)cậu)\b.{0,28}(?:thách\s*đấu|khiêu\s*chiến|giao\s*đấu|tham\s*gia\s*(?:trận|đấu)|bước\s*(?:ra|vào)\s*sân|vào\s*trận|đấu\s+với|đánh\s+với|sẽ\s+đấu|muốn\s+đấu)|(?:đối\s*thủ|trận\s*đấu)\s+của\s+(?:tôi|mình|cậu)|(?:你|玩家|主角).{0,28}(?:接受挑战|迎战|应战|进入战斗|开始战斗|参加对战|发起挑战|进行对战)|(?:向你|向玩家|向主角).{0,18}(?:发起挑战|挑战|发动攻击))/iu
 
-const PLAYER_SENDS_MON_RE = /\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|(?<!của\s)cậu)\b.{0,65}(?:tung\s+ra|gọi\s+ra|cử\s+ra|chọn\s+.+?\s+ra\s+sân|ra\s+lệnh\s+cho)/iu
+const PLAYER_SENDS_MON_RE = /(?:\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|(?<!của\s)cậu)\b.{0,65}(?:tung\s+ra|gọi\s+ra|cử\s+ra|chọn\s+.+?\s+ra\s+sân|ra\s+lệnh\s+cho)|(?:你|玩家|主角).{0,65}(?:派出|放出|让.{0,18}出战|命令.{0,18}攻击))/iu
 
 const THIRD_PARTY_ACTOR = '(?:bạn(?:\\s+của\\s+(?:tôi|mình|cậu))?|người\\s*bạn|bạn\\s*đồng\\s*hành|đồng\\s*hành|nhỏ\\s*đó|cô\\s*ấy|cậu\\s*ấy|anh\\s*ấy|chị\\s*ấy|hắn|nó|friend|companion)'
 const THIRD_PARTY_GYM_RE = new RegExp(`${THIRD_PARTY_ACTOR}.{0,70}(?:thử\\s*thách|thách\\s*đấu|khiêu\\s*chiến|challenge|đấu\\s+với).{0,55}(?:gym|chủ\\s*gym|gym\\s*leader|nhà\\s*thi\\s*đấu)`, 'iu')
 const GYM_THIRD_PARTY_RE = new RegExp(`(?:gym|chủ\\s*gym|gym\\s*leader|nhà\\s*thi\\s*đấu).{0,75}${THIRD_PARTY_ACTOR}.{0,55}(?:thử\\s*thách|thách\\s*đấu|khiêu\\s*chiến|challenge|đấu)`, 'iu')
-const SPECTATOR_RE = /(?:đứng\s*xem|ngồi\s*xem|xem\s+(?:bạn|nhỏ\s*đó|cô\s*ấy|cậu\s*ấy|anh\s*ấy|chị\s*ấy|trận)|quan\s*sát|theo\s*dõi\s*trận|cổ\s*vũ|ở\s*khán\s*đài|watch(?:ing)?|spectat(?:e|ing))/iu
+const SPECTATOR_RE = /(?:đứng\s*xem|ngồi\s*xem|xem\s+(?:bạn|nhỏ\s*đó|cô\s*ấy|cậu\s*ấy|anh\s*ấy|chị\s*ấy|trận)|quan\s*sát|theo\s*dõi\s*trận|cổ\s*vũ|ở\s*khán\s*đài|watch(?:ing)?|spectat(?:e|ing)|旁观|观战|看着.{0,20}(?:对战|战斗)|站在一旁|在观众席)/iu
 
-const PLAYER_SPECTATES_THIRD_PARTY_RE = /(?:\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|cậu)\b.{0,40}(?:xem|quan\s*sát|theo\s*dõi|cổ\s*vũ).{0,45}(?:bạn|người\s*bạn|nhỏ\s*đó|cô\s*ấy|cậu\s*ấy|anh\s*ấy|chị\s*ấy).{0,45}(?:thử\s*thách|thách\s*đấu|khiêu\s*chiến|đấu|challenge))/iu
+const PLAYER_SPECTATES_THIRD_PARTY_RE = /(?:\b(?:tôi|mình|ta|main|người\s*chơi|nhân\s*vật\s*chính|cậu)\b.{0,40}(?:xem|quan\s*sát|theo\s*dõi|cổ\s*vũ).{0,45}(?:bạn|người\s*bạn|nhỏ\s*đó|cô\s*ấy|cậu\s*ấy|anh\s*ấy|chị\s*ấy).{0,45}(?:thử\s*thách|thách\s*đấu|khiêu\s*chiến|đấu|challenge)|(?:你|玩家|主角).{0,35}(?:旁观|观战|看着|观察).{0,55}(?:朋友|同伴|他|她|他们|她们|训练家).{0,45}(?:挑战|对战|战斗))/iu
 
 function ownMonIsActive(text, ownNames = []) {
   const lower = String(text ?? '').toLowerCase()
   if (!lower || !ownNames?.length) return false
-  const activeCue = /(xuất\s*trận|ra\s*sân|tung\s+ra|gọi\s+ra|cử\s+ra|vào\s*sân|sent\s+out|entered\s+the\s+field|ra\s*lệnh)/iu
+  const activeCue = /(xuất\s*trận|ra\s*sân|tung\s+ra|gọi\s+ra|cử\s+ra|vào\s*sân|sent\s+out|entered\s+the\s+field|ra\s*lệnh|出战|派出|放出|进入战场|命令.{0,16}攻击)/iu
   for (const rawName of ownNames) {
     const name = String(rawName ?? '').trim().toLowerCase()
     if (!name) continue
@@ -46,8 +46,9 @@ export function battleBelongsToPlayer({ storyText = '', userText = '', ownNames 
   if (PLAYER_BATTLE_RE.test(combined) || PLAYER_SENDS_MON_RE.test(combined)) return true
 
   const thirdPartyGym = THIRD_PARTY_GYM_RE.test(combined) || GYM_THIRD_PARTY_RE.test(combined)
+  const chineseThirdPartyBattle = /(?:朋友|同伴|他|她|他们|她们|那名训练家|另一名训练家).{0,55}(?:挑战|对战|战斗|迎战).{0,55}(?:道馆|馆主|训练家|对手)/u.test(combined)
   const spectator = SPECTATOR_RE.test(combined)
-  if (thirdPartyGym) return false
-  if (spectator && /(?:gym|trận\s*đấu|battle|thách\s*đấu|khiêu\s*chiến)/iu.test(combined)) return false
+  if (thirdPartyGym || chineseThirdPartyBattle) return false
+  if (spectator && /(?:gym|trận\s*đấu|battle|thách\s*đấu|khiêu\s*chiến|对战|战斗|挑战|道馆)/iu.test(combined)) return false
   return true
 }

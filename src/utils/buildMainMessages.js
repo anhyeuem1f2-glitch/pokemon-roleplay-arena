@@ -1,7 +1,7 @@
 import { getActiveLoreEntries } from './lorebook.js'
 import { getActiveWorldbook } from './worldbook.js'
 import { buildCanonTrainerNote } from '../data/canonTrainers.js'
-import { applyPresetRegexToMessages, buildPresetPrompt } from './presetImport.js'
+import { applyPresetRegexToMessages, buildPresetMessages } from './presetImport.js'
 import { buildSystemPrompt, applyPlaceholders, BATTLE_INSTRUCTION } from './promptBuilder.js'
 import { STORY_STATE_INSTRUCTION } from './storyStateProtocol.js'
 import { DIRECTOR_WORLD_INSTRUCTION } from '../data/storyDirector.js'
@@ -52,7 +52,7 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
   if (toneNote) canonNote = [toneNote, canonNote].filter(Boolean).join('\n\n')
   if (mainPreset) {
     const activeLore = [...wbActive, ...getActiveLoreEntries(character.lorebook ?? [], scanText)]
-    const { beforeHistory, afterHistory } = buildPresetPrompt(mainPreset.blocks, {
+    const { beforeHistoryMessages, afterHistoryMessages } = buildPresetMessages(mainPreset.blocks, {
       charDescription: applyPlaceholders(character.description, character.name, playerName),
       charPersonality: applyPlaceholders(character.personality, character.name, playerName),
       scenario: applyPlaceholders(character.scenario, character.name, playerName),
@@ -65,15 +65,14 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       characterName: character.name,
     })
     const presetHistory = applyPresetRegexToMessages(history, mainPreset.regexScripts)
-    const apiMessages = [
-      { role: 'system', content: beforeHistory },
-      ...presetHistory,
-      ...(afterHistory ? [{ role: 'system', content: afterHistory }] : []),
+
+    // Dot142: giữ nguyên role + thứ tự Prompt Manager của SillyTavern. Các
+    // control riêng của Trainer Arena được chèn TRƯỚC post-history blocks để
+    // assistant/user prefill của preset vẫn là phần cuối request như ST.
+    const appControlMessages = [
       { role: 'system', content: languageInstruction },
       { role: 'system', content: BATTLE_INSTRUCTION },
       { role: 'system', content: STORY_STATE_INSTRUCTION },
-      // Đạo diễn tình huống (đợt 31): nguyên tắc thế giới sống + thân phận
-      // người chơi — chèn cả khi dùng preset để preset không đè mất.
       { role: 'system', content: DIRECTOR_WORLD_INSTRUCTION },
       { role: 'system', content: PROSE_QUALITY_NOTE },
       ...(identityContext ? [{ role: 'system', content: identityContext }] : []),
@@ -83,11 +82,14 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
       ...(wbActive.length || canonNote
         ? [{ role: 'system', content: buildLoreWikiNote(wbActive, canonNote) }]
         : []),
-      // Dot134: story language and action-choice language are separate.
-      // Narrative can still follow an explicit preset language, while the
-      // suggestion cards always follow the language selected in the UI.
-      { role: 'system', content: languageInstruction },
       { role: 'system', content: actionChoicesInstruction },
+    ]
+
+    const apiMessages = [
+      ...beforeHistoryMessages,
+      ...presetHistory,
+      ...appControlMessages,
+      ...afterHistoryMessages,
     ]
     const callOptions = {
       temperature: mainPreset.meta?.temperature,

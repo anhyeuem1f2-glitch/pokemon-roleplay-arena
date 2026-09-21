@@ -1,3 +1,49 @@
+## Đợt 142 — sửa import SillyTavern preset / prompt_order 100001 (21/09/2026)
+
+### Báo lỗi thực tế
+
+Người dùng Trung Quốc import preset SillyTavern nhưng preset gần như không có tác dụng; model vẫn dễ từ chối nội dung mà preset đó vốn dùng được trong SillyTavern. Kiểm tra trực tiếp preset `Kemini Aether 中秋快乐` cho thấy file có **2 prompt_order group**: `100000` chỉ là bộ marker mặc định ngắn, còn `100001` mới chứa toàn bộ custom prompt/JB/style.
+
+### Root cause
+
+- Importer cũ lấy cứng `prompt_order[0]` → chỉ đọc group `100000`. Với preset thực tế này Dot141 chỉ import **11 block / 10 block bật**, trong khi group `100001` có **82 block / 45 block bật**.
+- Importer còn dùng `order.enabled && prompt.enabled`; nhiều custom prompt của SillyTavern có `prompts[].enabled=false` nhưng trạng thái thật trong Prompt Manager lại nằm ở `prompt_order[].enabled=true`, nên nếu có đọc đúng group cũng vẫn bị tắt nhầm.
+- Engine cũ gộp mọi block thành một `system` string, làm mất role `user` / `assistant` của post-history prompt. Preset này có block assistant cuối kiểu prefill/CoT, nên việc ép role làm hành vi khác SillyTavern.
+- Macro `setvar/getvar` cũ chỉ nhận tên ASCII; preset Trung dùng cả tên biến Unicode nên một số biến không resolve.
+
+### Sửa trong Dot142
+
+- Ưu tiên `prompt_order` có `character_id=100001`; fallback `100000`, rồi mới tới group lớn nhất/`prompts`.
+- Trạng thái bật/tắt lấy từ **prompt_order** đúng chuẩn Prompt Manager, không còn AND với `prompts[].enabled`.
+- Giữ nguyên role từng block (`system/user/assistant`) và giữ post-history tail sau lịch sử chat. Trainer Arena chèn control riêng **trước** post-history tail để assistant/user block của preset vẫn nằm cuối request.
+- `setvar/getvar` hỗ trợ tên biến Unicode; macro comment `{{// ...}}` được bỏ khỏi prompt thật.
+- Settings hiển thị `ST order 100001`; preset đã import bằng engine cũ sẽ hiện cảnh báo yêu cầu **re-import JSON một lần** vì 71 block đã bị bỏ từ lúc import cũ không thể tự phục hồi.
+- Xác minh trực tiếp preset người dùng: Dot141 = `11 blocks / 10 enabled / NSFW style missing`; Dot142 = `82 blocks / 45 enabled / 🔥nsfw风格（最适配） enabled`, post-history cuối vẫn là role `assistant`.
+
+### Regression Dot142
+
+- `test-dot142.mjs`: **7/7 PASS**.
+- **41 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–142`).
+- `82` file `.js` trong `src/functions/worker` qua `node --check`.
+- `npm/esbuild` không hoàn tất trong môi trường bàn giao (npx timeout), nên chưa xác nhận bundle bằng Vite ở đây.
+- Các test lịch sử `122/123/127` vẫn là test Google Translate đã bị retire từ Dot128; `test-dot70` là regression cũ trước các thay đổi perk.
+
+### File runtime cần cập nhật GitHub sau đợt 142
+
+- `src/utils/presetImport.js`
+- `src/utils/buildMainMessages.js`
+- `src/components/SettingsPage.jsx`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot142.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+### Sau khi deploy
+
+Người đã import preset trước Dot142 phải vào Settings → **Nạp preset khác** và import lại file JSON đúng một lần. Nếu không re-import, localStorage vẫn giữ bản preset cũ chỉ có 11 block nên fix mới không thể dựng lại các block đã mất.
+
+---
+
 ## Đợt 141 — tên chiêu Simplified Chinese theo UI + tùy chọn giữ English (21/09/2026)
 
 ### Yêu cầu

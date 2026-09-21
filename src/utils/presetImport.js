@@ -18,9 +18,23 @@
 // cách SillyTavern để 100k mà chính văn thực tế chỉ ra ~4-6k chữ.
 const MAX_SAFE_TOKENS = 200000
 
+function choosePromptOrderGroup(data) {
+  const groups = Array.isArray(data.prompt_order) ? data.prompt_order.filter((g) => Array.isArray(g?.order)) : []
+  if (!groups.length) return null
+
+  // SillyTavern dùng character_id 100001 cho prompt-manager order đầy đủ của
+  // preset hiện hành. 100000 thường chỉ là bộ mặc định 10-12 marker hệ thống.
+  // Nhiều preset Trung/JP để toàn bộ custom/JB block ở 100001; lấy [0] như
+  // trước sẽ khiến preset "đã nhập" nhưng gần như không có tác dụng.
+  return groups.find((g) => Number(g.character_id) === 100001)
+    ?? groups.find((g) => Number(g.character_id) === 100000)
+    ?? groups.reduce((best, group) => ((group.order?.length ?? 0) > (best.order?.length ?? 0) ? group : best), groups[0])
+}
+
 function normalizeOrder(data) {
   const byId = new Map(data.prompts.map((p) => [p.identifier, p]))
-  const orderEntry = data.prompt_order?.[0]?.order
+  const orderGroup = choosePromptOrderGroup(data)
+  const orderEntry = orderGroup?.order
 
   const sequence = orderEntry
     ? orderEntry.map((o) => ({ identifier: o.identifier, enabled: o.enabled }))
@@ -30,12 +44,20 @@ function normalizeOrder(data) {
     .map(({ identifier, enabled }) => {
       const block = byId.get(identifier)
       if (!block) return null
+      const role = ['system', 'user', 'assistant'].includes(block.role) ? block.role : 'system'
       return {
         identifier,
         name: block.name || identifier,
         marker: Boolean(block.marker),
         content: block.content || '',
-        enabled: enabled !== false && block.enabled !== false,
+        // IMPORTANT: prompt_order là nguồn bật/tắt thật sự của SillyTavern.
+        // prompts[].enabled thường false cho custom entries ngay cả khi chúng
+        // đang bật trong Prompt Manager, nên không được AND hai giá trị này.
+        enabled: enabled !== false,
+        role,
+        injectionPosition: Number.isFinite(Number(block.injection_position)) ? Number(block.injection_position) : null,
+        injectionDepth: Number.isFinite(Number(block.injection_depth)) ? Number(block.injection_depth) : null,
+        forbidOverrides: Boolean(block.forbid_overrides),
       }
     })
     .filter(Boolean)
@@ -179,6 +201,7 @@ export async function importMainPreset(file) {
 
   const blocks = normalizeOrder(data)
 
+  const selectedOrderGroup = choosePromptOrderGroup(data)
   const meta = {
     temperature: typeof data.temperature === 'number' ? data.temperature : undefined,
     maxTokens:
@@ -186,6 +209,7 @@ export async function importMainPreset(file) {
         ? Math.min(data.openai_max_tokens, MAX_SAFE_TOKENS)
         : undefined,
     assistantPrefill: typeof data.assistant_prefill === 'string' ? data.assistant_prefill : '',
+    promptOrderCharacterId: selectedOrderGroup?.character_id ?? null,
   }
 
   const regexScripts = extractRegexScripts(data)
@@ -203,42 +227,50 @@ export async function importMainPreset(file) {
 // sẽ giữ nguyên dạng {{...}} thô thay vì được xử lý.
 export function resolveSetvarMacros(text) {
   const vars = {}
-  const setterRegex = /\{\{(?:setvar|setglobalvar)::([a-zA-Z0-9_]+)::([\s\S]*?)\}\}/g
+  // SillyTavern cho phép tên biến Unicode. Preset Trung thường dùng tên như
+  // {{setvar::防额外环境环境描写::...}}; regex ASCII cũ làm các biến này rơi rụng.
+  const setterRegex = /\{\{(?:setvar|setglobalvar)::([^:{}\r\n]+?)::([\s\S]*?)\}\}/gu
 
-  let withoutSetters = text.replace(setterRegex, (_match, name, value) => {
-    vars[name] = value
+  // Comment macro của ST chỉ là ghi chú cho người viết preset, không phải
+  // prompt gửi model.
+  let withoutSetters = String(text ?? '').replace(/\{\{\/\/[\s\S]*?\}\}/gu, '')
+  withoutSetters = withoutSetters.replace(setterRegex, (_match, name, value) => {
+    vars[String(name).trim()] = value
     return ''
   })
 
-  const getterRegex = /\{\{getvar::([a-zA-Z0-9_]+)\}\}/g
+  const getterRegex = /\{\{getvar::([^{}\r\n:]+?)\}\}/gu
   let resolved = withoutSetters
   // Lặp vài vòng để xử lý trường hợp 1 biến chứa {{getvar}} tới biến khác.
-  for (let i = 0; i < 4; i++) {
-    const next = resolved.replace(getterRegex, (_match, name) => vars[name] ?? '')
+  for (let i = 0; i < 8; i++) {
+    const next = resolved.replace(getterRegex, (_match, name) => vars[String(name).trim()] ?? '')
     if (next === resolved) break
     resolved = next
   }
 
-  resolved = resolved.replace(/\{\{trim\}\}/g, '')
+  resolved = resolved.replace(/\{\{trim\}\}/gu, '')
   resolved = resolved.replace(/\n{3,}/g, '\n\n').trim()
   return resolved
 }
 
-const CHAT_HISTORY_SENTINEL = '\u0000__CHAT_HISTORY__\u0000'
+/** Render các block preset thành Chat Completion messages và giữ role gốc. */
+function replaceCommonMacros(text, dynamic) {
+  return String(text ?? '')
+    .replace(/\{\{lastUserMessage\}\}/gi, dynamic.lastUserMessage ?? '')
+    .replace(/\{\{lastUsermessage\}\}/gi, dynamic.lastUserMessage ?? '')
+    .replace(/\{\{user\}\}/gi, dynamic.user ?? dynamic.playerName ?? '')
+    .replace(/\{\{char\}\}/gi, dynamic.char ?? dynamic.characterName ?? '')
+}
+
+const BLOCK_SENTINEL_PREFIX = '\u0000__PRESET_BLOCK_'
+const BLOCK_SENTINEL_SUFFIX = '__\u0000'
 
 /**
- * Ghép các block đã bật theo đúng thứ tự thành 1 chuỗi, thay marker bằng dữ
- * liệu động tương ứng, xử lý macro setvar/getvar, rồi cắt tại vị trí
- * "chatHistory" marker thành 2 phần:
- * - beforeHistory: dùng làm system prompt chính (system message đầu tiên)
- * - afterHistory: phần hướng dẫn đặt SAU lịch sử chat (kiểu "post-history
- *   instructions"/jailbreak block) — nếu có, app sẽ chèn thành 1 system
- *   message riêng ngay trước lượt gọi AI.
- *
- * @param {Array} blocks kết quả từ importMainPreset(...).blocks
- * @param {{charDescription, personaDescription, charPersonality, scenario, worldInfoBefore, worldInfoAfter, dialogueExamples}} dynamic
+ * Render preset theo đúng prompt_order nhưng GIỮ role từng block. Đây là điểm
+ * khác quan trọng so với engine cũ: custom user/assistant prompt của ST không
+ * còn bị ép hết thành system message.
  */
-export function buildPresetPrompt(blocks, dynamic) {
+export function buildPresetMessages(blocks, dynamic) {
   const markerMap = {
     worldInfoBefore: dynamic.worldInfoBefore ?? '',
     charDescription: dynamic.charDescription ?? '',
@@ -247,26 +279,56 @@ export function buildPresetPrompt(blocks, dynamic) {
     scenario: dynamic.scenario ?? '',
     worldInfoAfter: dynamic.worldInfoAfter ?? '',
     dialogueExamples: dynamic.dialogueExamples ?? '',
-    chatHistory: CHAT_HISTORY_SENTINEL,
   }
 
-  const raw = blocks
-    .filter((b) => b.enabled)
-    .map((b) => (b.marker ? markerMap[b.identifier] ?? '' : b.content))
-    .join('\n\n')
+  const active = (blocks ?? []).filter((b) => b.enabled)
+  const parts = active.map((block, index) => {
+    const rawContent = block.identifier === 'chatHistory'
+      ? ''
+      : (block.marker ? markerMap[block.identifier] ?? '' : block.content)
+    return `${BLOCK_SENTINEL_PREFIX}${index}${BLOCK_SENTINEL_SUFFIX}\n${replaceCommonMacros(rawContent, dynamic)}`
+  })
 
-  const commonMacros = raw
-    .replace(/\{\{lastUserMessage\}\}/gi, dynamic.lastUserMessage ?? '')
-    .replace(/\{\{user\}\}/gi, dynamic.user ?? dynamic.playerName ?? '')
-    .replace(/\{\{char\}\}/gi, dynamic.char ?? dynamic.characterName ?? '')
-  const resolved = resolveSetvarMacros(commonMacros)
-
-  const idx = resolved.indexOf(CHAT_HISTORY_SENTINEL)
-  if (idx === -1) {
-    return { beforeHistory: resolved, afterHistory: '' }
+  // Resolve setvar/getvar trên TOÀN bộ preset một lần để biến khai báo ở block
+  // trước vẫn dùng được ở block sau, giống cách preset phức tạp của ST hoạt động.
+  const resolvedAll = resolveSetvarMacros(parts.join('\n'))
+  const contentByIndex = new Map()
+  const boundary = /\u0000__PRESET_BLOCK_(\d+)__\u0000/g
+  const matches = [...resolvedAll.matchAll(boundary)]
+  for (let i = 0; i < matches.length; i++) {
+    const index = Number(matches[i][1])
+    const from = matches[i].index + matches[i][0].length
+    const to = i + 1 < matches.length ? matches[i + 1].index : resolvedAll.length
+    contentByIndex.set(index, resolvedAll.slice(from, to).trim())
   }
+
+  const beforeHistoryMessages = []
+  const afterHistoryMessages = []
+  let afterHistory = false
+
+  active.forEach((block, index) => {
+    if (block.identifier === 'chatHistory') {
+      afterHistory = true
+      return
+    }
+    const content = contentByIndex.get(index)?.trim() ?? ''
+    if (!content) return
+    const message = {
+      role: ['system', 'user', 'assistant'].includes(block.role) ? block.role : 'system',
+      content,
+    }
+    ;(afterHistory ? afterHistoryMessages : beforeHistoryMessages).push(message)
+  })
+
+  return { beforeHistoryMessages, afterHistoryMessages }
+}
+
+/** Legacy string API kept for old callers/tests. */
+export function buildPresetPrompt(blocks, dynamic) {
+  const { beforeHistoryMessages, afterHistoryMessages } = buildPresetMessages(blocks, dynamic)
   return {
-    beforeHistory: resolved.slice(0, idx).trim(),
-    afterHistory: resolved.slice(idx + CHAT_HISTORY_SENTINEL.length).trim(),
+    beforeHistory: beforeHistoryMessages.map((message) => message.content).join('\n\n'),
+    afterHistory: afterHistoryMessages.map((message) => message.content).join('\n\n'),
   }
 }
+

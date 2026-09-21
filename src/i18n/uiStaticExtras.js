@@ -3,6 +3,7 @@
 // already excludes those surfaces and only rewrites interface chrome.
 
 export const ZH_UI_EXTRAS = Object.freeze({
+  'Preset này được nhập bằng engine cũ. Hãy nhập lại file JSON một lần để áp đúng Prompt Manager / prompt_order của SillyTavern.': '此预设是由旧版导入引擎载入的。请重新导入一次 JSON，以正确应用 SillyTavern 的 Prompt Manager / prompt_order。',
   'Tên chiêu Pokémon': '宝可梦招式名称',
   'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': '仅改变显示名称。战斗与存档中的招式数据始终保留标准英文名称，避免影响机制与兼容性。',
   'Cách hiển thị tên chiêu': '招式名称显示方式',
@@ -327,6 +328,7 @@ export const ZH_UI_EXTRAS = Object.freeze({
 })
 
 export const EN_UI_EXTRAS = Object.freeze({
+  'Preset này được nhập bằng engine cũ. Hãy nhập lại file JSON một lần để áp đúng Prompt Manager / prompt_order của SillyTavern.': 'This preset was imported by the old engine. Re-import the JSON once so SillyTavern Prompt Manager / prompt_order is applied correctly.',
   'Tên chiêu Pokémon': 'Pokémon move names',
   'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': 'Display only. Battle/save data always keeps canonical English move names so mechanics remain stable.',
   'Cách hiển thị tên chiêu': 'Move-name display',

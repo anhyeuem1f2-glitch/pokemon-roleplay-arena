@@ -107,7 +107,13 @@ function MainPresetManager({ mainPreset, setMainPreset, onPresetPrefill }) {
           <h2 className="page-title">Preset chính văn (JSON)</h2>
           <p className="page-subtitle" style={{ marginBottom: 4 }}>
             {mainPreset.fileName} — {enabledCount}/{mainPreset.blocks.length} block đang bật
+            {mainPreset.meta?.promptOrderCharacterId != null ? ` · ST order ${mainPreset.meta.promptOrderCharacterId}` : ''}
           </p>
+          {mainPreset.meta?.promptOrderCharacterId == null && (
+            <div className="status-pill status-pill--error" style={{ marginTop: 8, display: 'inline-block' }}>
+              {translateUiText('Preset này được nhập bằng engine cũ. Hãy nhập lại file JSON một lần để áp đúng Prompt Manager / prompt_order của SillyTavern.', uiLanguage)}
+            </div>
+          )}
         </div>
         <button className="btn" onClick={() => setMainPreset(null)}>
           Gỡ preset

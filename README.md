@@ -1,3 +1,47 @@
+## Đợt 141 — tên chiêu Simplified Chinese theo UI + tùy chọn giữ English (21/09/2026)
+
+### Yêu cầu
+
+Khi người chơi chọn giao diện `简体中文`, tên move trong các màn Pokémon/battle nên có thể hiển thị tiếng Trung, nhưng canonical move data phải tiếp tục giữ English để không phá PP, learnset, save, Z-Move/Dynamax và battle lookup. Đồng thời cần một tùy chọn cho người thích tên chiêu English giữ nguyên English dù UI đang là 中文.
+
+### Sửa trong Dot141
+
+- Thêm preference thiết bị **Tên chiêu Pokémon** trong Settings:
+  - `Theo ngôn ngữ giao diện` (mặc định): UI `简体中文` hiển thị tên move giản thể khi catalog có entry; VI/EN vẫn giữ English.
+  - `Luôn giữ tên tiếng Anh`: khóa phần hiển thị move về canonical English ở mọi UI language.
+- **Không dịch/ghi đè `move.id`, `move.name` trong dữ liệu game.** Localization chỉ đi qua `getMoveDisplayName()` lúc render/log, nên battle engine/save/PP/learnset tiếp tục dùng canonical English.
+- Catalog 中文 được đọc từ dữ liệu localization PokeAPI (`language_id=12`), tải lười chỉ khi thật sự cần, ưu tiên jsDelivr rồi raw GitHub; cache IndexedDB 90 ngày và có stale-cache fallback nếu mạng tạm lỗi. Nếu chưa tải được catalog, UI tự giữ English thay vì làm hỏng game.
+- Đã sửa lỗi loader tự huỷ request do dependency trạng thái `loading/error`: chuyển dependency sang chỉ `uiLanguage + moveNameMode`, nên đổi sang 中文 không còn rơi vào vòng cleanup ngay sau khi bắt đầu tải catalog.
+- Nối display helper vào `PokemonInfoModal`, `MoveLearnModal`, Sandbox full-learnset trong `IntroScreen`, battle đơn và battle đôi. Search move ở Sandbox nhận cả English canonical lẫn tên 中文 đã tải.
+- Max Move và Z-Move giữ canonical gameplay data nhưng phần tên hiển thị/log được localize đúng; PP-empty log trong double battle cũng dùng display name.
+- Thêm offline UI text VI/EN/ZH cho lựa chọn hiển thị tên chiêu. Preference lưu localStorage theo thiết bị, không gắn vào save truyện.
+
+### Regression Dot141
+
+- `test-dot141.mjs`: **10/10 PASS**.
+- **40 regression files hiện hành PASS** (`73, 74, 99–121, 124–126, 128–130, 133–141`).
+- `82` file `.js` trong `src/functions/worker` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript JSX transpile parser.
+- Chưa chạy `npm ci`/`npm run build` trong môi trường bàn giao vì không có `node_modules`; regression + syntax/parse đã chạy.
+
+### File runtime cần cập nhật GitHub sau đợt 141
+
+- `src/context/GameContext.jsx`
+- `src/i18n/moveNames.js` **(mới)**
+- `src/utils/moveNameTranslations.js` **(mới)**
+- `src/i18n/uiStaticExtras.js`
+- `src/components/SettingsPage.jsx`
+- `src/components/PokemonInfoModal.jsx`
+- `src/components/MoveLearnModal.jsx`
+- `src/components/IntroScreen.jsx`
+- `src/components/BattleModal.jsx`
+- `src/components/DoubleBattleModal.jsx`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot141.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 140 — cứu battle tiếng Trung + nối lại trần level Legendary 120/150/200 (21/09/2026)
 
 ### Báo lỗi thực tế

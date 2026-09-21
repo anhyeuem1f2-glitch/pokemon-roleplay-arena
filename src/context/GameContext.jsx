@@ -24,6 +24,8 @@ import { normalizeDynamicState } from '../data/dynamicState.js'
 import { createCustomItemDescriptor, resolveInventoryItemByName } from '../data/shopItems.js'
 import { completeSandboxBootstrap, loadSandboxBootstrap } from '../utils/sandboxBootstrap.js'
 import { DEFAULT_UI_LANGUAGE, normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from '../i18n/uiLanguage.js'
+import { DEFAULT_MOVE_NAME_MODE, MOVE_NAME_MODE_STORAGE_KEY, displayMoveName, normalizeMoveNameMode } from '../i18n/moveNames.js'
+import { loadZhMoveNames } from '../utils/moveNameTranslations.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -75,6 +77,63 @@ export function GameProvider({ children }) {
       return resolved
     })
   }, [])
+
+
+  // --- Tên chiêu hiển thị (đợt 141): chỉ là preference thiết bị. ---
+  // Canonical move.id/name vẫn luôn là English để battle/save không đổi.
+  const [moveNameMode, setMoveNameModeState] = useState(() => {
+    try { return normalizeMoveNameMode(localStorage.getItem(MOVE_NAME_MODE_STORAGE_KEY) || DEFAULT_MOVE_NAME_MODE) } catch { return DEFAULT_MOVE_NAME_MODE }
+  })
+  const setMoveNameMode = useCallback((next) => {
+    setMoveNameModeState((cur) => {
+      const resolved = normalizeMoveNameMode(typeof next === 'function' ? next(cur) : next)
+      try { localStorage.setItem(MOVE_NAME_MODE_STORAGE_KEY, resolved) } catch { /* ignore */ }
+      return resolved
+    })
+  }, [])
+  const [zhMoveNames, setZhMoveNames] = useState({})
+  const [moveNameTranslationStatus, setMoveNameTranslationStatus] = useState('idle') // idle|loading|ready|error
+  const [moveNameTranslationError, setMoveNameTranslationError] = useState(null)
+
+  useEffect(() => {
+    if (uiLanguage !== 'zh' || moveNameMode !== 'ui') return undefined
+    if (Object.keys(zhMoveNames).length > 500) {
+      setMoveNameTranslationStatus('ready')
+      return undefined
+    }
+    let cancelled = false
+    setMoveNameTranslationStatus('loading')
+    setMoveNameTranslationError(null)
+    loadZhMoveNames()
+      .then((catalog) => {
+        if (cancelled) return
+        setZhMoveNames(catalog || {})
+        setMoveNameTranslationStatus('ready')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        setMoveNameTranslationStatus('error')
+        setMoveNameTranslationError(error?.message || String(error))
+      })
+    return () => { cancelled = true }
+  }, [moveNameMode, uiLanguage])
+
+  // Nếu rời chế độ cần catalog trong lúc request đang chạy/lỗi, trả trạng thái
+  // về idle. Khi người dùng quay lại 中文 + follow-UI, loader sẽ thử lại;
+  // catalog đã load thành công (ready) vẫn được giữ trong RAM.
+  useEffect(() => {
+    if (uiLanguage === 'zh' && moveNameMode === 'ui') return
+    // Không phụ thuộc moveNameTranslationStatus ở dependency: nếu effect loader vừa
+    // set `loading`, việc rerender không được phép tự cleanup/cancel request hiện tại.
+    // Khi rời chế độ 中文 + follow-UI, functional update đưa trạng thái đang
+    // loading/error về idle; catalog ready vẫn giữ trong RAM để quay lại tức thì.
+    setMoveNameTranslationStatus((current) => current === 'ready' ? current : 'idle')
+    setMoveNameTranslationError(null)
+  }, [moveNameMode, uiLanguage])
+
+  const getMoveDisplayName = useCallback((move) => (
+    displayMoveName(move, uiLanguage, moveNameMode, zhMoveNames)
+  ), [moveNameMode, uiLanguage, zhMoveNames])
 
   // Admin Mode chỉ sống trong SESSION hiện tại: không chèn vào save, không
   // theo người chơi sang máy khác và không có URL/query công khai để bật.
@@ -1194,6 +1253,11 @@ export function GameProvider({ children }) {
   const value = {
     uiLanguage,
     setUiLanguage,
+    moveNameMode,
+    setMoveNameMode,
+    moveNameTranslationStatus,
+    moveNameTranslationError,
+    getMoveDisplayName,
     adminMode,
     unlockAdmin,
     lockAdmin,

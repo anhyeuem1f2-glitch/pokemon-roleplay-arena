@@ -301,7 +301,7 @@ function PickCard({ selected, title, desc, onClick, compact }) {
 
 export default function IntroScreen({ onOpenSettings }) {
   const {
-    apiConfig, stateApiConfig, stateApiConfig2, outcomeApiConfig, character, stylePreset, mainPreset, assistantPrefill, uiLanguage,
+    apiConfig, stateApiConfig, stateApiConfig2, outcomeApiConfig, character, stylePreset, mainPreset, assistantPrefill, uiLanguage, getMoveDisplayName,
     setPlayerName, setPlayerMon, setMessages, setGameStarted, setPcBox, setPokedexRecords,
     resetTrainerIdentity, setWorldProgress, setPokemonLife, setTradeState, setDynamicState,
     pokedexSpecies, movesDb, setPlayerLocation, setParty,
@@ -501,6 +501,7 @@ export default function IntroScreen({ onOpenSettings }) {
     const q = sandboxMoveSearch.trim().toLowerCase()
     if (!q) return true
     return entry.move.name.toLowerCase().includes(q)
+      || getMoveDisplayName(entry.move).toLowerCase().includes(q)
       || String(entry.move.type ?? '').toLowerCase().includes(q)
       || sandboxMoveSourceLabel(entry.sources).toLowerCase().includes(q)
   })
@@ -1772,7 +1773,7 @@ export default function IntroScreen({ onOpenSettings }) {
                                         ? [...new Set([...current, id])]
                                         : current.filter((move) => move !== id))}
                                     />
-                                    <span style={{ color: 'var(--text-hi)', fontSize: 10.8, fontWeight: 700 }}>{entry.move.name}</span>
+                                    <span style={{ color: 'var(--text-hi)', fontSize: 10.8, fontWeight: 700 }} title={getMoveDisplayName(entry.move) !== entry.move.name ? entry.move.name : undefined}>{getMoveDisplayName(entry.move)}</span>
                                     <span style={{ color: 'var(--text-mid)', fontSize: 9.5, textTransform: 'uppercase' }}>{entry.move.type}</span>
                                     <span style={{ color: 'var(--text-dim)', fontSize: 9.2 }}>{sandboxMoveSourceLabel(entry.sources)}</span>
                                   </label>

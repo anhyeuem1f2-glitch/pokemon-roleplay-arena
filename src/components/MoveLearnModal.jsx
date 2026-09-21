@@ -28,12 +28,13 @@ function MoveFacts({ move, compact = false }) {
 }
 
 export default function MoveLearnModal() {
-  const { party, setParty, playerMon, setPlayerMon } = useGame()
+  const { party, setParty, playerMon, setPlayerMon, getMoveDisplayName } = useGame()
   const partyTarget = (party ?? []).find((mon) => mon?.pendingMoveLearns?.length)
   const target = partyTarget ?? (playerMon?.pendingMoveLearns?.length ? playerMon : null)
   if (!target) return null
 
   const candidate = target.pendingMoveLearns[0]
+  const candidateDisplayName = getMoveDisplayName(candidate)
   const queueCount = target.pendingMoveLearns.length
 
   function commit(options) {
@@ -48,7 +49,7 @@ export default function MoveLearnModal() {
         <header className="move-learn__header">
           <div>
             <div className="move-learn__eyebrow">HỌC CHIÊU MỚI</div>
-            <h2 id="move-learn-title">{target.name} muốn học {candidate.name}!</h2>
+            <h2 id="move-learn-title">{target.name} muốn học {candidateDisplayName}!</h2>
           </div>
           <div className="move-learn__queue">Còn {queueCount} chiêu</div>
         </header>
@@ -68,7 +69,7 @@ export default function MoveLearnModal() {
           <section className="move-learn__moves-panel">
             <div className="move-learn__new-move">
               <div className="move-learn__new-label">CHIÊU MỚI · Lv.{candidate.learnedAtLevel ?? target.level}</div>
-              <div className="move-learn__new-name">{candidate.name}</div>
+              <div className="move-learn__new-name" title={candidateDisplayName !== candidate.name ? candidate.name : undefined}>{candidateDisplayName}</div>
               <MoveFacts move={candidate} />
               <p>{candidate.description || 'Chiêu thức mới được học khi Pokémon đạt cấp độ này.'}</p>
             </div>
@@ -81,11 +82,11 @@ export default function MoveLearnModal() {
                   type="button"
                   className="move-learn__move-row"
                   disabled
-                  title={`${target.name} vẫn giữ ${move.name}`}
+                  title={`${target.name} vẫn giữ ${getMoveDisplayName(move)}`}
                 >
                   <span className="move-learn__slot">{index + 1}</span>
                   <span className="move-learn__move-copy">
-                    <strong>{move.name}</strong>
+                    <strong title={getMoveDisplayName(move) !== move.name ? move.name : undefined}>{getMoveDisplayName(move)}</strong>
                     <MoveFacts move={move} compact />
                   </span>
                   <span className="move-learn__forget">GIỮ</span>
@@ -97,7 +98,7 @@ export default function MoveLearnModal() {
 
         <footer className="move-learn__actions">
           <button className="move-learn__primary" type="button" onClick={() => commit({})}>
-            Học {candidate.name}
+            Học {candidateDisplayName}
           </button>
           <button className="move-learn__skip" type="button" onClick={() => commit({ skip: true })}>
             Không học chiêu này

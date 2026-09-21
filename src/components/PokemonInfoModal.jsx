@@ -43,19 +43,19 @@ function PartyEntry({ mon, selected, onClick }) {
   )
 }
 
-function MoveRow({ move, index, onToggleStar }) {
+function MoveRow({ move, index, onToggleStar, displayName }) {
   return (
     <div className="summary-move">
       <button
         className="summary-move__number"
         type="button"
-        aria-label={move.starred ? `Bỏ ghim ${move.name}` : `Ghim ${move.name}`}
+        aria-label={move.starred ? `Bỏ ghim ${displayName}` : `Ghim ${displayName}`}
         title={move.starred ? 'Bỏ dấu sao' : 'Đánh dấu sao để đưa chiêu lên đầu'}
         onClick={() => onToggleStar?.(!move.starred)}
         style={{ cursor: 'pointer', color: move.starred ? '#e5a91a' : undefined, border: 0, background: 'transparent', padding: 0 }}
       >{move.starred ? '★' : '☆'}</button>
       <div className="summary-move__main">
-        <div className="summary-move__name">{move.name}</div>
+        <div className="summary-move__name" title={displayName !== move.name ? move.name : undefined}>{displayName}</div>
         <div className="summary-move__meta">
           <TypeBadge type={move.type ?? 'normal'} />
           <span>{moveCategory(move.category)}</span>
@@ -70,7 +70,7 @@ function MoveRow({ move, index, onToggleStar }) {
 }
 
 export default function PokemonInfoModal({ mon, party = [], activeMon = null, hunger = null, onSelect, onClose }) {
-  const { setPokemonMoveStar, setPokemonNickname } = useGame()
+  const { setPokemonMoveStar, setPokemonNickname, getMoveDisplayName } = useGame()
   const [tab, setTab] = useState('summary')
   const [nicknameDraft, setNicknameDraft] = useState(String(mon?.nickname ?? ''))
   const current = useMemo(() => {
@@ -277,6 +277,7 @@ export default function PokemonInfoModal({ mon, party = [], activeMon = null, hu
                     key={`${move.id ?? move.name}-${index}`}
                     move={move}
                     index={index}
+                    displayName={getMoveDisplayName(move)}
                     onToggleStar={(starred) => setPokemonMoveStar(current, move.id ?? move.name, starred)}
                   />
                 ))}

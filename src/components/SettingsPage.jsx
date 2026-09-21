@@ -313,6 +313,11 @@ export default function SettingsPage({ onBack }) {
     setMemoryApiConfig,
     chatPreferences,
     setChatPreferences,
+    uiLanguage,
+    moveNameMode,
+    setMoveNameMode,
+    moveNameTranslationStatus,
+    moveNameTranslationError,
   } = useGame()
 
   return (
@@ -347,6 +352,33 @@ export default function SettingsPage({ onBack }) {
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h2 className="page-title">{translateUiText('Tên chiêu Pokémon', uiLanguage)}</h2>
+        <p className="page-subtitle">
+          {translateUiText('Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.', uiLanguage)}
+        </p>
+        <label style={{ display: 'block', marginBottom: 6 }}>{translateUiText('Cách hiển thị tên chiêu', uiLanguage)}</label>
+        <select
+          value={moveNameMode === 'en' ? 'en' : 'ui'}
+          onChange={(event) => setMoveNameMode(event.target.value)}
+          style={{ width: '100%' }}
+        >
+          <option value="ui">{translateUiText('Theo ngôn ngữ giao diện', uiLanguage)}</option>
+          <option value="en">{translateUiText('Luôn giữ tên tiếng Anh', uiLanguage)}</option>
+        </select>
+        <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '7px 0 0' }}>
+          {translateUiText('Khi giao diện là 简体中文 và đang chọn “Theo ngôn ngữ giao diện”, tên chiêu sẽ dùng bản giản thể trong catalog nếu có. Các ngôn ngữ khác hiện giữ tên English.', uiLanguage)}
+        </p>
+        {uiLanguage === 'zh' && moveNameMode !== 'en' && moveNameTranslationStatus === 'loading' && (
+          <div className="status-pill" style={{ marginTop: 8 }}>{translateUiText('Đang tải tên chiêu tiếng Trung…', uiLanguage)}</div>
+        )}
+        {uiLanguage === 'zh' && moveNameMode !== 'en' && moveNameTranslationStatus === 'error' && (
+          <div className="status-pill status-pill--error" style={{ marginTop: 8 }} title={moveNameTranslationError || ''}>
+            {translateUiText('Không tải được tên chiêu tiếng Trung — tạm giữ English.', uiLanguage)}
+          </div>
+        )}
       </div>
 
 

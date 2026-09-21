@@ -378,7 +378,7 @@ function MenuButton({ label, sub, color, onClick, disabled }) {
 
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null, initialEnemyTeam = null }) {
-  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId, uiLanguage, mainPreset, stylePreset } = useGame()
+  const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId, uiLanguage, mainPreset, stylePreset, getMoveDisplayName } = useGame()
   const storyLanguage = resolveStoryLanguage(uiLanguage, mainPreset, stylePreset)
   const restoredEnv = initialBattleState?.battleEnvKey
     ? getBattleEnv(initialBattleState.battleEnvKey)
@@ -847,7 +847,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     const ppMoveName = move.baseMoveName ?? move.name
     const storedMove = (playerMon.moves ?? []).find((candidate) => candidate.name === ppMoveName || candidate.id === move.id)
     if (!move.isStruggle && storedMove && Number(storedMove.currentPp ?? storedMove.pp ?? 35) <= 0) {
-      pushLog(`${storedMove.name} đã hết PP!`)
+      pushLog(`${getMoveDisplayName(storedMove)} đã hết PP!`)
       return
     }
     setBusy(true)
@@ -880,7 +880,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       }
       const itemPermission = heldItemMoveAllowed(actor, chosenMove)
       if (!itemPermission.allowed) {
-        lines.push(`${actor.name} không thể dùng ${chosenMove.name}: ${itemPermission.reason}`)
+        lines.push(`${actor.name} không thể dùng ${getMoveDisplayName(chosenMove)}: ${itemPermission.reason}`)
         return
       }
       if (!canActLocal(actor, lines)) return
@@ -893,7 +893,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       Object.assign(actor, lockChoiceMove(actor, chosenMove))
       const currentWeather = weatherKey()
       if (!moveHitsWithAbilities(chosenMove, actor, defender, currentWeather, actorStages, defenderStages)) {
-        lines.push(`${actor.name} dùng ${chosenMove.name}, nhưng đòn đánh trượt!`)
+        lines.push(`${actor.name} dùng ${getMoveDisplayName(chosenMove)}, nhưng đòn đánh trượt!`)
         return
       }
 
@@ -901,12 +901,12 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       if (moveWeather) {
         turnEnv = getBattleEnv(moveWeather)
         turnWeatherTurns = weatherTurnsFromHeldItem(actor, moveWeather, 5)
-        lines.push(`${actor.name} dùng ${chosenMove.name} và làm thay đổi thời tiết!`)
+        lines.push(`${actor.name} dùng ${getMoveDisplayName(chosenMove)} và làm thay đổi thời tiết!`)
       }
 
       const selfTarget = chosenMove.target === 'self'
       if (selfTarget) {
-        lines.push(`${actor.name} dùng ${chosenMove.name}.`)
+        lines.push(`${actor.name} dùng ${getMoveDisplayName(chosenMove)}.`)
         if (chosenMove.volatileStatus === 'protect') {
           actor.protected = true
           lines.push(`${actor.name} dựng lá chắn bảo vệ!`)
@@ -941,7 +941,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
 
       for (let hit = 0; hit < hits && defender.hp > 0; hit++) {
         if (defender.protected) {
-          lines.push(`${defender.name} đã bảo vệ bản thân khỏi ${chosenMove.name}!`)
+          lines.push(`${defender.name} đã bảo vệ bản thân khỏi ${getMoveDisplayName(chosenMove)}!`)
           break
         }
         const critStage = Math.max(0, Number(chosenMove.critRatio) || 0)
@@ -1006,11 +1006,11 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
       lines.push(...attackerItemAfter.logs)
 
       if (chosenMove.power > 0 || chosenMove.damage != null) {
-        lines.push(`${actor.name} dùng ${chosenMove.name}! Gây ${totalDamage} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
+        lines.push(`${actor.name} dùng ${getMoveDisplayName(chosenMove)}! Gây ${totalDamage} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`)
         const label = effLabel(effectiveness)
         if (label) lines.push(label)
       } else {
-        lines.push(`${actor.name} dùng ${chosenMove.name}.`)
+        lines.push(`${actor.name} dùng ${getMoveDisplayName(chosenMove)}.`)
       }
 
       if (chosenMove.boosts && !moveImmune) boostLocal(chosenMove.target === 'self' ? actorStages : defenderStages, chosenMove.boosts, chosenMove.target === 'self' ? actor.name : defender.name, lines, chosenMove.target === 'self' ? actor : defender, { fromOpponent: chosenMove.target !== 'self' })
@@ -1897,7 +1897,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                         // Phóng Z-Move: bản Z của chiêu này, power theo bảng, dùng 1 lần.
                         setZArmed(false)
                         setGimmickUsed('zmove')
-                        pushLog(`✦ ${playerMon.name} phóng Z-MOVE: Z-${move.name}!!`)
+                        pushLog(`✦ ${playerMon.name} phóng Z-MOVE: Z-${getMoveDisplayName(move)}!!`)
                         handleMove({
                           ...move, baseMoveName: move.name, isZMove: true, name: `Z-${move.name}`, power: zPower(move.power),
                           multihit: null, drain: null, recoil: null, status: null, boosts: null,
@@ -1920,7 +1920,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
                     }}
                   >
                     <span style={zTarget ? { color: TYPE_COLORS[move.type] ?? '#e8b84a', fontWeight: 700 } : undefined}>
-                      {move.starred ? '★ ' : ''}{zTarget ? `⚡Z-${move.name}` : move.name}
+                      {move.starred ? '★ ' : ''}{zTarget ? `⚡Z-${getMoveDisplayName(move)}` : getMoveDisplayName(move)}
                       {move.category && (
                         <span style={{ fontSize: 9, color: 'var(--text-dim)', marginLeft: 6 }}>
                           {move.category === 'Special' ? 'SPEC' : move.category === 'Status' ? 'STT' : 'PHYS'}

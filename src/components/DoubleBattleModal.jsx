@@ -187,16 +187,16 @@ function BattleCard({ mon, label, active, onClick, stages }) {
   )
 }
 
-function actionText(action, team, enemies) {
+function actionText(action, team, enemies, getMoveDisplayName = (move) => move?.name ?? '') {
   if (!action) return 'Chưa chọn'
   if (action.type === 'switch') return `Đổi → ${team.find((mon) => monKey(mon) === action.targetUid)?.name ?? '?'}`
   if (action.type === 'item') return `${action.item.name} → ${action.targetUid ? (team.find((mon) => monKey(mon) === action.targetUid)?.name ?? '?') : `ô ${action.targetSlot + 1}`}`
   const target = action.move.target === 'self' ? 'bản thân' : isSpreadMove(action.move) ? 'cả phe địch' : enemies[action.targetIndex]?.name ?? '?'
-  return `${action.move.name} → ${target}`
+  return `${getMoveDisplayName(action.move)} → ${target}`
 }
 
 export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd, initialBattleState = null }) {
-  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies, markPokedexSeen, playerLocation, storyDate } = useGame()
+  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies, markPokedexSeen, playerLocation, storyDate, getMoveDisplayName } = useGame()
   const fallbackTeam = buildInitialTeam(party, playerMon)
   const restoredTeam = initialBattleState?.team?.length
     ? initialBattleState.team.map(cloneMon)
@@ -456,7 +456,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       if (at < 0) return true
       const current = Number(mon.moves[at].currentPp ?? mon.moves[at].pp ?? 35)
       if (current <= 0) {
-        roundLog.push(`${mon.moves[at].name} đã hết PP!`)
+        roundLog.push(`${getMoveDisplayName(mon.moves[at])} đã hết PP!`)
         return false
       }
       mon.moves = mon.moves.map((candidate, index) => index === at ? { ...candidate, currentPp: current - 1 } : candidate)
@@ -468,11 +468,11 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       const actorStage = nextStages[monKey(actor)] ?? STAGE_ZERO
       const targetStage = nextStages[monKey(target)] ?? STAGE_ZERO
       if (target.protected) {
-        roundLog.push(`${target.name} đã bảo vệ bản thân khỏi ${move.name}!`)
+        roundLog.push(`${target.name} đã bảo vệ bản thân khỏi ${getMoveDisplayName(move)}!`)
         return 0
       }
       if (!moveHitsWithAbilities(move, actor, target, currentWeather, actorStage, targetStage)) {
-        roundLog.push(`${actor.name} dùng ${move.name} lên ${target.name}, nhưng đòn đánh trượt!`)
+        roundLog.push(`${actor.name} dùng ${getMoveDisplayName(move)} lên ${target.name}, nhưng đòn đánh trượt!`)
         return 0
       }
       const effectiveness = getEffectivenessMulti(move.type, defenderTypesWithHeldItem(target, move.type))
@@ -543,8 +543,8 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
       }
 
       roundLog.push(totalDealt > 0
-        ? `${actor.name} dùng ${move.name} lên ${target.name}, gây ${totalDealt} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`
-        : `${actor.name} dùng ${move.name} lên ${target.name}.`)
+        ? `${actor.name} dùng ${getMoveDisplayName(move)} lên ${target.name}, gây ${totalDealt} sát thương.${actualHits > 1 ? ` Trúng ${actualHits} lần.` : ''}`
+        : `${actor.name} dùng ${getMoveDisplayName(move)} lên ${target.name}.`)
       if (totalDealt > 0 && effectiveness > 1) roundLog.push('Hiệu quả tốt!')
       else if (totalDealt > 0 && effectiveness > 0 && effectiveness < 1) roundLog.push('Hiệu quả không tốt...')
       else if (effectiveness === 0) roundLog.push('Không có tác dụng.')
@@ -690,10 +690,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (playerWeather) {
           roundEnv = getBattleEnv(playerWeather)
           roundWeatherTurns = weatherTurnsFromHeldItem(actor, playerWeather, 5)
-          roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
+          roundLog.push(`${actor.name} dùng ${getMoveDisplayName(move)} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
-          roundLog.push(`${actor.name} dùng ${move.name}.`)
+          roundLog.push(`${actor.name} dùng ${getMoveDisplayName(move)}.`)
           if (move.volatileStatus === 'protect') actor.protected = true
           if (move.heal) {
             const before = actor.hp
@@ -747,10 +747,10 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
         if (enemyWeather) {
           roundEnv = getBattleEnv(enemyWeather)
           roundWeatherTurns = weatherTurnsFromHeldItem(actor, enemyWeather, 5)
-          roundLog.push(`${actor.name} dùng ${move.name} và làm thay đổi thời tiết!`)
+          roundLog.push(`${actor.name} dùng ${getMoveDisplayName(move)} và làm thay đổi thời tiết!`)
         }
         if (move.target === 'self') {
-          roundLog.push(`${actor.name} dùng ${move.name}.`)
+          roundLog.push(`${actor.name} dùng ${getMoveDisplayName(move)}.`)
           if (move.volatileStatus === 'protect') actor.protected = true
           if (move.heal) {
             const before = actor.hp
@@ -910,14 +910,14 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8, marginBottom: 8 }}>
               {[0, 1].map((slot) => (
                 <button key={slot} className="btn" onClick={() => { setSelectedSlot(slot); setTargeting(null) }} disabled={!activeMons[slot] || activeMons[slot].hp <= 0} style={{ borderColor: selectedSlot === slot ? 'var(--mint)' : undefined }}>
-                  Ô {slot + 1}: {activeMons[slot]?.name ?? 'trống'} · <span style={{ color: actions[slot] ? 'var(--mint)' : 'var(--text-dim)' }}>{actionText(actions[slot], team, enemies)}</span>
+                  Ô {slot + 1}: {activeMons[slot]?.name ?? 'trống'} · <span style={{ color: actions[slot] ? 'var(--mint)' : 'var(--text-dim)' }}>{actionText(actions[slot], team, enemies, getMoveDisplayName)}</span>
                 </button>
               ))}
             </div>
 
             {targeting ? (
               <div className="panel" style={{ padding: 10, marginBottom: 8 }}>
-                <div style={{ fontSize: 11.5, marginBottom: 7 }}>Chọn mục tiêu cho <strong>{targeting.move.name}</strong></div>
+                <div style={{ fontSize: 11.5, marginBottom: 7 }}>Chọn mục tiêu cho <strong title={getMoveDisplayName(targeting.move) !== targeting.move.name ? targeting.move.name : undefined}>{getMoveDisplayName(targeting.move)}</strong></div>
                 <div style={{ display: 'flex', gap: 7 }}>
                   {enemies.map((mon, index) => <button key={monKey(mon, index)} className="btn" disabled={mon.hp <= 0} onClick={() => chooseTarget(index)} style={{ flex: 1 }}>{mon.name} · {mon.hp}/{mon.maxHp}</button>)}
                   <button className="btn" onClick={() => setTargeting(null)}>Huỷ</button>
@@ -947,12 +947,12 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 7, maxHeight: '36vh', overflowY: 'auto', paddingRight: 3 }}>
                   {sortMovesForDisplay(selectedMon?.moves).map((move) => (
                     <button key={move.name} className="btn" disabled={busy || selectedMon.hp <= 0 || Number(move.currentPp ?? move.pp ?? 35) <= 0 || !heldItemMoveAllowed(selectedMon, move).allowed} title={heldItemMoveAllowed(selectedMon, move).reason} onClick={() => chooseMove(selectedSlot, move)} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span>{move.starred ? '★ ' : ''}{move.name} · PP {move.currentPp ?? move.pp ?? 35}/{move.pp ?? 35}</span><TypeBadge type={move.type} />
+                      <span>{move.starred ? '★ ' : ''}{getMoveDisplayName(move)} · PP {move.currentPp ?? move.pp ?? 35}/{move.pp ?? 35}</span><TypeBadge type={move.type} />
                     </button>
                   ))}
                   {(selectedMon?.moves ?? []).length > 0 && (selectedMon.moves ?? []).every((move) => Number(move.currentPp ?? move.pp ?? 35) <= 0) && (
                     <button className="btn" disabled={busy || selectedMon.hp <= 0} onClick={() => chooseMove(selectedSlot, { id: 'struggle', name: 'Struggle', type: 'normal', category: 'Physical', power: 50, recoil: [1, 4], target: 'normal', isStruggle: true })} style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span>Struggle · PP ∞</span><TypeBadge type="normal" />
+                      <span>{getMoveDisplayName({ id: 'struggle', name: 'Struggle' })} · PP ∞</span><TypeBadge type="normal" />
                     </button>
                   )}
                 </div>

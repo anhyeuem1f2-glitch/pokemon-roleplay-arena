@@ -3,6 +3,14 @@
 // already excludes those surfaces and only rewrites interface chrome.
 
 export const ZH_UI_EXTRAS = Object.freeze({
+  'Tên chiêu Pokémon': '宝可梦招式名称',
+  'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': '仅改变显示名称。战斗与存档中的招式数据始终保留标准英文名称，避免影响机制与兼容性。',
+  'Cách hiển thị tên chiêu': '招式名称显示方式',
+  'Theo ngôn ngữ giao diện': '跟随界面语言',
+  'Luôn giữ tên tiếng Anh': '始终保留英文招式名',
+  'Khi giao diện là 简体中文 và đang chọn “Theo ngôn ngữ giao diện”, tên chiêu sẽ dùng bản giản thể trong catalog nếu có. Các ngôn ngữ khác hiện giữ tên English.': '当界面为简体中文且选择“跟随界面语言”时，招式名称会优先显示目录中的简体中文名；其他界面语言目前保留英文招式名。',
+  'Đang tải tên chiêu tiếng Trung…': '正在加载中文招式名称…',
+  'Không tải được tên chiêu tiếng Trung — tạm giữ English.': '无法加载中文招式名称——暂时保留英文。',
   'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. localhost/127.0.0.1/LAN luôn gọi trực tiếp từ trình duyệt và không bao giờ đi qua server bridge. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': '填写基础 Endpoint，不要在末尾加 /chat/completions（例如 https://.../v1 或 http://.../v1）。HTTPS 会直接请求；在 HTTPS 网页中使用公网 HTTP Endpoint 时，会自动通过服务器桥接，以避开浏览器的 mixed content 阻止。localhost/127.0.0.1/局域网地址始终由当前浏览器直接访问，绝不会经过服务器 bridge。若 provider 支持，仍建议优先 HTTPS，因为 HTTP 在 bridge → provider 这一段不会加密。',
   'Mở lại bảng:': '重新打开面板：',
   'Bấm để tải ảnh lên (hoặc kéo-thả ảnh vào đây)': '点击上传图片（或将图片拖放到这里）',
@@ -319,6 +327,14 @@ export const ZH_UI_EXTRAS = Object.freeze({
 })
 
 export const EN_UI_EXTRAS = Object.freeze({
+  'Tên chiêu Pokémon': 'Pokémon move names',
+  'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': 'Display only. Battle/save data always keeps canonical English move names so mechanics remain stable.',
+  'Cách hiển thị tên chiêu': 'Move-name display',
+  'Theo ngôn ngữ giao diện': 'Follow UI language',
+  'Luôn giữ tên tiếng Anh': 'Always keep English move names',
+  'Khi giao diện là 简体中文 và đang chọn “Theo ngôn ngữ giao diện”, tên chiêu sẽ dùng bản giản thể trong catalog nếu có. Các ngôn ngữ khác hiện giữ tên English.': 'With Simplified Chinese UI and “Follow UI language”, Simplified Chinese move names from the catalog are shown when available. Other UI languages currently keep English names.',
+  'Đang tải tên chiêu tiếng Trung…': 'Loading Chinese move names…',
+  'Không tải được tên chiêu tiếng Trung — tạm giữ English.': 'Could not load Chinese move names — keeping English for now.',
   'Endpoint gốc, không kèm /chat/completions ở cuối (VD https://.../v1 hoặc http://.../v1). HTTPS được gọi trực tiếp; HTTP công khai trên bản web HTTPS sẽ tự đi qua cầu nối máy chủ để tránh trình duyệt chặn mixed content. localhost/127.0.0.1/LAN luôn gọi trực tiếp từ trình duyệt và không bao giờ đi qua server bridge. Nên ưu tiên HTTPS nếu provider hỗ trợ vì HTTP không mã hoá đoạn bridge → provider.': 'Enter the base endpoint without /chat/completions (for example https://.../v1 or http://.../v1). HTTPS is called directly; a public HTTP endpoint used from the HTTPS web app is automatically routed through the server bridge to avoid the browser mixed-content block. localhost/127.0.0.1/LAN addresses are always called directly by the current browser and never sent through the server bridge. Prefer HTTPS when the provider supports it because HTTP leaves the bridge → provider hop unencrypted.',
   'Mở lại bảng:': 'Reopen panel:',
   'Bấm để tải ảnh lên (hoặc kéo-thả ảnh vào đây)': 'Click to upload an image (or drag and drop it here)',

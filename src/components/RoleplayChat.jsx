@@ -10,6 +10,7 @@ import { battleBelongsToPlayer } from '../utils/battleOwnership.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { resolveStoryLanguage } from '../i18n/storyLanguage.js'
+import { loadZhPokemonSpeciesNames, zhSpeciesDetectOptions } from '../utils/pokemonNameTranslations.js'
 import { buildToneNote } from '../data/storyTones.js'
 import { buildCharacterTraitsNote } from '../data/characterTraits.js'
 import {
@@ -172,14 +173,14 @@ const STRONG_BATTLE_CUE_RE = /(xuất\s*trận|ra\s*sân|tung\s+ra|sent\s+out|th
 const BATTLE_RESULT_CUE_RE = /(đã\s+thắng|chiến\s+thắng|bị\s+đánh\s+bại|đã\s+thua|gục\s+ngã|mất\s+khả\s+năng\s+chiến\s+đấu|battle\s+(?:was\s+)?won|defeated|fainted|victory|取得(?:了)?胜利|赢得(?:了)?.{0,12}(?:战斗|对战)|输掉(?:了)?.{0,12}(?:战斗|对战)|被击败|失去战斗能力|战斗结束|对战结束)/iu
 const EXPLICIT_ZH_BATTLE_START_RE = /(发起(?:了)?挑战|向(?:你|玩家|主角)挑战|接受(?:了)?挑战|进入(?:了)?战斗|开始(?:了)?战斗|战斗(?:正式)?开始|准备(?:开始)?战斗|摆出(?:了)?战斗姿态|迎战|应战)/u
 
-function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames = []) {
+function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames = [], detectOptions = {}) {
   const text = String(storyText ?? '')
   if (!text.trim() || text.includes(BATTLE_MARKER)) return text
   if (BATTLE_RESULT_CUE_RE.test(text)) return text
   if (!battleBelongsToPlayer({ storyText: text, userText, ownNames })) return text
   if (!STRONG_BATTLE_CUE_RE.test(`${String(userText ?? '')}\n${text}`)) return text
 
-  const activeOpponent = detectBattleOpponentSpecies(text, pokedex ?? [], { excludeNames: ownNames })
+  const activeOpponent = detectBattleOpponentSpecies(text, pokedex ?? [], { ...detectOptions, excludeNames: ownNames })
   const trainer = detectTrainerBattle(`${String(userText ?? '')}\n${text}`)
   // Với 中文, tên Pokémon thường được localize nên detector canonical English
   // có thể chưa resolve được loài. Chỉ cho phép fallback khi câu thách đấu là
@@ -188,6 +189,20 @@ function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames 
   return `${text.trimEnd()}\n\n${BATTLE_MARKER}`
 }
 
+
+async function loadBattleSpeciesDetectOptions(storyLanguage) {
+  // Dot143: nếu chính văn là 中文 thì dùng catalog tên loài chính thức trước.
+  // Đây là đường deterministic; AI chỉ còn là fallback cuối khi catalog/CDN lỗi
+  // hoặc văn bản dùng biệt danh không có trong PokeAPI.
+  if (storyLanguage !== 'zh') return {}
+  try {
+    const catalog = await loadZhPokemonSpeciesNames()
+    return zhSpeciesDetectOptions(catalog)
+  } catch (error) {
+    console.warn('[battle-target] không tải được catalog tên Pokémon 中文:', error?.message ?? error)
+    return {}
+  }
+}
 
 async function resolveLocalizedBattleOpponent(apiConfig, storyText, pokedex, ownNames = []) {
   if (!apiConfig?.baseUrl || !apiConfig?.model || !String(storyText ?? '').trim()) return null
@@ -221,7 +236,7 @@ function rerollPriorSupportsBattle(priorText) {
   return Boolean(trainer.isTrainer && /(đối\s*thủ|trận|battle|gym|nhà\s*thi\s*đấu)/iu.test(text))
 }
 
-function battleMarkerHasCanonSetup(storyText, userText, pokedex, ownNames = [], { reroll = false, priorText = '' } = {}) {
+function battleMarkerHasCanonSetup(storyText, userText, pokedex, ownNames = [], { reroll = false, priorText = '', detectOptions = {} } = {}) {
   if (!String(storyText ?? '').includes(BATTLE_MARKER)) return true
   // Reroll không được tự tạo một hard side-effect mới chỉ vì model trong lần
   // viết lại bỗng nảy ra encounter. Nhánh trước/current input phải đã có mầm battle.
@@ -231,7 +246,7 @@ function battleMarkerHasCanonSetup(storyText, userText, pokedex, ownNames = [], 
   // Đợt 119: marker của trận NPC/Gym mà người chơi chỉ đứng xem không được
   // mở BattleModal bằng party người chơi.
   if (!battleBelongsToPlayer({ storyText: beforeMarker, userText, ownNames })) return false
-  const activeOpponent = detectBattleOpponentSpecies(beforeMarker, pokedex ?? [], { excludeNames: ownNames })
+  const activeOpponent = detectBattleOpponentSpecies(beforeMarker, pokedex ?? [], { ...detectOptions, excludeNames: ownNames })
   if (activeOpponent) return true
   const trainer = detectTrainerBattle(combined)
   return Boolean(trainer.isTrainer && STRONG_BATTLE_CUE_RE.test(combined))
@@ -2899,10 +2914,13 @@ export default function RoleplayChat() {
       {
         const ownNames = [...(latestPartyRef.current ?? []).map((mon) => mon?.name), latestPlayerMonRef.current?.name]
           .filter(Boolean)
-        // Dot140: cứu marker bị model bỏ quên ở cả VI/EN/ZH trước khi gate canon.
-        displayText = ensureBattleMarkerFromNarrative(displayText, stateUserText, pokedexSpecies, ownNames)
+        // Dot143: tải alias Pokémon 中文 trước khi gate battle. Nhờ vậy
+        // "野生肯泰罗发动攻击" cũng resolve thẳng Tauros thay vì cần marker
+        // cực rõ hoặc rơi xuống encounter random.
+        const battleDetectOptions = await loadBattleSpeciesDetectOptions(storyLanguage)
+        displayText = ensureBattleMarkerFromNarrative(displayText, stateUserText, pokedexSpecies, ownNames, battleDetectOptions)
         if (displayText.includes(BATTLE_MARKER)
-          && !battleMarkerHasCanonSetup(displayText, stateUserText, pokedexSpecies, ownNames, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })) {
+          && !battleMarkerHasCanonSetup(displayText, stateUserText, pokedexSpecies, ownNames, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, detectOptions: battleDetectOptions })) {
           displayText = displayText.split(BATTLE_MARKER).join('').trim()
           console.warn('[battle-marker] bỏ marker không có setup canon độc lập')
         }
@@ -4271,22 +4289,24 @@ ${m.content}`
 
                   if (!m.battleStarted) {
                     const ownNames = battleOwnNames
-                    const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, { excludeNames: ownNames })
-                    const activeMentionedList = detectBattleOpponentSpeciesList(m.content, pokedexSpecies, { excludeNames: ownNames })
-                      .concat(detectBattleOpponentSpeciesList(previousUserText, pokedexSpecies, { excludeNames: ownNames }))
+                    const battleDetectOptions = await loadBattleSpeciesDetectOptions(storyLanguage)
+                    const detectOptions = { ...battleDetectOptions, excludeNames: ownNames }
+                    const mentionedList = detectMentionedSpeciesList(battleSource, pokedexSpecies, detectOptions)
+                    const activeMentionedList = detectBattleOpponentSpeciesList(m.content, pokedexSpecies, detectOptions)
+                      .concat(detectBattleOpponentSpeciesList(previousUserText, pokedexSpecies, detectOptions))
                       .filter((entry, index, list) => list.findIndex((other) => other.name === entry.name) === index)
                     // Đợt 111: ưu tiên Pokémon có cue “xuất trận/ra sân/đối thủ”;
                     // Pokémon đứng xem/khán đài không được biến thành combatant chỉ
                     // vì tên của nó xuất hiện muộn hơn trong chính văn.
-                    const battleOpponent = detectBattleOpponentSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
-                      || detectBattleOpponentSpecies(battleSource, pokedexSpecies, { excludeNames: ownNames })
-                    let mentioned = battleOpponent || detectMentionedSpecies(m.content, pokedexSpecies, { excludeNames: ownNames })
-                    if (!mentioned && !battleCtx.isTrainer) {
-                      // Dot140: 中文 thường dùng tên bản địa (肯泰罗/烈空坐/利欧路...),
-                      // trong khi Pokédex runtime dùng canonical English. Chỉ khi detector
-                      // local không resolve được mới gọi 1 lượt AI cực ngắn để nối alias ->
-                      // species Showdown, tránh mở đúng battle nhưng random nhầm đối thủ.
-                      mentioned = await resolveLocalizedBattleOpponent(apiConfig, m.content, pokedexSpecies, ownNames)
+                    const battleOpponent = detectBattleOpponentSpecies(m.content, pokedexSpecies, detectOptions)
+                      || detectBattleOpponentSpecies(battleSource, pokedexSpecies, detectOptions)
+                    let mentioned = battleOpponent || detectMentionedSpecies(m.content, pokedexSpecies, detectOptions)
+                    if (!mentioned) {
+                      // Dot143: AI fallback áp dụng cho CẢ trainer battle. Dot140 chỉ gọi
+                      // nhánh này khi wild, khiến "训练家派出肯泰罗" không resolve được
+                      // rồi pickEcologicalEncounter random thành Lillipup. Dùng cả input +
+                      // chính văn để model có đủ tên đối thủ nếu catalog bản địa thất bại.
+                      mentioned = await resolveLocalizedBattleOpponent(apiConfig, battleSource, pokedexSpecies, ownNames)
                     }
                     const ecologyOptions = {
                       pokedex: pokedexSpecies,

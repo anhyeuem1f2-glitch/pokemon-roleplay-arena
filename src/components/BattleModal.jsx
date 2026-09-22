@@ -376,6 +376,18 @@ function MenuButton({ label, sub, color, onClick, disabled }) {
  */
 // Đợt 81: điều kiện gimmick được kiểm tra tập trung trong pokemonHeldItems.js.
 
+function initialBattleLog(uiLanguage, enemyName, isWild) {
+  if (uiLanguage === 'zh') return isWild
+    ? `野生的 ${enemyName} 出现了！`
+    : `对方训练家的 ${enemyName} 出战了！`
+  if (uiLanguage === 'en') return isWild
+    ? `A wild ${enemyName} appeared!`
+    : `The opposing Trainer sent out ${enemyName}!`
+  return isWild
+    ? `Một ${enemyName} hoang dã xuất hiện!`
+    : `${enemyName} của huấn luyện viên đối thủ xuất trận!`
+}
+
 
 export default function BattleModal({ onClose, onBattleEnd, isWild = true, environment = null, devUnlockGimmicks = false, initialBattleState = null, initialEnemyTeam = null }) {
   const { playerMon, setPlayerMon, enemyMon, setEnemyMon, resetBattle, apiConfig, animeApiConfig, party, setParty, inventory, setInventory, pokedexSpecies, movesDb, playerTraits, pcBox, setPcBox, markPokedexSeen, markPokedexCaught, playerLocation, storyDate, trainerId, uiLanguage, mainPreset, stylePreset, getMoveDisplayName } = useGame()
@@ -385,7 +397,7 @@ export default function BattleModal({ onClose, onBattleEnd, isWild = true, envir
     : (environment ?? getBattleEnv('none'))
   const [log, setLog] = useState(() => Array.isArray(initialBattleState?.log) && initialBattleState.log.length
     ? [...initialBattleState.log]
-    : [isWild ? `Một ${enemyMon.name} hoang dã xuất hiện!` : `${enemyMon.name} của huấn luyện viên đối thủ xuất trận!`])
+    : [initialBattleLog(uiLanguage, enemyMon.name, isWild)])
   const [busy, setBusy] = useState(false)
   const [finished, setFinished] = useState(false)
   // Đợt 87: trainer có đội bền vững được đánh liên tiếp trong CÙNG một

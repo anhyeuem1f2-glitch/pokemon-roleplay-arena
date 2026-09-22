@@ -1,3 +1,48 @@
+## Đợt 143 — nhận diện đúng Pokémon tên 中文 trong battle + localize battle intro (22/09/2026)
+
+### Báo lỗi thực tế
+
+Người dùng Trung Quốc xác nhận battle trigger đã hoạt động, nhưng chính văn nói đối thủ dùng `肯泰罗` (Tauros) còn BattleModal lại sinh `Lillipup`. Cùng ảnh báo lỗi còn lộ câu battle log tiếng Việt dù UI đang `简体中文`.
+
+### Root cause
+
+- Dot140 chỉ có detector canonical English/Showdown. Tên bản địa như `肯泰罗` không khớp `Tauros`, nên detector species trả `null`.
+- AI fallback tên bản địa của Dot140 lại chỉ chạy khi `!battleCtx.isTrainer`. Vì case thật là **trainer battle**, fallback bị bỏ qua hoàn toàn; `mentioned` rỗng rồi `pickEcologicalEncounter()` sinh một loài ngẫu nhiên (ví dụ Lillipup).
+- Battle marker gate cũng chưa có catalog alias 中文, nên một số wild battle tiếng Trung vẫn phụ thuộc cue cực rõ thay vì nhận thẳng tên loài.
+- Dòng mở đầu BattleModal/DoubleBattleModal được tạo từ state string tiếng Việt, nên runtime UI translator không luôn đổi được chuỗi động này.
+
+### Sửa trong Dot143
+
+- Thêm `src/utils/pokemonNameTranslations.js`: tải `pokemon_species_names.csv` của PokeAPI, ưu tiên jsDelivr rồi raw GitHub, lấy `language_id=12` (简体中文), cache IndexedDB 90 ngày và stale-cache fallback.
+- Catalog chỉ dùng làm **alias detector**; `entry.name/species` canonical English trong battle/save không bị thay đổi.
+- Detector `detectMentionedSpecies*` + `detectBattleOpponentSpecies*` nhận thêm alias theo National Dex number. Với fallback Gen1 tĩnh vốn chưa có `num`, catalog đồng thời nối English canonical -> 中文 nên vẫn nhận được `肯泰罗 -> Tauros`.
+- Luồng tạo/gate `[[BATTLE]]` tải alias 中文 trước khi xác thực, nên wild/trainer battle đều có thể nhận đúng species bản địa mà không cần random fallback.
+- AI canonical-name resolver vẫn giữ làm fallback cuối, nhưng Dot143 chạy cho **cả trainer và wild battle** và đọc cả `battleSource` (input + chính văn), không còn điều kiện bỏ trainer.
+- Battle mở đầu theo UI: `简体中文` dùng câu Trung, English dùng câu Anh, VI giữ câu Việt. Đấu đôi được sửa tương tự.
+
+### Regression Dot143
+
+- `test-dot143.mjs`: **8/8 PASS**.
+- `test-dot140.mjs`: **9/9 PASS** sau khi cập nhật assertion cho detector có alias catalog.
+- **42 active regression files PASS** (`73, 74, 99–121, 124–126, 128–130, 133–143`).
+- `83` file `.js` trong `src/functions/worker` qua `node --check`.
+- `55/55` file `.jsx` không có TypeScript parser syntax error.
+- `test-dot70` và `122/123/127` vẫn là test lịch sử/retired, không thuộc active regression như các bản trước.
+- Chưa chạy Vite bundle đầy đủ vì gói bàn giao không có `node_modules`.
+
+### File runtime cần cập nhật GitHub sau đợt 143
+
+- `src/utils/pokemonNameTranslations.js` **(mới)**
+- `src/data/pokemonSpecies.js`
+- `src/components/RoleplayChat.jsx`
+- `src/components/BattleModal.jsx`
+- `src/components/DoubleBattleModal.jsx`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot143.mjs` chỉ nằm trong full ZIP để bàn giao/regression, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 142 — sửa import SillyTavern preset / prompt_order 100001 (21/09/2026)
 
 ### Báo lỗi thực tế

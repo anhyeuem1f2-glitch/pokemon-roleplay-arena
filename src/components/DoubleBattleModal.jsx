@@ -195,8 +195,15 @@ function actionText(action, team, enemies, getMoveDisplayName = (move) => move?.
   return `${getMoveDisplayName(action.move)} → ${target}`
 }
 
+function initialDoubleBattleLog(uiLanguage, names) {
+  const joined = names.filter(Boolean).join(' + ')
+  if (uiLanguage === 'zh') return `双打 2v2 开始：${joined || '两只对手宝可梦'} 出战！`
+  if (uiLanguage === 'en') return `2v2 double battle begins: ${joined || 'two opposing Pokémon'} enter the field!`
+  return `Đấu đôi 2v2 bắt đầu: ${joined || 'hai đối thủ'} xuất trận!`
+}
+
 export default function DoubleBattleModal({ initialEnemies, environment = null, onClose, onSnapshot, onBattleEnd, initialBattleState = null }) {
-  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies, markPokedexSeen, playerLocation, storyDate, getMoveDisplayName } = useGame()
+  const { playerMon, setPlayerMon, party, setParty, inventory, setInventory, movesDb, pokedexSpecies, markPokedexSeen, playerLocation, storyDate, uiLanguage, getMoveDisplayName } = useGame()
   const fallbackTeam = buildInitialTeam(party, playerMon)
   const restoredTeam = initialBattleState?.team?.length
     ? initialBattleState.team.map(cloneMon)
@@ -236,7 +243,7 @@ export default function DoubleBattleModal({ initialEnemies, environment = null, 
   const entryAbilitiesAppliedRef = useRef(Boolean(initialBattleState?.entryAbilitiesApplied))
   const [log, setLog] = useState(() => Array.isArray(initialBattleState?.log) && initialBattleState.log.length
     ? [...initialBattleState.log]
-    : [`Đấu đôi 2v2 bắt đầu: ${restoredEnemies.map((mon) => mon.name).join(' + ') || 'hai đối thủ'} xuất trận!`])
+    : [initialDoubleBattleLog(uiLanguage, restoredEnemies.map((mon) => mon.name))])
   const participantsRef = useRef(new Set(
     initialBattleState?.participantUids?.length
       ? initialBattleState.participantUids

@@ -1029,9 +1029,32 @@ export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
  * phải random). Ưu tiên tên dài hơn trước để tránh khớp nhầm (VD tên ngắn là
  * 1 phần của tên dài hơn).
  */
+function speciesDetectionNames(entry, options = {}) {
+  const names = [entry?.name, entry?.species]
+  // Dot143: PokeAPI species-name catalog được key theo National Dex number.
+  // Chỉ gắn alias bản địa cho base species; nếu gắn cùng alias cho mọi forme
+  // (Alola/Mega/Gmax) detector có thể chọn nhầm forme chỉ vì chúng chung dex num.
+  if (!entry?.forme) {
+    const byNum = Number.isFinite(entry?.num)
+      ? (options.localizedNamesByNum?.[String(entry.num)] ?? options.localizedNamesByNum?.[entry.num])
+      : null
+    const canonicalKey = String(entry?.name ?? entry?.species ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+    const byCanonical = canonicalKey ? options.localizedNamesByCanonical?.[canonicalKey] : null
+    const localized = byNum ?? byCanonical
+    if (localized) names.push(localized)
+  }
+  return [...new Set(names.filter(Boolean).map((value) => String(value).toLowerCase()))]
+}
+
+function speciesEntryExcluded(entry, exclude) {
+  return [entry?.name, entry?.species]
+    .filter(Boolean)
+    .some((value) => exclude.has(String(value).toLowerCase()))
+}
+
 export function detectMentionedSpecies(text, speciesList, options = {}) {
   if (!text || !speciesList?.length) return null
-  const lower = text.toLowerCase()
+  const lower = String(text).toLowerCase()
   // Đợt 65 — BUG người chơi báo: "đánh con nào cũng ra Charmander".
   // Nguyên nhân: hàm này quét cả tên Pokémon CỦA NGƯỜI CHƠI trong chính văn
   // ("Charmander của tôi lao vào cắn Rattata hoang") rồi sắp xếp theo ĐỘ DÀI
@@ -1047,14 +1070,15 @@ export function detectMentionedSpecies(text, speciesList, options = {}) {
   )
   let best = null
   for (const entry of speciesList) {
-    const name = entry.name.toLowerCase()
-    if (exclude.has(name)) continue
-    const at = lower.lastIndexOf(name)
-    if (at === -1) continue
-    // Ưu tiên tên xuất hiện MUỘN NHẤT; nếu cùng vị trí thì tên dài hơn
-    // (tránh "Rat" ăn trước "Raticate").
-    if (!best || at > best.at || (at === best.at && name.length > best.name.length)) {
-      best = { entry, at, name }
+    if (speciesEntryExcluded(entry, exclude)) continue
+    for (const name of speciesDetectionNames(entry, options)) {
+      const at = lower.lastIndexOf(name)
+      if (at === -1) continue
+      // Ưu tiên tên xuất hiện MUỘN NHẤT; nếu cùng vị trí thì tên dài hơn
+      // (tránh "Rat" ăn trước "Raticate").
+      if (!best || at > best.at || (at === best.at && name.length > best.name.length)) {
+        best = { entry, at, name }
+      }
     }
   }
   return best?.entry ?? null
@@ -1109,9 +1133,9 @@ export function detectBattleOpponentSpecies(text, speciesList, options = {}) {
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
   let best = null
   for (const entry of speciesList) {
-    const names = [entry.name, entry.species].filter(Boolean).map((v) => String(v).toLowerCase())
-    for (const name of new Set(names)) {
-      if (exclude.has(name)) continue
+    if (speciesEntryExcluded(entry, exclude)) continue
+    const names = speciesDetectionNames(entry, options)
+    for (const name of names) {
       let at = lower.indexOf(name)
       while (at !== -1) {
         const score = battleMentionScore(lower, at, name.length)
@@ -1130,9 +1154,9 @@ export function detectBattleOpponentSpeciesList(text, speciesList, options = {})
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
   const bestByEntry = new Map()
   for (const entry of speciesList) {
-    const names = [entry.name, entry.species].filter(Boolean).map((v) => String(v).toLowerCase())
-    for (const name of new Set(names)) {
-      if (exclude.has(name)) continue
+    if (speciesEntryExcluded(entry, exclude)) continue
+    const names = speciesDetectionNames(entry, options)
+    for (const name of names) {
       let at = lower.indexOf(name)
       while (at !== -1) {
         const score = battleMentionScore(lower, at, name.length)
@@ -1155,11 +1179,12 @@ export function detectMentionedSpeciesList(text, speciesList, options = {}) {
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
   const hits = []
   for (const entry of speciesList) {
-    const name = entry.name.toLowerCase()
-    let at = lower.indexOf(name)
-    while (at !== -1) {
-      hits.push({ entry, at, end: at + name.length, len: name.length })
-      at = lower.indexOf(name, at + Math.max(1, name.length))
+    for (const name of speciesDetectionNames(entry, options)) {
+      let at = lower.indexOf(name)
+      while (at !== -1) {
+        hits.push({ entry, at, end: at + name.length, len: name.length })
+        at = lower.indexOf(name, at + Math.max(1, name.length))
+      }
     }
   }
 
@@ -1178,7 +1203,7 @@ export function detectMentionedSpeciesList(text, speciesList, options = {}) {
   const seen = new Set()
   for (const hit of nonOverlapping) {
     const key = hit.entry.name.toLowerCase()
-    if (exclude.has(key) || seen.has(key)) continue
+    if (speciesEntryExcluded(hit.entry, exclude) || seen.has(key)) continue
     seen.add(key)
     out.push(hit.entry)
   }

@@ -1052,36 +1052,43 @@ function speciesEntryExcluded(entry, exclude) {
     .some((value) => exclude.has(String(value).toLowerCase()))
 }
 
-export function detectMentionedSpecies(text, speciesList, options = {}) {
-  if (!text || !speciesList?.length) return null
+function collectNonOverlappingSpeciesHits(text, speciesList, options = {}) {
+  if (!text || !speciesList?.length) return []
   const lower = String(text).toLowerCase()
-  // Đợt 65 — BUG người chơi báo: "đánh con nào cũng ra Charmander".
-  // Nguyên nhân: hàm này quét cả tên Pokémon CỦA NGƯỜI CHƠI trong chính văn
-  // ("Charmander của tôi lao vào cắn Rattata hoang") rồi sắp xếp theo ĐỘ DÀI
-  // TÊN — "Charmander" (10 ký tự) luôn thắng "Rattata" (7) → đối thủ hoang
-  // dã biến thành bản sao Pokémon của chính người chơi, lượt nào cũng vậy.
-  // Sửa: (1) loại trừ tên trong đội hình người chơi; (2) chọn theo VỊ TRÍ
-  // XUẤT HIỆN CUỐI (tên nhắc sau thường là đối thủ vừa xuất hiện) thay vì
-  // theo độ dài tên.
-  const exclude = new Set(
-    (options.excludeNames ?? [])
-      .filter(Boolean)
-      .map((n) => String(n).toLowerCase()),
-  )
-  let best = null
+  const hits = []
   for (const entry of speciesList) {
-    if (speciesEntryExcluded(entry, exclude)) continue
     for (const name of speciesDetectionNames(entry, options)) {
-      const at = lower.lastIndexOf(name)
-      if (at === -1) continue
-      // Ưu tiên tên xuất hiện MUỘN NHẤT; nếu cùng vị trí thì tên dài hơn
-      // (tránh "Rat" ăn trước "Raticate").
-      if (!best || at > best.at || (at === best.at && name.length > best.name.length)) {
-        best = { entry, at, name }
+      let at = lower.indexOf(name)
+      while (at !== -1) {
+        hits.push({ entry, name, at, end: at + name.length, len: name.length })
+        at = lower.indexOf(name, at + Math.max(1, name.length))
       }
     }
   }
-  return best?.entry ?? null
+
+  // Dot144: tên bản địa có chuỗi lồng nhau rất thường xuyên. Ví dụ
+  // 可可多拉 (Aron) chứa nguyên 可多拉 (Lairon). Phải giữ span DÀI NHẤT
+  // trước rồi mới loại Pokémon phe mình. Nếu exclude Aron trước, alias ngắn
+  // 可多拉 sẽ còn sót và detector biến Aron của người chơi thành Lairon địch.
+  hits.sort((a, b) => a.at - b.at || b.len - a.len)
+  const kept = []
+  for (const hit of hits) {
+    if (kept.some((old) => hit.at < old.end && hit.end > old.at)) continue
+    kept.push(hit)
+  }
+  return kept
+}
+
+export function detectMentionedSpecies(text, speciesList, options = {}) {
+  if (!text || !speciesList?.length) return null
+  const exclude = new Set(
+    (options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()),
+  )
+  const hits = collectNonOverlappingSpeciesHits(text, speciesList, options)
+    .filter((hit) => !speciesEntryExcluded(hit.entry, exclude))
+  if (!hits.length) return null
+  hits.sort((a, b) => b.at - a.at || b.len - a.len)
+  return hits[0].entry
 }
 
 
@@ -1101,7 +1108,7 @@ const BATTLE_ACTIVE_CUES = [
   'bước ra sân', 'lao ra sân', 'đối thủ', 'đối phương', 'pokemon đối phương',
   'pokémon đối phương', 'sẽ dùng', 'chọn dùng', 'cử ra', 'triệu hồi', 'battle begins',
   'xuất hiện giữa sân', 'xuất hiện trên sân', 'hiện ra giữa sân', 'hiện ra trên sân', 'sent out', 'sends out', 'entered the field',
-  '出战', '派出', '放出', '登场', '进入战场', '对手', '对方', '发起挑战', '发动攻击', '摆出战斗姿态',
+  '出战', '派出', '放出', '登场', '进入战场', '对手', '对方', '发起挑战', '发动攻击', '攻击', '挑衅', '冲锋', '发起冲锋', '摆出战斗姿态',
 ]
 const BATTLE_SPECTATOR_CUES = [
   'khán đài', 'khán giả', 'đứng xem', 'ngồi xem', 'xem trận', 'cổ vũ', 'đứng ngoài',
@@ -1132,16 +1139,11 @@ export function detectBattleOpponentSpecies(text, speciesList, options = {}) {
   const lower = String(text).toLowerCase()
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
   let best = null
-  for (const entry of speciesList) {
-    if (speciesEntryExcluded(entry, exclude)) continue
-    const names = speciesDetectionNames(entry, options)
-    for (const name of names) {
-      let at = lower.indexOf(name)
-      while (at !== -1) {
-        const score = battleMentionScore(lower, at, name.length)
-        if (!best || score > best.score || (score === best.score && at > best.at)) best = { entry, score, at }
-        at = lower.indexOf(name, at + Math.max(1, name.length))
-      }
+  for (const hit of collectNonOverlappingSpeciesHits(text, speciesList, options)) {
+    if (speciesEntryExcluded(hit.entry, exclude)) continue
+    const score = battleMentionScore(lower, hit.at, hit.name.length)
+    if (!best || score > best.score || (score === best.score && hit.at > best.at)) {
+      best = { entry: hit.entry, score, at: hit.at }
     }
   }
   // Nếu tất cả mention đều mang ngữ cảnh spectator rất rõ thì đừng chọn bừa.
@@ -1153,18 +1155,11 @@ export function detectBattleOpponentSpeciesList(text, speciesList, options = {})
   const lower = String(text).toLowerCase()
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
   const bestByEntry = new Map()
-  for (const entry of speciesList) {
-    if (speciesEntryExcluded(entry, exclude)) continue
-    const names = speciesDetectionNames(entry, options)
-    for (const name of names) {
-      let at = lower.indexOf(name)
-      while (at !== -1) {
-        const score = battleMentionScore(lower, at, name.length)
-        const old = bestByEntry.get(entry)
-        if (!old || score > old.score || (score === old.score && at > old.at)) bestByEntry.set(entry, { score, at })
-        at = lower.indexOf(name, at + Math.max(1, name.length))
-      }
-    }
+  for (const hit of collectNonOverlappingSpeciesHits(text, speciesList, options)) {
+    if (speciesEntryExcluded(hit.entry, exclude)) continue
+    const score = battleMentionScore(lower, hit.at, hit.name.length)
+    const old = bestByEntry.get(hit.entry)
+    if (!old || score > old.score || (score === old.score && hit.at > old.at)) bestByEntry.set(hit.entry, { score, at: hit.at })
   }
   return [...bestByEntry.entries()]
     .filter(([, hit]) => hit.score > 5)
@@ -1172,43 +1167,22 @@ export function detectBattleOpponentSpeciesList(text, speciesList, options = {})
     .map(([entry]) => entry)
 }
 
+
 /** Trả về nhiều loài được nhắc, theo thứ tự xuất hiện từ sớm tới muộn. */
 export function detectMentionedSpeciesList(text, speciesList, options = {}) {
   if (!text || !speciesList?.length) return []
-  const lower = text.toLowerCase()
   const exclude = new Set((options.excludeNames ?? []).filter(Boolean).map((n) => String(n).toLowerCase()))
-  const hits = []
-  for (const entry of speciesList) {
-    for (const name of speciesDetectionNames(entry, options)) {
-      let at = lower.indexOf(name)
-      while (at !== -1) {
-        hits.push({ entry, at, end: at + name.length, len: name.length })
-        at = lower.indexOf(name, at + Math.max(1, name.length))
-      }
-    }
-  }
-
-  // Tên Pokémon có thể nằm trong tên khác (Mew trong Mewtwo, Mime trong
-  // Mr. Mime). Chọn span dài nhất ở cùng vị trí rồi bỏ mọi hit chồng lấn.
-  // Làm bước này TRƯỚC exclude để Pokémon phe mình bị loại không vô tình
-  // để lại một tên ngắn giả ở bên trong tên của chính nó.
-  hits.sort((a, b) => a.at - b.at || b.len - a.len)
-  const nonOverlapping = []
-  for (const hit of hits) {
-    if (nonOverlapping.some((kept) => hit.at < kept.end && hit.end > kept.at)) continue
-    nonOverlapping.push(hit)
-  }
-
   const out = []
   const seen = new Set()
-  for (const hit of nonOverlapping) {
-    const key = hit.entry.name.toLowerCase()
+  for (const hit of collectNonOverlappingSpeciesHits(text, speciesList, options)) {
+    const key = String(hit.entry.name ?? hit.entry.species ?? '').toLowerCase()
     if (speciesEntryExcluded(hit.entry, exclude) || seen.has(key)) continue
     seen.add(key)
     out.push(hit.entry)
   }
   return out
 }
+
 
 /**
  * Chọn ngẫu nhiên 1 loài và sinh Pokémon hoang dã Lv.8-15.

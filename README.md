@@ -1,3 +1,41 @@
+## Đợt 144 — Shop 中文 hoàn chỉnh + chặn nhận nhầm Pokémon do alias lồng nhau (24/09/2026)
+
+### Shop khi chọn `简体中文`
+
+- `ShopModal` không còn hiển thị chrome tiếng Việt: ví tiền, quy mô, mặc cả, hỏi chủ quán, category, tổng tiền, nút mua/rời shop và tooltip đều đi theo UI VI/EN/ZH.
+- Hàng dân dụng sinh tự động có lớp **display localization** riêng: tên dòng sản phẩm, màu/biến thể, mô tả và nhãn category đổi sang 简体中文 nhưng `id/name` nội bộ vẫn giữ nguyên để save/inventory không bị đổi schema.
+- Tìm hàng / highlight lời chủ quán hiểu cả tên canonical và tên đang hiển thị tiếng Trung.
+- `detectShopType()` hiểu thêm `服装/时装/登山/攀岩/户外/露营/杂货/便利店/超市`; quy mô `小型/中型/大型` cũng được hiểu đúng.
+
+### Battle 中文 — lỗi `小拳石` bị biến thành `可多拉/Lairon`
+
+- Root cause: `可可多拉` (Aron) **chứa nguyên chuỗi** `可多拉` (Lairon). Detector cũ loại Aron phe người chơi trước rồi mới quét, khiến phần tên ngắn `可多拉` còn sót và bị coi là Pokémon đối thủ.
+- Dot144 gom toàn bộ mention trước, giữ **span dài nhất không chồng lấn**, sau đó mới áp `excludeNames`. Cùng luật được dùng cho `detectMentionedSpecies`, `detectMentionedSpeciesList`, `detectBattleOpponentSpecies` và list battle.
+- Bổ sung cue 中文 `挑衅 / 冲锋 / 发起冲锋 / 攻击` để cảnh như ảnh báo lỗi ưu tiên đúng Pokémon đang thách đấu.
+- Catalog PokeAPI đầy đủ vẫn được tải/cache như Dot143, nhưng có thêm lõi alias offline cho các loài quan trọng/đã báo lỗi (`小拳石`, `可可多拉`, `可多拉`, `波士可多拉`, `利欧路`, `肯泰罗`...). Nếu jsDelivr/GitHub khó truy cập ở Trung Quốc, detector vẫn có deterministic fallback thay vì ném lỗi rồi rơi sang AI/random.
+
+### Regression
+
+- `test-dot144.mjs`: **9/9 PASS**.
+- **43/43 active regression files PASS** (`73, 74, 99–121, 124–126, 128–130, 133–144`).
+- `84` file `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript transpiler.
+- Chưa chạy Vite build đầy đủ vì gói bàn giao không có `node_modules`.
+
+### File runtime cần cập nhật GitHub
+
+- `src/i18n/shopLocalization.js` **(mới)**
+- `src/components/ShopModal.jsx`
+- `src/data/shopGenerator.js`
+- `src/utils/pokemonNameTranslations.js`
+- `src/data/pokemonSpecies.js`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot144.mjs` chỉ nằm trong full ZIP, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 143 — nhận diện đúng Pokémon tên 中文 trong battle + localize battle intro (22/09/2026)
 
 ### Báo lỗi thực tế

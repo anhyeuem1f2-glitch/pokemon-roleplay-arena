@@ -14,6 +14,48 @@ const SOURCES = [
   'https://raw.githubusercontent.com/PokeAPI/pokeapi/master/data/v2/csv/pokemon_species_names.csv',
 ]
 
+// Dot144: lõi alias offline cho các loài dễ gặp + các chuỗi tên Trung lồng
+// nhau đã gây lỗi thật. Catalog mạng vẫn bổ sung đầy đủ 1025 loài, nhưng khi
+// GitHub/jsDelivr chập chờn (đặc biệt ở Trung Quốc) battle không được rơi
+// thẳng sang AI/random nữa.
+const BUILTIN_ZH_SPECIES = [
+  [25, '皮卡丘', 'Pikachu'], [26, '雷丘', 'Raichu'],
+  [50, '地鼠', 'Diglett'], [51, '三地鼠', 'Dugtrio'],
+  [74, '小拳石', 'Geodude'], [75, '隆隆石', 'Graveler'], [76, '隆隆岩', 'Golem'],
+  [79, '呆呆兽', 'Slowpoke'], [80, '呆壳兽', 'Slowbro'],
+  [92, '鬼斯', 'Gastly'], [93, '鬼斯通', 'Haunter'], [94, '耿鬼', 'Gengar'],
+  [111, '独角犀牛', 'Rhyhorn'], [112, '钻角犀兽', 'Rhydon'],
+  [128, '肯泰罗', 'Tauros'], [129, '鲤鱼王', 'Magikarp'], [130, '暴鲤龙', 'Gyarados'],
+  [133, '伊布', 'Eevee'], [143, '卡比兽', 'Snorlax'], [150, '超梦', 'Mewtwo'], [151, '梦幻', 'Mew'],
+  [304, '可可多拉', 'Aron'], [305, '可多拉', 'Lairon'], [306, '波士可多拉', 'Aggron'],
+  [384, '烈空坐', 'Rayquaza'], [447, '利欧路', 'Riolu'], [448, '路卡利欧', 'Lucario'],
+  [506, '小约克', 'Lillipup'], [507, '哈约克', 'Herdier'], [508, '长毛狗', 'Stoutland'],
+]
+
+function builtInCatalog() {
+  const byId = {}
+  const byName = {}
+  const byCanonical = {}
+  for (const [id, zh, en] of BUILTIN_ZH_SPECIES) {
+    byId[String(id)] = zh
+    byName[normalizeLocalizedPokemonName(zh)] = id
+    byCanonical[normalizeLocalizedPokemonName(en)] = zh
+  }
+  return { byId, byName, byCanonical }
+}
+
+export function getBuiltInZhPokemonSpeciesNames() {
+  return builtInCatalog()
+}
+
+function mergeCatalog(base, extra) {
+  return {
+    byId: { ...(base?.byId ?? {}), ...(extra?.byId ?? {}) },
+    byName: { ...(base?.byName ?? {}), ...(extra?.byName ?? {}) },
+    byCanonical: { ...(base?.byCanonical ?? {}), ...(extra?.byCanonical ?? {}) },
+  }
+}
+
 function parseCsvLine(line) {
   const out = []
   let value = ''
@@ -105,23 +147,25 @@ export function getCachedZhPokemonSpeciesNames() {
 }
 
 export async function loadZhPokemonSpeciesNames() {
-  if (memoryCache?.byId && Object.keys(memoryCache.byId).length > 500) return memoryCache
+  if (memoryCache?.byId) return memoryCache
   if (inFlight) return inFlight
 
   inFlight = (async () => {
+    const offline = builtInCatalog()
     const cached = await readLargeCache(CACHE_KEY)
     const cachedData = cached?.data?.byId ? cached.data : null
     if (cachedData && Date.now() - Number(cached.savedAt || 0) < CACHE_MAX_AGE) {
-      memoryCache = cachedData
-      return cachedData
+      memoryCache = mergeCatalog(offline, cachedData)
+      return memoryCache
     }
 
     let lastError = null
     for (const url of SOURCES) {
       try {
         const csv = await fetchText(url)
-        const data = buildZhPokemonSpeciesNameMap(csv)
-        if (Object.keys(data.byId).length < 500) throw new Error('Catalog tên Pokémon Trung không đầy đủ')
+        const remote = buildZhPokemonSpeciesNameMap(csv)
+        if (Object.keys(remote.byId).length < 500) throw new Error('Catalog tên Pokémon Trung không đầy đủ')
+        const data = mergeCatalog(offline, remote)
         memoryCache = data
         await writeLargeCache(CACHE_KEY, { savedAt: Date.now(), data })
         return data
@@ -130,12 +174,11 @@ export async function loadZhPokemonSpeciesNames() {
       }
     }
 
-    // Cache cũ vẫn tốt hơn AI/random khi CDN tạm thời lỗi.
-    if (cachedData && Object.keys(cachedData.byId).length > 500) {
-      memoryCache = cachedData
-      return cachedData
-    }
-    throw lastError ?? new Error('Không tải được catalog tên Pokémon tiếng Trung')
+    // Stale cache hoặc lõi offline vẫn deterministic hơn AI/random. Không
+    // ném lỗi chỉ vì CDN Trung Quốc chặn GitHub/jsDelivr.
+    memoryCache = mergeCatalog(offline, cachedData)
+    if (lastError && typeof console !== 'undefined') console.warn('[pokemon-name-zh] remote catalog unavailable; using offline aliases', lastError)
+    return memoryCache
   })()
 
   try {
@@ -144,6 +187,7 @@ export async function loadZhPokemonSpeciesNames() {
     inFlight = null
   }
 }
+
 
 export function zhSpeciesDetectOptions(catalog) {
   return catalog?.byId ? { localizedNamesByNum: catalog.byId, localizedNamesByCanonical: catalog.byCanonical ?? {} } : {}

@@ -203,18 +203,18 @@ export function detectShopType(typeStr, shopName = '') {
   // `type`. Phải suy loại từ CẢ tên shop, nếu không Poké Mart bị rơi về
   // `general` và mất toàn bộ quầy Poké Ball/thuốc. Hỗ trợ cả VI/EN/ZH.
   if (/trainer|pok[ée]?\s*mart|pokemart|poke\s*mart|mart|poké|poke|bóng|thuốc|宝可梦商店|宝可梦友好商店|友好商店|精灵商店|精灵中心商店/.test(t)) return 'trainer'
-  if (/quần áo|thời trang|clothes|may mặc/.test(t)) return 'clothes'
-  if (/leo núi|climb/.test(t)) return 'climbing'
-  if (/dã ngoại|cắm trại|lều|outdoor|camping/.test(t)) return 'outdoor'
-  if (/tạp hoá|tạp hóa|thực phẩm|grocery|chợ/.test(t)) return 'grocery'
+  if (/quần áo|thời trang|clothes|may mặc|服装|时装|衣服|服饰/.test(t)) return 'clothes'
+  if (/leo núi|climb|登山|攀岩|攀爬/.test(t)) return 'climbing'
+  if (/dã ngoại|cắm trại|lều|outdoor|camping|户外|露营|帐篷/.test(t)) return 'outdoor'
+  if (/tạp hoá|tạp hóa|thực phẩm|grocery|chợ|杂货|食品|便利店|超市/.test(t)) return 'grocery'
   return 'general'
 }
 
 /** Số món theo quy mô: nhỏ 30-60, vừa 90-150, lớn 200-300 (seed quyết định số lẻ). */
 function countForSize(sizeStr, rng) {
   const t = (sizeStr ?? '').toLowerCase()
-  if (/lớn|to|big|large/.test(t)) return 200 + Math.floor(rng() * 101)
-  if (/nhỏ|small|bé/.test(t)) return 30 + Math.floor(rng() * 31)
+  if (/lớn|to|big|large|大型|大/.test(t)) return 200 + Math.floor(rng() * 101)
+  if (/nhỏ|small|bé|小型|小/.test(t)) return 30 + Math.floor(rng() * 31)
   return 90 + Math.floor(rng() * 61) // vừa (mặc định)
 }
 
@@ -269,6 +269,15 @@ export function generateShopItems(shop) {
       friendship: c.fam.friendship ?? 0,
       humanHeal: c.fam.humanHeal ?? null,
       desc: `${c.fam.desc} — ${c.brand.blurb}.`,
+      // Dot144: metadata hiển thị riêng để UI có thể dịch sang 中文 mà
+      // inventory/save/AI vẫn giữ tên canonical ổn định bằng tiếng Việt.
+      generatedShopItem: true,
+      shopBrand: c.brand.name,
+      shopBase: c.fam.base,
+      shopVariant: c.v ?? null,
+      shopSize: c.sz ?? null,
+      shopSourceDesc: c.fam.desc,
+      shopBrandBlurb: c.brand.blurb,
     })
   }
   return items

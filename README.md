@@ -1,3 +1,33 @@
+## Đợt 145 — Sandbox search: vật phẩm A→Z + tìm Pokémon bằng English/中文 (24/09/2026)
+
+### Creative / Sandbox UX
+
+- `Vật phẩm khởi đầu` có ô tìm kiếm riêng; danh sách được lọc rồi **sắp A→Z theo tên canonical English**, đồng thời chia `optgroup` theo chữ cái đầu để người dùng Trung Quốc dùng phần mềm dịch vẫn dò nhanh.
+- Pokémon Builder có tìm kiếm thật theo **English hoặc 简体中文**. Query `小拳石` resolve trực tiếp về canonical `Geodude`; query một phần như `小拳` cũng hiện kết quả gợi ý.
+- Mỗi kết quả Pokémon hiển thị cặp `中文 · English` + số Pokédex để kiểm tra nhanh mapping tiếng Trung có khớp đúng species hay không.
+- Kết quả Pokémon giữ thứ tự số Pokédex trong cùng mức khớp, nên các line tiến hoá liền nhau dễ đối chiếu hơn.
+- Không đổi canonical species trong save/battle; tên 中文 chỉ là lớp tìm kiếm/hiển thị.
+- Catalog 中文 dùng loader/cache của Dot143/144; khi remote catalog chưa sẵn sàng vẫn giữ lõi alias offline đã có.
+
+### Regression
+
+- `test-dot145.mjs`: **8/8 PASS**.
+- **44/44 active regression files PASS** (`73, 74, 99–121, 124–126, 128–130, 133–145`).
+- `85` file `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript transpiler.
+- Chưa chạy Vite build đầy đủ vì full ZIP không chứa `node_modules`.
+
+### File runtime cần cập nhật GitHub
+
+- `src/utils/sandboxSearch.js` **(mới)**
+- `src/components/IntroScreen.jsx`
+- `src/i18n/zhStaticCatalog.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot145.mjs` chỉ nằm trong full ZIP, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 144 — Shop 中文 hoàn chỉnh + chặn nhận nhầm Pokémon do alias lồng nhau (24/09/2026)
 
 ### Shop khi chọn `简体中文`

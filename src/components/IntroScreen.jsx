@@ -42,6 +42,8 @@ import LanguageSwitcher from './LanguageSwitcher.jsx'
 import { musicManager } from '../utils/musicManager.js'
 import { applyDynamicStateUpdates } from '../data/dynamicState.js'
 import { saveSandboxBootstrap } from '../utils/sandboxBootstrap.js'
+import { loadZhPokemonSpeciesNames, getCachedZhPokemonSpeciesNames } from '../utils/pokemonNameTranslations.js'
+import { filterAndSortSandboxItems, groupSandboxItemsByInitial, localizedPokemonNameForEntry, resolveSandboxPokemonEntry, searchSandboxPokemon } from '../utils/sandboxSearch.js'
 import { estimateStateChangeLoad } from '../utils/stateScanPlan.js'
 
 // ============ MÀN TẠO NHÂN VẬT v3 — WIZARD 4 TRANG (đợt 34) ============
@@ -415,8 +417,10 @@ export default function IntroScreen({ onOpenSettings }) {
   // species/form, không chỉ bộ level-up ngẫu nhiên lúc build mon.
   const [sandboxStarterMoveIds, setSandboxStarterMoveIds] = useState([])
   const [sandboxMoveSearch, setSandboxMoveSearch] = useState('')
+  const [sandboxZhPokemonCatalog, setSandboxZhPokemonCatalog] = useState(() => getCachedZhPokemonSpeciesNames())
   const [editingSandboxStarterIndex, setEditingSandboxStarterIndex] = useState(null)
   const [sandboxItems, setSandboxItems] = useState([])
+  const [sandboxItemSearch, setSandboxItemSearch] = useState('')
   const [sandboxItemId, setSandboxItemId] = useState('pokeball')
   const [sandboxItemQty, setSandboxItemQty] = useState('1')
   const [sandboxItemInfinite, setSandboxItemInfinite] = useState(false)
@@ -477,10 +481,23 @@ export default function IntroScreen({ onOpenSettings }) {
     : getIdentityV2(playerIdentity)
   const sandboxMode = normalizeGameMode(storyTone) === 'sandbox'
   const activeSteps = STEPS.filter((entry) => entry.key !== 'sandbox' || sandboxMode)
-  const sandboxBaseStarterEntry = pokedexSpecies.find((entry) =>
-    entry.name.toLowerCase() === sandboxStarterSpecies.trim().toLowerCase()
-    || pokemonId(entry.species) === pokemonId(sandboxStarterSpecies),
-  ) ?? null
+
+  useEffect(() => {
+    if (!sandboxMode) return undefined
+    let alive = true
+    loadZhPokemonSpeciesNames()
+      .then((catalog) => {
+        if (alive) setSandboxZhPokemonCatalog(catalog)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [sandboxMode])
+
+  const sandboxBaseStarterEntry = resolveSandboxPokemonEntry(pokedexSpecies, sandboxStarterSpecies, sandboxZhPokemonCatalog)
+  const sandboxPokemonMatches = searchSandboxPokemon(pokedexSpecies, sandboxStarterSpecies, sandboxZhPokemonCatalog, 24)
+  const sandboxSelectedZhName = localizedPokemonNameForEntry(sandboxBaseStarterEntry, sandboxZhPokemonCatalog)
+  const sandboxFilteredItems = filterAndSortSandboxItems(SHOP_ITEMS, sandboxItemSearch)
+  const sandboxItemGroups = groupSandboxItemsByInitial(sandboxFilteredItems)
   const sandboxStarterForms = sandboxFormFamily(sandboxBaseStarterEntry, pokedexSpecies)
   const sandboxEffectiveStarterEntry = (
     sandboxStarterFormSpecies
@@ -1546,10 +1563,9 @@ export default function IntroScreen({ onOpenSettings }) {
                 </div>
 
                 <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(190px,1.4fr) minmax(170px,1fr) 100px', gap: 8 }}>
-                  <div>
-                    <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Loài</label>
+                  <div style={{ position: 'relative' }}>
+                    <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Loài · tìm bằng English hoặc 中文</label>
                     <input
-                      list="sandbox-pokemon-list"
                       value={sandboxStarterSpecies}
                       onChange={(event) => {
                         setSandboxStarterSpecies(event.target.value)
@@ -1559,11 +1575,57 @@ export default function IntroScreen({ onOpenSettings }) {
                         setSandboxStarterMoveIds([])
                         setSandboxMoveSearch('')
                       }}
-                      placeholder="VD: Garchomp, Eevee, Giratina"
+                      placeholder="VD: Geodude / 小拳石 / Garchomp"
+                      autoComplete="off"
                     />
-                    <datalist id="sandbox-pokemon-list">
-                      {pokedexSpecies.map((entry) => <option key={entry.species ?? entry.name} value={entry.name} />)}
-                    </datalist>
+                    {sandboxStarterSpecies.trim() && !sandboxBaseStarterEntry && sandboxPokemonMatches.length > 0 && (
+                      <div style={{
+                        position: 'absolute', zIndex: 20, left: 0, right: 0, top: 'calc(100% + 4px)',
+                        maxHeight: 220, overflowY: 'auto', border: '1px solid var(--line)', borderRadius: 8,
+                        background: 'var(--bg-deep)', boxShadow: '0 12px 28px rgba(0,0,0,.35)',
+                      }}>
+                        {sandboxPokemonMatches.map((entry) => {
+                          const zh = localizedPokemonNameForEntry(entry, sandboxZhPokemonCatalog)
+                          const dex = Number(entry.num)
+                          return (
+                            <button
+                              key={`sandbox-search-${entry.species ?? entry.name}`}
+                              type="button"
+                              onClick={() => {
+                                setSandboxStarterSpecies(entry.name)
+                                setSandboxStarterFormSpecies('')
+                                setSandboxStarterAbilitySlot('auto')
+                                setSandboxStarterGender('auto')
+                                setSandboxStarterMoveIds([])
+                                setSandboxMoveSearch('')
+                              }}
+                              style={{
+                                display: 'grid', gridTemplateColumns: '52px minmax(0,1fr)', gap: 8, width: '100%',
+                                border: 0, borderBottom: '1px solid rgba(255,255,255,.045)', padding: '7px 9px',
+                                textAlign: 'left', cursor: 'pointer', background: 'transparent', color: 'inherit',
+                              }}
+                            >
+                              <span style={{ color: 'var(--text-dim)', fontSize: 9.5 }}>{Number.isFinite(dex) ? `#${String(dex).padStart(3, '0')}` : 'FORM'}</span>
+                              <span style={{ minWidth: 0 }}>
+                                <b style={{ color: 'var(--text-hi)', fontSize: 10.8 }}>{zh ? `${zh} · ` : ''}{entry.name}</b>
+                                {entry.forme && <span style={{ color: 'var(--text-dim)', fontSize: 9.2 }}> · {entry.forme}</span>}
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {sandboxBaseStarterEntry && (
+                      <div style={{ marginTop: 4, color: 'var(--text-dim)', fontSize: 9.7 }}>
+                        {sandboxSelectedZhName ? `中文 ${sandboxSelectedZhName} · ` : ''}English {sandboxBaseStarterEntry.name}
+                        {Number.isFinite(Number(sandboxBaseStarterEntry.num)) ? ` · #${String(Number(sandboxBaseStarterEntry.num)).padStart(3, '0')}` : ''}
+                      </div>
+                    )}
+                    {sandboxStarterSpecies.trim() && !sandboxBaseStarterEntry && sandboxPokemonMatches.length === 0 && (
+                      <div style={{ marginTop: 4, color: 'var(--text-dim)', fontSize: 9.7 }}>
+                        Không tìm thấy Pokémon khớp. Catalog 中文 sẽ tự tải/cache; có thể tiếp tục tìm bằng tên English.
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>Hình thái / Form</label>
@@ -1835,16 +1897,35 @@ export default function IntroScreen({ onOpenSettings }) {
               </div>
 
               <div style={{ marginTop: 16, padding: 12, border: '1px solid var(--line)', borderRadius: 10 }}>
-                <div style={{ color: 'var(--mint)', fontWeight: 800, marginBottom: 8 }}>Vật phẩm khởi đầu</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
+                  <div style={{ color: 'var(--mint)', fontWeight: 800 }}>Vật phẩm khởi đầu</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: 9.8 }}>{sandboxFilteredItems.length}/{SHOP_ITEMS.length} · A → Z</div>
+                </div>
+                <input
+                  value={sandboxItemSearch}
+                  onChange={(event) => {
+                    const query = event.target.value
+                    setSandboxItemSearch(query)
+                    const next = filterAndSortSandboxItems(SHOP_ITEMS, query)
+                    if (next.length && !next.some((item) => item.id === sandboxItemId)) setSandboxItemId(next[0].id)
+                  }}
+                  placeholder="Tìm vật phẩm theo tên…"
+                  style={{ marginBottom: 8 }}
+                />
                 <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'minmax(180px,1fr) 100px auto auto', gap: 8, alignItems: 'center' }}>
-                  <select value={sandboxItemId} onChange={(event) => setSandboxItemId(event.target.value)}>
-                    {SHOP_ITEMS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                  <select value={sandboxFilteredItems.some((item) => item.id === sandboxItemId) ? sandboxItemId : ''} onChange={(event) => setSandboxItemId(event.target.value)}>
+                    {sandboxItemGroups.length === 0 && <option value="">Không tìm thấy vật phẩm</option>}
+                    {sandboxItemGroups.map((group) => (
+                      <optgroup key={group.initial} label={group.initial}>
+                        {group.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </optgroup>
+                    ))}
                   </select>
                   <input type="number" min="1" value={sandboxItemQty} onChange={(event) => setSandboxItemQty(event.target.value)} />
                   <label style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 11.5, color: 'var(--text-mid)' }}>
                     <input type="checkbox" checked={sandboxItemInfinite} onChange={(event) => setSandboxItemInfinite(event.target.checked)} /> ∞
                   </label>
-                  <button className="btn" type="button" onClick={addSandboxItem}>+ Thêm</button>
+                  <button className="btn" type="button" disabled={!sandboxFilteredItems.length} onClick={addSandboxItem}>+ Thêm</button>
                 </div>
                 {sandboxItems.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>

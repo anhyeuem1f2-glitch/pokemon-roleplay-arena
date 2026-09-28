@@ -1,3 +1,79 @@
+## Đợt 147 — Chặn CoT trần của preset + cắt prose đúng điểm gặp Pokémon hoang dã (28/09/2026)
+
+### Preset làm lộ thinking khi provider làm rơi wrapper
+
+- Báo lỗi thực tế dùng preset Tawa/AvarsiSkull: preset chủ động yêu cầu output có `<thinking>...</thinking>` rồi `<content>...</content>` và còn dùng assistant prefill mở `<thinking>`. Một số proxy/model coi prefill là phần đã tồn tại rồi trả continuation mà không lặp lại thẻ mở; trường hợp test còn làm rơi cả `</thinking>`/`<content>`, nên regex/tag cleanup cũ không còn ranh giới để bóc CoT.
+- `outputCleanup.js` có thêm fallback **naked-CoT recovery** bảo thủ: chỉ kích hoạt khi đầu reply có đồng thời nhiều header `GIAI ĐOẠN/STAGE/STEP`, nhiều dòng `Tawa:`/`AvarsiSkull:` và scaffold checklist. Sau ranh giới xuất bản (`Xuất thẻ HTML ẩn`, `CHÍNH VĂN`, `FINAL PROSE`, ...), chỉ phần prose được hiển thị/lưu.
+- Phần scaffold bị ẩn vẫn được `extractThinking()` phục hồi cho tab Debug/Suy nghĩ; state tags nằm trong scaffold không được phép cập nhật save thật.
+- Văn bình thường không đủ ngưỡng scaffold sẽ không bị cắt, tránh regex quá rộng nuốt chính văn.
+
+### Wild encounter phải dừng prose và mở Battle UI
+
+- Test thực tế có `Zigzagoon hoang dã` lộ diện, rồi model tiếp tục tự kể Sandile lao tới/cắn bằng chữ vì không xuất `[[BATTLE]]`.
+- Thêm `src/utils/wildBattleGate.js`: sau khi detector xác định đúng đối thủ, app tìm **đoạn đầu tiên Pokémon hoang dã cụ thể lộ diện trực tiếp trước người chơi**. Nếu là encounter thật, reply bị cắt ngay sau đoạn reveal và app chèn `[[BATTLE]]` tại đó; mọi prose model tự bịa sau điểm này bị bỏ vì chưa xảy ra canon.
+- Không trigger với đoạn worldbook/Pokédex chỉ nói loài đó “thường gặp / sinh sống / phân bố / habitat / 栖息 / 分布”. Hỗ trợ VI/EN/简体中文 và dùng alias 中文 đã có từ Dot143–145.
+- `BATTLE_INSTRUCTION` cũng được siết lại: khi Pokémon hoang dã cụ thể xuất hiện trực tiếp, model phải dừng ở reveal/confrontation, không kể Pokémon người chơi lao vào ra chiêu và không kể đối phương phản công trước Battle UI.
+
+### Regression
+
+- `test-dot147.mjs`: **8/8 PASS**.
+- **46/46 active regression files PASS** (`73, 74, 99–121, 124–126, 128–130, 133–147`).
+- `87` file `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript transpiler.
+
+### File runtime cần cập nhật GitHub
+
+- `src/utils/outputCleanup.js`
+- `src/utils/wildBattleGate.js` **(mới)**
+- `src/components/RoleplayChat.jsx`
+- `src/utils/promptBuilder.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot147.mjs` chỉ nằm trong full ZIP, **không push GitHub** theo workflow hiện tại.
+
+---
+
+## Đợt 146 — Multi-worldbook + bố cục màn hình rộng (28/09/2026)
+
+### Nhiều Worldbook cùng lúc
+
+- Settings giờ cho **thêm nhiều file World Info/Lorebook `.json`** thay vì mỗi lần import lại ghi đè book cũ. Có thể chọn nhiều file một lượt hoặc thêm dần từng file.
+- Mỗi worldbook là một book độc lập, có nút bật/tắt/xoá riêng; entry bên trong vẫn bật/tắt riêng như trước. Import lại đúng cùng `sourceFileName` sẽ cập nhật book đó thay vì nhân đôi canon.
+- Dữ liệu cũ `{name, entries}` được migrate mềm sang collection `{books:[...]}` nên người dùng cũ không phải import lại chỉ vì schema mới.
+- Pipeline prompt dùng `getActiveWorldbookCollection()`: **mọi book đang bật đều cùng tham gia keyword scan**; constant entry của tất cả book luôn được chèn, keyword-hit từ tất cả book được gộp theo `order`. Mỗi block có prefix `[WORLDBOOK: <tên book>]` để model phân biệt nguồn.
+- Cả nhánh preset SillyTavern lẫn nhánh prompt mặc định đều nhận chung `wbActive`, nên AI nhìn thấy entry kích hoạt từ tất cả worldbook đã nạp.
+
+### Bố cục màn hình rộng
+
+- Settings > `Trò chuyện & bàn phím` có thêm `Bố cục màn hình`:
+  - `Tiêu chuẩn · khung truyện gọn` giữ layout cũ (main tối đa 760px).
+  - `Màn hình rộng / ultrawide · mở rộng khung truyện` gom HUD trái + story + HUD phải vào stage tối đa 1800px ở giữa và tăng story column tới 1120px.
+- Tùy chọn lưu trong `trainer-arena:chat-preferences`, thuộc thiết bị và không đi theo save. Mobile vẫn dùng layout mobile cũ.
+- Chuỗi setting/worldbook mới đã có VI/EN/简体中文 offline.
+
+### Regression
+
+- `test-dot146.mjs`: **8/8 PASS**.
+- **45/45 active regression files PASS** (`73, 74, 99–121, 124–126, 128–130, 133–146`).
+- `85` file `.js` qua `node --check`.
+- `55/55` file `.jsx` parse PASS bằng TypeScript transpiler.
+- Không chạy Vite build đầy đủ: `npm ci` trong môi trường bàn giao bị timeout; đã xoá `node_modules/dist` sau kiểm tra, ZIP không chứa dependency build.
+
+### File runtime cần cập nhật GitHub
+
+- `src/utils/worldbook.js`
+- `src/utils/buildMainMessages.js`
+- `src/context/GameContext.jsx`
+- `src/components/WorldbookSection.jsx`
+- `src/components/SettingsPage.jsx`
+- `src/App.jsx`
+- `src/i18n/uiStaticExtras.js`
+- `README.md`
+
+`BAN_GIAO_DU_AN.md` và `test-dot146.mjs` chỉ nằm trong full ZIP, **không push GitHub** theo workflow hiện tại.
+
+---
+
 ## Đợt 145 — Sandbox search: vật phẩm A→Z + tìm Pokémon bằng English/中文 (24/09/2026)
 
 ### Creative / Sandbox UX

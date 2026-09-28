@@ -1,5 +1,5 @@
 import { getActiveLoreEntries } from './lorebook.js'
-import { getActiveWorldbook } from './worldbook.js'
+import { getActiveWorldbookCollection } from './worldbook.js'
 import { buildCanonTrainerNote } from '../data/canonTrainers.js'
 import { applyPresetRegexToMessages, buildPresetMessages } from './presetImport.js'
 import { buildSystemPrompt, applyPlaceholders, BATTLE_INSTRUCTION } from './promptBuilder.js'
@@ -40,9 +40,9 @@ export function buildMainApiMessages({ character, playerName, stylePreset, mainP
   const actionChoiceLanguage = normalizeUiLanguage(uiLanguage)
   const actionChoicesInstruction = buildActionChoicesInstruction(actionChoiceLanguage)
 
-  // WORLDBOOK (đợt 41) — nguồn thông tin CHÍNH của người dùng; gộp với
+  // WORLDBOOK (Dot146) — TOÀN BỘ worldbook đang bật cùng tham gia quét; gộp với
   // lorebook cũ của character (nếu có). Đưa vào worldInfoBefore + system.
-  const wbActive = getActiveWorldbook(worldbook?.entries ?? [], scanText)
+  const wbActive = getActiveWorldbookCollection(worldbook, scanText)
   // ĐỘI HÌNH CANON tĩnh (đợt 48): nhắc tên gym leader/E4/Champion gốc →
   // chèn đội hình đúng game nguồn (chạy cả offline, bổ trợ lớp Bulbapedia).
   const canonTrainerNote = buildCanonTrainerNote(scanText)

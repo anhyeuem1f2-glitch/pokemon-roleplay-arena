@@ -26,6 +26,7 @@ import { completeSandboxBootstrap, loadSandboxBootstrap } from '../utils/sandbox
 import { DEFAULT_UI_LANGUAGE, normalizeUiLanguage, UI_LANGUAGE_STORAGE_KEY } from '../i18n/uiLanguage.js'
 import { DEFAULT_MOVE_NAME_MODE, MOVE_NAME_MODE_STORAGE_KEY, displayMoveName, normalizeMoveNameMode } from '../i18n/moveNames.js'
 import { loadZhMoveNames } from '../utils/moveNameTranslations.js'
+import { normalizeWorldbookCollection } from '../utils/worldbook.js'
 
 const STORAGE_KEY = 'trainer-arena:api-config'
 
@@ -56,12 +57,13 @@ function assistantSourceMessageId(mon) {
   return at > 0 ? source.slice(0, at) : null
 }
 
-const DEFAULT_CHAT_PREFERENCES = Object.freeze({ autoScroll: true, enterBehavior: 'send' })
+const DEFAULT_CHAT_PREFERENCES = Object.freeze({ autoScroll: true, enterBehavior: 'send', layoutMode: 'standard' })
 function normalizeChatPreferences(value) {
   const raw = value && typeof value === 'object' ? value : {}
   return {
     autoScroll: raw.autoScroll !== false,
     enterBehavior: raw.enterBehavior === 'newline' ? 'newline' : 'send',
+    layoutMode: raw.layoutMode === 'wide' ? 'wide' : 'standard',
   }
 }
 
@@ -198,17 +200,22 @@ export function GameProvider({ children }) {
   // nhập (đợt 41).
   const [character, setCharacter] = useState({ name: '', description: '', personality: '', scenario: '', first_mes: '', lorebook: [] })
 
-  // WORLDBOOK (World Info độc lập) — persist. {name, entries:[...]}.
+  // WORLDBOOK (World Info độc lập) — Dot146 hỗ trợ nhiều book song song.
+  // Dữ liệu cũ {name,entries} được migrate mềm sang {books:[...]} khi load.
   const [worldbook, setWorldbookState] = useState(() => {
     try {
       const saved = localStorage.getItem('trainer-arena:worldbook')
-      if (saved) return JSON.parse(saved)
+      if (saved) return normalizeWorldbookCollection(JSON.parse(saved))
     } catch { /* ignore */ }
-    return { name: '', entries: [] }
+    return { books: [] }
   })
   const setWorldbook = useCallback((next) => {
-    setWorldbookState(next)
-    try { localStorage.setItem('trainer-arena:worldbook', JSON.stringify(next)) } catch { /* ignore */ }
+    setWorldbookState((current) => {
+      const raw = typeof next === 'function' ? next(current) : next
+      const resolved = normalizeWorldbookCollection(raw)
+      try { localStorage.setItem('trainer-arena:worldbook', JSON.stringify(resolved)) } catch { /* ignore */ }
+      return resolved
+    })
   }, [])
 
   // --- Tính cách + thiên phú (đợt 69) ---

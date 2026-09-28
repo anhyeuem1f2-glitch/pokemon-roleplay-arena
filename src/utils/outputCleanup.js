@@ -66,6 +66,77 @@ const DEFAULT_SCRIPTS = [
   },
 ]
 
+
+// ===== CoT trần khi provider không trả lại wrapper (Dot147) =====
+// Một số proxy/model coi assistant-prefill "<thinking>..." là phần đã có sẵn
+// nên response chỉ chứa PHẦN TIẾP NỐI. Tệ hơn, có model còn bỏ luôn
+// </thinking>/<content>. Khi đó regex chuẩn không thể bắt được dù preset đúng.
+// Ta nhận diện scaffold lập kế hoạch với ngưỡng bảo thủ rồi chỉ lấy phần prose
+// sau ranh giới xuất bản. Không dùng heuristic này cho văn bình thường.
+const NAKED_COT_STAGE_RE = /^\s*(?:(?:GIAI\s*ĐOẠN|STAGE|阶段)\s*[0-9]+|STEP\.[0-9]+|\[[0-9]+(?:\.[0-9A-Za-z]+)?\s*[—-])/iu
+const NAKED_COT_SPEAKER_RE = /^\s*(?:AvarsiSkull|Tawa)\s*:/iu
+const NAKED_COT_BULLET_RE = /^\s*(?:[·•+*-]|\d+[.)])\s*(?:STEP|Kích hoạt|Kiểm tra|TÌM KIẾM|PHÁN QUYẾT|Triệu hồi|Neo giữ|Định vị|Suy diễn|Nhân vật|Thực thi|Lượt|Thời gian|Vị trí|Khoảng cách|Góc nhìn|Đánh giá|Điểm neo|Tín hiệu|Không áp dụng|Cần|BẮT BUỘC)/iu
+const NAKED_COT_PUBLISH_RE = /^\s*(?:\[BẮT BUỘC\]\s*)?(?:Xuất\s+thẻ\s+HTML\s+ẩn|BẮT\s*ĐẦU\s+CHÍNH\s*VĂN|CHÍNH\s*VĂN|FINAL\s+(?:ANSWER|PROSE|OUTPUT)|START\s+(?:CONTENT|PROSE)|开始正文|正文开始)\s*[:：]?\s*$/iu
+
+function isNakedCotScaffoldLine(line) {
+  const value = String(line ?? '').trim()
+  if (!value) return false
+  return NAKED_COT_STAGE_RE.test(value)
+    || NAKED_COT_SPEAKER_RE.test(value)
+    || NAKED_COT_BULLET_RE.test(value)
+    || /^\s*\[(?:LỆNH|THEME|TEXT_STYLE|CHECK|EDITOR|KHÓA|BANNED|THỰC THI|PIPELINE)/iu.test(value)
+}
+
+function splitNakedThinkingScaffold(text) {
+  const source = String(text ?? '')
+  if (!source.trim()) return null
+  // Wrapper còn nguyên thì nhánh chuẩn phía trên xử lý chính xác hơn.
+  if (/<(?:thinking|suy_ngh[ĩi]|content|story_scene|main_text|正文)\b/i.test(source)) return null
+
+  const lines = source.split(/\r?\n/)
+  const inspect = lines.slice(0, Math.min(lines.length, 260))
+  let stageHits = 0
+  let speakerHits = 0
+  let scaffoldHits = 0
+  for (const line of inspect) {
+    if (NAKED_COT_STAGE_RE.test(line)) stageHits += 1
+    if (NAKED_COT_SPEAKER_RE.test(line)) speakerHits += 1
+    if (isNakedCotScaffoldLine(line)) scaffoldHits += 1
+  }
+  // Cần nhiều dấu hiệu cùng lúc để không cắt nhầm truyện có chữ "stage/step".
+  if (scaffoldHits < 7 || stageHits < 2 || speakerHits < 2) return null
+
+  let boundary = inspect.findIndex((line) => NAKED_COT_PUBLISH_RE.test(line))
+  if (boundary < 0) {
+    // Fallback cho preset tương tự nhưng thiếu dòng "Xuất thẻ...": sau Giai
+    // đoạn/Stage 7, tìm đoạn prose dài đầu tiên không còn hình dạng checklist.
+    let finalStage = -1
+    for (let i = 0; i < inspect.length; i++) {
+      if (/(?:GIAI\s*ĐOẠN|STAGE|阶段)\s*7|Kết\s*thúc\s*CoT|Đóng\s*Gói\s*Tư\s*Duy/iu.test(inspect[i])) finalStage = i
+    }
+    if (finalStage >= 0) {
+      for (let i = finalStage + 1; i < inspect.length; i++) {
+        const value = inspect[i].trim()
+        if (!value || isNakedCotScaffoldLine(value)) continue
+        if (/^\s*(?:\[|<|```|AvarsiSkull:|Tawa:)/iu.test(value)) continue
+        if (value.length >= 120 && /[.!?…]/u.test(value)) {
+          boundary = i - 1
+          break
+        }
+      }
+    }
+  }
+  if (boundary < 0) return null
+
+  let storyStart = boundary + 1
+  while (storyStart < lines.length && !lines[storyStart].trim()) storyStart += 1
+  if (storyStart >= lines.length) return null
+  const story = lines.slice(storyStart).join('\n').trim()
+  const thinking = lines.slice(0, storyStart).join('\n').trim()
+  if (story.length < 80 || !thinking) return null
+  return { thinking, story }
+}
+
 // ===== Pipeline dịch song ngữ (đợt 45) =====
 // Một số preset (bản mod dịch) bắt model viết nháp tiếng Nhật trong <jp>,
 // rồi dịch sang tiếng Việt trong <vn>, kèm comment HTML điều khiển vòng lặp
@@ -141,6 +212,7 @@ export function cleanAiOutput(text, customScripts) {
     && originalHasProseBlock && !regexKeptProseBlock
   const working = regexProcessed.trim() && !suspiciousLoss ? regexProcessed : text
   const extracted = extractContent(working) ?? extractStoryScene(working)
+  const nakedSplit = extracted === null ? splitNakedThinkingScaffold(working) : null
   let cleaned
   if (extracted !== null) {
     // CÓ <content>: chính văn là phần trong đó. Vẫn gỡ nốt vài thẻ lồng
@@ -151,8 +223,10 @@ export function cleanAiOutput(text, customScripts) {
     // không bao giờ được gỡ. Giờ chạy ở CẢ 2 nhánh.
     for (const re of STRIP_BLOCKS) cleaned = cleaned.replace(re, '')
   } else {
-    // KHÔNG có <content>: gỡ block CoT/hậu kỳ, giữ phần còn lại.
-    cleaned = working
+    // KHÔNG có <content>: nếu provider làm rơi wrapper nhưng scaffold CoT vẫn
+    // còn nguyên, lấy thẳng phần prose sau ranh giới xuất bản. Đây là lỗi thật
+    // của các preset prefill kiểu Tawa/AvarsiSkull trên một số proxy Gemini.
+    cleaned = nakedSplit?.story ?? working
     if (!(customScripts ?? []).some((script) => script.enabled)) {
       for (const s of DEFAULT_SCRIPTS) {
         const regex = parseRegexLiteral(s.findRegexRaw)
@@ -185,7 +259,8 @@ export function cleanAiOutput(text, customScripts) {
 }
 
 export function extractStateTags(raw) {
-  const eligible = String(raw ?? '')
+  const nakedSplit = splitNakedThinkingScaffold(raw)
+  const eligible = String(nakedSplit?.story ?? raw ?? '')
     .replace(/<(?:thinking|suy_nghĩ|suy_nghi|tableThink)\b[^>]*>[\s\S]*?<\/(?:thinking|suy_nghĩ|suy_nghi|tableThink)>/gi, '')
     .replace(/<(?:user_input|interactive_input)\b[^>]*>[\s\S]*?<\/(?:user_input|interactive_input)>/gi, '')
     .replace(/<!--[\s\S]*?-->/g, '')
@@ -211,7 +286,9 @@ export function extractThinking(raw) {
   // hậu trường (CoT tuôn trần — đã gặp thực tế vụ Editor Pass).
   const ci = raw.search(/<content>/i)
   if (ci > 0) return raw.slice(0, ci).trim()
-  return ''
+  // Dot147: provider có thể làm rơi CẢ wrapper. Vẫn giữ phần scaffold trong
+  // viewer debug, nhưng tuyệt đối không để nó lọt vào chính văn.
+  return splitNakedThinkingScaffold(raw)?.thinking ?? ''
 }
 
 // Biến/trạng thái riêng của preset chỉ là lớp trình bày. Chúng KHÔNG được

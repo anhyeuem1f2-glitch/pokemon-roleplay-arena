@@ -38,7 +38,7 @@ function useIsMobile(breakpoint = 820) {
 }
 
 export default function App() {
-  const { apiConfig, gameStarted, setGameStarted, adminMode } = useGame()
+  const { apiConfig, gameStarted, setGameStarted, adminMode, chatPreferences } = useGame()
   const [showSettings, setShowSettings] = useState(false)
   const [showDev, setShowDev] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
@@ -46,6 +46,7 @@ export default function App() {
   // Trên mobile: mở/đóng từng HUD (mặc định đóng — chính văn là chính).
   const [mobilePanel, setMobilePanel] = useState(null) // null | 'left' | 'right'
   const configured = Boolean(apiConfig.baseUrl && apiConfig.model)
+  const wideLayout = !isMobile && chatPreferences?.layoutMode === 'wide'
 
   // Giao thức kín: không có nút, query URL hay gợi ý trên UI thường.
   useEffect(() => {
@@ -153,10 +154,31 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start' }}>
+      <div
+        data-layout-mode={wideLayout ? 'wide' : 'standard'}
+        style={{
+          display: 'flex',
+          flexDirection: isMobile ? 'column' : 'row',
+          alignItems: 'flex-start',
+          width: '100%',
+          maxWidth: wideLayout ? 1800 : undefined,
+          margin: wideLayout ? '0 auto' : undefined,
+          padding: wideLayout ? '0 20px' : undefined,
+          gap: wideLayout ? 18 : 0,
+        }}
+      >
         {/* HUD dọc trái kiểu Phàm Nhân Tu Tiên — chỉ hiện trong màn chơi. */}
         {(!isMobile || mobilePanel === 'left') && <PlayerHUD mobile={isMobile} />}
-        <main style={{ flex: 1, width: isMobile ? '100%' : undefined, maxWidth: isMobile ? '100%' : 760, margin: '0 auto', padding: isMobile ? '14px 12px 20px' : '24px 20px', minWidth: 0 }}>
+        <main
+          style={{
+            flex: 1,
+            width: isMobile ? '100%' : undefined,
+            maxWidth: isMobile ? '100%' : (wideLayout ? 1120 : 760),
+            margin: isMobile ? '0' : (wideLayout ? '0' : '0 auto'),
+            padding: isMobile ? '14px 12px 20px' : (wideLayout ? '24px 8px' : '24px 20px'),
+            minWidth: 0,
+          }}
+        >
           <RoleplayChat />
         </main>
         {/* Cột phải (đợt 26): mini map + Cài đặt + Màn hình chính. */}

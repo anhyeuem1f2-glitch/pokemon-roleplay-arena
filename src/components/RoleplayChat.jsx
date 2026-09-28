@@ -7,6 +7,7 @@ import { enrichItemDescription, itemDescriptionNeedsEnrichment, applyEnrichedIte
 import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { battleBelongsToPlayer } from '../utils/battleOwnership.js'
+import { directWildEncounterBoundary } from '../utils/wildBattleGate.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { resolveStoryLanguage } from '../i18n/storyLanguage.js'
@@ -172,8 +173,7 @@ const STRONG_BATTLE_CUE_RE = /(xuất\s*trận|ra\s*sân|tung\s+ra|sent\s+out|th
 // mở lại một trận đã được kể xong trong hồi tưởng.
 const BATTLE_RESULT_CUE_RE = /(đã\s+thắng|chiến\s+thắng|bị\s+đánh\s+bại|đã\s+thua|gục\s+ngã|mất\s+khả\s+năng\s+chiến\s+đấu|battle\s+(?:was\s+)?won|defeated|fainted|victory|取得(?:了)?胜利|赢得(?:了)?.{0,12}(?:战斗|对战)|输掉(?:了)?.{0,12}(?:战斗|对战)|被击败|失去战斗能力|战斗结束|对战结束)/iu
 const EXPLICIT_ZH_BATTLE_START_RE = /(发起(?:了)?挑战|向(?:你|玩家|主角)挑战|接受(?:了)?挑战|进入(?:了)?战斗|开始(?:了)?战斗|战斗(?:正式)?开始|准备(?:开始)?战斗|摆出(?:了)?战斗姿态|迎战|应战)/u
-
-function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames = [], detectOptions = {}) {
+export function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames = [], detectOptions = {}) {
   const text = String(storyText ?? '')
   if (!text.trim() || text.includes(BATTLE_MARKER)) return text
   if (BATTLE_RESULT_CUE_RE.test(text)) return text
@@ -182,6 +182,12 @@ function ensureBattleMarkerFromNarrative(storyText, userText, pokedex, ownNames 
 
   const activeOpponent = detectBattleOpponentSpecies(text, pokedex ?? [], { ...detectOptions, excludeNames: ownNames })
   const trainer = detectTrainerBattle(`${String(userText ?? '')}\n${text}`)
+  // Wild encounter trực tiếp: dừng NGAY đoạn Pokémon lộ diện. Không để model
+  // tự kể tiếp cú cắn/đòn đánh bằng chữ rồi mới đặt nút battle ở cuối response.
+  if (activeOpponent && !trainer.isTrainer) {
+    const boundary = directWildEncounterBoundary(text, activeOpponent, detectOptions)
+    if (boundary >= 0) return `${text.slice(0, boundary).trimEnd()}\n\n${BATTLE_MARKER}`
+  }
   // Với 中文, tên Pokémon thường được localize nên detector canonical English
   // có thể chưa resolve được loài. Chỉ cho phép fallback khi câu thách đấu là
   // cực kỳ rõ; những câu chỉ nhắc “攻击/战斗” chung chung vẫn cần opponent/trainer.

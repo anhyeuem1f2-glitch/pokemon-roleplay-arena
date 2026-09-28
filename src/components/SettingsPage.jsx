@@ -357,6 +357,20 @@ export default function SettingsPage({ onBack }) {
               Chế độ xuống dòng phù hợp điện thoại: bấm nút Gửi khi hoàn tất. Trên máy tính vẫn có Ctrl/⌘+Enter để gửi nhanh.
             </p>
           </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: 6 }}>{translateUiText('Bố cục màn hình', uiLanguage)}</label>
+            <select
+              value={chatPreferences?.layoutMode === 'wide' ? 'wide' : 'standard'}
+              onChange={(event) => setChatPreferences((cur) => ({ ...cur, layoutMode: event.target.value }))}
+              style={{ width: '100%' }}
+            >
+              <option value="standard">{translateUiText('Tiêu chuẩn · khung truyện gọn', uiLanguage)}</option>
+              <option value="wide">{translateUiText('Màn hình rộng / ultrawide · mở rộng khung truyện', uiLanguage)}</option>
+            </select>
+            <p style={{ fontSize: 11.5, color: 'var(--text-dim)', margin: '6px 0 0' }}>
+              {translateUiText('Chế độ màn hình rộng gom hai HUD và khung truyện vào một vùng lớn ở giữa, đồng thời tăng chiều rộng chính văn để tránh khoảng trống quá lớn trên màn 21:9 / 32:9.', uiLanguage)}
+            </p>
+          </div>
         </div>
       </div>
 

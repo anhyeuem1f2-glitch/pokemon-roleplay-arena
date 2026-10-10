@@ -1,4 +1,5 @@
 import { inferPokemonGenderFromStory, normalizePokemonGender } from '../data/pokemonGender.js'
+import { getBuiltInZhPokemonSpeciesNames, getCachedZhPokemonSpeciesNames, normalizeLocalizedPokemonName } from './pokemonNameTranslations.js'
 
 // ============ ĐỐI CHIẾU TAG VỚI CHÍNH VĂN (đợt 77) ============
 // Tag chỉ là dữ liệu máy đọc, KHÔNG phải bằng chứng. Mọi thay đổi save phải
@@ -331,7 +332,7 @@ const ACQUIRE = [
   'trở thành pokemon của', 'trở thành bạn đồng hành', 'vào đội', 'về đội',
   'đồng ý theo', 'chấp nhận đi cùng',
   'caught', 'joined the team', 'joined your team', 'became your pokemon', 'became your pokémon', 'became your partner', 'became your companion',
-  '捕获成功', '成功捕捉', '抓到了', '收服', '领取', '领到', '收下', '接过', '加入队伍', '加入了队伍', '进入队伍', '成为我的宝可梦', '成为玩家的宝可梦', '成为伙伴', '成为同伴', '同意同行', '跟随玩家',
+  '捕获成功', '成功捕捉', '抓到了', '收服', '给了', '送给', '交给', '赠送', '赠送给', '领取', '领到', '收下', '接过', '加入队伍', '加入了队伍', '进入队伍', '成为我的宝可梦', '成为玩家的宝可梦', '成为伙伴', '成为同伴', '同意同行', '跟随玩家',
   // Dot135: tiếng Trung tự nhiên thường chen 了/你的/第一只 giữa động từ và
   // danh từ, nên chuỗi cố định "成为伙伴" hoặc "加入队伍" không bắt được.
   /(?:正式)?成为(?:了)?(?:你|玩家|我)?(?:的)?(?:第一只|首只|初始)?宝可梦/u,
@@ -1019,21 +1020,105 @@ export function proseHasCompletedPokemonAcquisition(text) {
   ))
 }
 
-export function proseSupportsSemanticPokemonAcquisition(text, entry) {
-  const species = entry?.species ?? entry?.name ?? ''
-  const storyName = entry?.details?.storyName ?? entry?.storyName ?? entry?.localName ?? ''
-  if (storyName && proseSupportsPokemonAcquisition(text, storyName)) return true
-  if (species && proseSupportsPokemonAcquisition(text, species)) return true
+// Dot148: Canon ownership needs an *identified species* and the *recipient*,
+// not merely an AI evidence paraphrase mentioning that "some Pokémon" arrived.
+// English canonical + Chinese narrative must agree via the same bilingual
+// catalog used by the battle detector. Never infer a species from the AI alone.
+function pokemonNarrativeAliases(entry) {
+  const species = String(entry?.species ?? entry?.name ?? '').trim()
+  const storyName = String(entry?.details?.storyName ?? entry?.storyName ?? entry?.localName ?? '').trim()
+  const builtIn = getBuiltInZhPokemonSpeciesNames()
+  const cached = getCachedZhPokemonSpeciesNames()
+  const canonicalKey = normalizeLocalizedPokemonName(species)
+  const localized = cached?.byCanonical?.[canonicalKey] ?? builtIn.byCanonical?.[canonicalKey] ?? ''
+  const aliases = [...new Set([species, localized].filter(Boolean))]
+  if (storyName && normalizeLocalizedPokemonName(storyName) !== canonicalKey) {
+    // A claimed translation is not proof: verify that it resolves back to
+    // the same canonical species. This blocks Pikachu -> Mewtwo hallucinations.
+    const expectedZh = normalizeLocalizedPokemonName(localized)
+    const suppliedZh = normalizeLocalizedPokemonName(storyName)
+    if (expectedZh && suppliedZh === expectedZh) aliases.push(storyName)
+    else if (!/\p{Script=Han}/u.test(storyName) && suppliedZh === canonicalKey) aliases.push(storyName)
+  }
+  return aliases
+}
 
-  const inferred = inferPokemonAcquisitionStoryName(text, entry?.evidence ?? '')
-  if (inferred && proseSupportsPokemonAcquisition(text, inferred)) return true
+const OWNERSHIP_ACTION_ZH = /(?:领到|领取|收下|接过|获得|得到|收到|赠送|送给|给了|交给|交到|交付|捕获|捕捉|抓到|抓住|收服|加入|成为|归|获得了)/u
+const OWNERSHIP_ACTION_EN_VI = /(?:\b(?:receive[ds]?|obtain(?:ed)?|caught|captured|adopted|joined|given|gave|handed|accepted|gifted|became)\b|nhận|được\s+tặng|được\s+trao|bắt\s+được|thu\s+phục|gia\s+nhập|vào\s+đội)/iu
+const EXPLICIT_PLAYER_TRANSFER_VI_EN = /(?:\b(?:gave|gifted|handed|presented)\s+(?:me|you|the\s+player|the\s+trainer)\b|\b(?:i|you|the\s+player)\s+(?:received|obtained|caught|adopted)\b|(?:tôi|cậu|bạn|người\s*chơi|nhân\s*vật\s*chính)\s+(?:vừa\s+nhận|đã\s+nhận|nhận\s+lấy|được\s+trao|nhận\s+được)|(?:giáo\s*sư|người\s*bán|chủ\s*tiệm).{0,24}(?:trao|đưa|tặng)\s+(?:cho\s+)?(?:tôi|cậu|bạn|người\s*chơi))/iu
+const ZH_NONPLAYER_ACTOR_RE = /(?:^|[。！？；，\n])\s*([\p{Script=Han}]{2,8})(?:在[^。！？；，]{0,25})?(?:领到|领取|收下|接过|获得|得到|收到|捕获|抓到|收服)(?:了)?/u
+const NPC_RECEIVER_CUES = /(?:给了|交给|送给|赠送给|转交给)(?:小刚|小霞|小智|其他训练家|另一个人|朋友|同伴|他人|别人)|(?:gave|handed|gifted|sent)\s+(?:it\s+to\s+)?(?:brock|misty|ash|a\s+friend|another\s+trainer)/iu
 
-  const confidence = Number(entry?.confidence ?? 0)
-  if (confidence < 0.78) return false
-  const storyHasCompletedCue = proseHasCompletedPokemonAcquisition(text)
-  const evidence = String(entry?.evidence ?? '')
-  const evidenceHasCompletedCue = proseHasCompletedPokemonAcquisition(evidence)
-  return storyHasCompletedCue && evidenceHasCompletedCue
+function pokemonAcquisitionActorMatches(line, playerName = '') {
+  const source = String(line ?? '')
+  if (NPC_RECEIVER_CUES.test(source)) return false
+  const named = source.match(ZH_NONPLAYER_ACTOR_RE)
+  if (!named) return true
+  const actor = named[1]
+  if (/(?:你|我|玩家|主角|自己|训练家|博士|教授|他|她|他们|她们)/u.test(actor)) return true
+  return Boolean(playerName && (actor === playerName || actor.includes(playerName)))
+}
+
+function linkedAcquisitionSegments(text, entry, { playerName = '' } = {}) {
+  const aliases = pokemonNarrativeAliases(entry)
+  if (!aliases.length) return []
+  const sentences = storySentences(text)
+  const matches = []
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i]
+    if (!aliases.some((name) => mentions(sentence, name))) continue
+    // Actions must be in the same sentence (a short adjacent sentence can
+    // contain a completed transfer only when it refers to this exact monster).
+    const sameSentence = OWNERSHIP_ACTION_ZH.test(sentence) || OWNERSHIP_ACTION_EN_VI.test(sentence)
+    const linkedNext = i + 1 < sentences.length && /(?:它|这只|那只|精灵球|宝可梦|pok[eé]ball|quả\s+bóng|con\s+này)/iu.test(sentences[i + 1])
+      && (OWNERSHIP_ACTION_ZH.test(sentences[i + 1]) || OWNERSHIP_ACTION_EN_VI.test(sentences[i + 1]))
+    if (!sameSentence && !linkedNext) continue
+    const actionText = sameSentence ? sentence : `${sentence} ${sentences[i + 1]}`
+    if (!completedActionClause(actionText, [...ACQUIRE, ...OWNERSHIP_ACQUIRE, ...EXPLICIT_POKEMON_RECEIVE])
+      && !OWNERSHIP_ACTION_ZH.test(actionText) && !EXPLICIT_PLAYER_TRANSFER_VI_EN.test(actionText)) continue
+    if (hasFutureOrConditional(actionText) || hasNegation(actionText)) {
+      if (!completedActionClause(actionText, [...ACQUIRE, ...OWNERSHIP_ACQUIRE, ...EXPLICIT_POKEMON_RECEIVE])) continue
+    }
+    if (!pokemonAcquisitionActorMatches(actionText, playerName)) continue
+    // Receiving a reward, an attack or a held item is not receiving the mon.
+    if (/(?:was\s+given\s+(?:medicine|food|an?\s+item|a\s+potion)|被给予(?:药|道具)|nhận\s+(?:đồ|thuốc|thức ăn))/iu.test(actionText) && !/(?:vào\s+đội|加入队伍|team|party)/iu.test(actionText)) continue
+    // 'Pikachu attacked / received a blow' is not acquiring a Pokémon.
+    if (/(?:受到|承受|遭受|received\s+(?:an?\s+)?(?:attack|blow|damage)|nhận\s+(?:một\s+)?(?:cú|đòn))/iu.test(actionText)
+      && !/(?:队伍|宝可梦|宝可球|精灵球|party|team|trainer|huấn\s*luyện\s*viên)/iu.test(actionText)) continue
+    matches.push({ sentence, index: i })
+  }
+  if (!matches.length) {
+    // One completed delivery may span two or three sentences: the first
+    // identifies the Pokémon inside a ball, the next has the player take it.
+    // Require the ball/PC reference AND a definite player handover, never a
+    // generic PC transfer or a mere NPC possession description.
+    for (let i = 0; i < sentences.length; i++) {
+      const named = sentences[i]
+      if (!aliases.some((name) => mentions(named, name))) continue
+      const next = sentences.slice(i, i + 3).join(' ')
+      if (!/(?:pok[eé]\s*ball|poke\s*ball|quả\s*bóng|quả\s*cầu|精灵球|宝可球|电脑|PC|储存箱|盒子)/iu.test(next)) continue
+      if (!/(?:cậu|tôi|mình|người\s*chơi|玩家|你|我).{0,35}(?:nhận\s*lấy|cầm\s*lấy|đón\s*lấy|take(?:s|n)?\s+(?:the\s+)?ball|接过|收下|取走|拿起)/iu.test(next)) continue
+      if (hasFutureOrConditional(next) || hasNegation(next)) continue
+      if (!pokemonAcquisitionActorMatches(next, playerName)) continue
+      matches.push({ sentence: named, index: i })
+    }
+  }
+  return matches
+}
+
+export function countProvenPokemonAcquisitions(text, entry, options = {}) {
+  const segments = linkedAcquisitionSegments(text, entry, options)
+  if (!segments.length) return 0
+  // Explicit acquisition of two same-species specimens in one sentence is
+  // distinct from the state interpreter duplicating one event.
+  const double = segments.some(({ sentence }) => /(?:两只|兩隻|二只|二隻|2\s*只|two\s+(?:pokemon|pok[eé]mon)|hai\s+con)/iu.test(sentence))
+  return segments.length + (double ? 1 : 0)
+}
+
+export function proseSupportsSemanticPokemonAcquisition(text, entry, options = {}) {
+  if (entry?.owner && !['player', 'user', 'you', '玩家', '主角', '你', '我'].includes(String(entry.owner).trim().toLowerCase())) return false
+  // Confidence may guide retry scheduling, never substitute for grounding.
+  return countProvenPokemonAcquisitions(text, entry, options) > 0
 }
 
 export function proseSupportsPokemonAcquisition(text, target) {

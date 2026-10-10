@@ -19,6 +19,15 @@ const SOURCES = [
 // GitHub/jsDelivr chập chờn (đặc biệt ở Trung Quốc) battle không được rơi
 // thẳng sang AI/random nữa.
 const BUILTIN_ZH_SPECIES = [
+  [1, '妙蛙种子', 'Bulbasaur'], [4, '小火龙', 'Charmander'], [7, '杰尼龟', 'Squirtle'],
+  [152, '菊草叶', 'Chikorita'], [155, '火球鼠', 'Cyndaquil'], [158, '小锯鳄', 'Totodile'],
+  [252, '木守宫', 'Treecko'], [255, '火稚鸡', 'Torchic'], [258, '水跃鱼', 'Mudkip'],
+  [387, '草苗龟', 'Turtwig'], [390, '小火焰猴', 'Chimchar'], [393, '波加曼', 'Piplup'],
+  [495, '藤藤蛇', 'Snivy'], [498, '暖暖猪', 'Tepig'], [501, '水水獭', 'Oshawott'],
+  [650, '哈力栗', 'Chespin'], [653, '火狐狸', 'Fennekin'], [656, '呱呱泡蛙', 'Froakie'],
+  [722, '木木枭', 'Rowlet'], [725, '火斑喵', 'Litten'], [728, '球球海狮', 'Popplio'],
+  [810, '敲音猴', 'Grookey'], [813, '炎兔儿', 'Scorbunny'], [816, '泪眼蜥', 'Sobble'],
+  [906, '新叶喵', 'Sprigatito'], [909, '呆火鳄', 'Fuecoco'], [912, '润水鸭', 'Quaxly'],
   [25, '皮卡丘', 'Pikachu'], [26, '雷丘', 'Raichu'],
   [50, '地鼠', 'Diglett'], [51, '三地鼠', 'Dugtrio'],
   [74, '小拳石', 'Geodude'], [75, '隆隆石', 'Graveler'], [76, '隆隆岩', 'Golem'],

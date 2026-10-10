@@ -12,6 +12,7 @@ import { buildWildMon, normalizeAcquiredMon, recomputeMonStats, NATURES, getMove
 import { buildCustomSpeciesEntry, resolveSpeciesEntryFlexible } from '../data/customPokemon.js'
 import { applyWorldDirectives, DEFAULT_WORLD_PROGRESS } from '../data/worldProgress.js'
 import { proseHasCompletedPokemonAcquisition, proseSupportsSemanticPokemonAcquisition, validateStateAgainstProse } from '../utils/stateEvidence.js'
+import { gateSemanticOwnership } from '../utils/semanticOwnershipGate.js'
 import { DEFAULT_POKEMON_LIFE } from '../data/pokemonLife.js'
 import { DEFAULT_TRADE_STATE } from '../data/trading.js'
 import { PERSONALITY_TRAITS, SUPERPOWERS, buildCharacterTraitsNote } from '../data/characterTraits.js'
@@ -987,12 +988,7 @@ export default function IntroScreen({ onOpenSettings }) {
       // Cùng ownership firewall với lượt thường: event canonical-English từ
       // chính văn 中文 vẫn được giữ nhờ storyName/evidence, nhưng hallucination
       // không có acquisition canon sẽ không tự sinh Pokémon starter.
-      parsed = {
-        ...parsed,
-        pokemons: (parsed.pokemons ?? []).filter((pk) => !pk?.semantic && !pk?.canon
-          ? true
-          : proseSupportsSemanticPokemonAcquisition(cleaned, pk)),
-      }
+      parsed = gateSemanticOwnership(parsed, cleaned, { playerName: finalName })
       const openingText = cleaned
       // Chương mở đầu cũng dùng cùng giao thức trạng thái như các lượt sau.
       // Trước đây tag MONEY/REL/BODY/HUNGER/ITEM/LOOT hợp lệ bị parse rồi bỏ

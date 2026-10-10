@@ -962,7 +962,7 @@ export function validateEvolutionRequirements(mon, fromEntry, targetEntry, conte
  */
 export function evolveOwnedMon(mon, targetEntry, movesDb = null) {
   if (!mon || !targetEntry) return mon
-  const level = Math.max(1, Math.min(MAX_LEVEL, Number(mon.level) || 1))
+  const level = Math.max(1, Math.min(maxLevelForPokemon(mon), Number(mon.level) || 1))
   const generated = buildMonSmart(
     targetEntry,
     level,
@@ -1304,26 +1304,31 @@ export function buildPartyBehaviorNote(party, activeMon) {
 // Nhóm tăng trưởng: dùng MEDIUM FAST (n^3) — nhóm phổ biến nhất trong game
 // gốc, công thức gọn và dễ kiểm chứng: tổng EXP để đạt cấp n là n³.
 export const MAX_LEVEL = 100
+export const LEGENDARY_ABSOLUTE_MAX_LEVEL = 200
+export function maxLevelForPokemon(mon) {
+  const name = typeof mon === 'string' ? mon : (mon?.name || mon?.species || mon?.baseSpeciesId)
+  return getBossTier(name)?.maxLevel ?? MAX_LEVEL
+}
 
 /** Tổng EXP cần để ĐẠT cấp `level` (medium fast: n³). */
 export function expForLevel(level) {
-  const n = Math.max(1, Math.min(MAX_LEVEL, Math.floor(level)))
+  const n = Math.max(1, Math.min(LEGENDARY_ABSOLUTE_MAX_LEVEL, Math.floor(level)))
   return n * n * n
 }
 
 /** Cấp tương ứng với tổng EXP đang có. */
-export function levelFromExp(exp) {
+export function levelFromExp(exp, cap = MAX_LEVEL) {
   const e = Math.max(0, Number(exp) || 0)
   let lv = Math.floor(Math.cbrt(e))
   if (lv < 1) lv = 1
-  if (lv > MAX_LEVEL) lv = MAX_LEVEL
+  if (lv > cap) lv = cap
   return lv
 }
 
 /** Tiến độ tới cấp kế tiếp: {current, need, ratio} — dùng cho thanh EXP. */
 export function expProgress(mon) {
   const lv = mon?.level ?? 1
-  if (lv >= MAX_LEVEL) return { current: 0, need: 0, ratio: 1 }
+  if (lv >= maxLevelForPokemon(mon)) return { current: 0, need: 0, ratio: 1 }
   const base = expForLevel(lv)
   const next = expForLevel(lv + 1)
   const total = Math.max(base, Number(mon?.exp) || base)
@@ -1355,11 +1360,11 @@ export function expGainFrom(defeated, { isTrainerMon = false } = {}) {
 export function applyExpGain(mon, amount, movesDb = null) {
   if (!mon || !amount || amount <= 0) return { mon, gained: 0, levelsGained: 0, newLevel: mon?.level ?? 1 }
   const oldLevel = mon.level ?? 1
-  if (oldLevel >= MAX_LEVEL) return { mon, gained: 0, levelsGained: 0, newLevel: MAX_LEVEL }
+  if (oldLevel >= maxLevelForPokemon(mon)) return { mon, gained: 0, levelsGained: 0, newLevel: oldLevel }
   // Mon cũ (trước đợt 65) chưa có trường exp → coi như đang ở mốc đầu cấp.
-  const curExp = Number.isFinite(mon.exp) ? mon.exp : expForLevel(oldLevel)
+  const curExp = Math.max(expForLevel(oldLevel), Number.isFinite(mon.exp) ? mon.exp : expForLevel(oldLevel))
   const newExp = curExp + amount
-  const newLevel = Math.min(MAX_LEVEL, levelFromExp(newExp))
+  const newLevel = Math.min(maxLevelForPokemon(mon), levelFromExp(Math.max(newExp, expForLevel(oldLevel)), maxLevelForPokemon(mon)))
   let next = { ...mon, exp: newExp, level: newLevel }
   if (newLevel > oldLevel) {
     // Lên cấp: tính lại chỉ số theo IV/EV/nature; recomputeMonStats giữ
@@ -1386,7 +1391,7 @@ export function applyExpGain(mon, amount, movesDb = null) {
 export function expFromDays(mon, days) {
   if (!mon || !days || days <= 0) return 0
   const lv = Math.max(1, mon.level ?? 1)
-  if (lv >= MAX_LEVEL) return 0
+  if (lv >= maxLevelForPokemon(mon)) return 0
   // ~2% quãng đường lên cấp kế tiếp cho mỗi ngày.
   const span = expForLevel(lv + 1) - expForLevel(lv)
   return Math.max(1, Math.round(span * 0.02 * Math.min(days, 30)))
@@ -1396,7 +1401,7 @@ export function expFromDays(mon, days) {
 export function expFromTraining(mon, intensity = 1) {
   if (!mon) return 0
   const lv = Math.max(1, mon.level ?? 1)
-  if (lv >= MAX_LEVEL) return 0
+  if (lv >= maxLevelForPokemon(mon)) return 0
   const span = expForLevel(lv + 1) - expForLevel(lv)
   // ~8% quãng đường/buổi ở cường độ 1; cường độ do AI khai (1-3).
   const k = Math.max(1, Math.min(3, Number(intensity) || 1))
@@ -1427,7 +1432,7 @@ export function syncMonInParty(party, mon) {
  */
 export function levelUpMon(mon, movesDb = null) {
   if (!mon) return mon
-  const next = Math.min(MAX_LEVEL, (mon.level ?? 1) + 1)
+  const next = Math.min(maxLevelForPokemon(mon), (mon.level ?? 1) + 1)
   if (next === mon.level) return mon
   const leveled = recomputeMonStats({ ...mon, level: next, exp: expForLevel(next) })
   return queueLevelUpMoves(leveled, mon.level ?? 1, next, movesDb)
@@ -1443,7 +1448,7 @@ export function levelUpMon(mon, movesDb = null) {
  */
 export function raiseMonToLevel(mon, targetLevel, movesDb = null) {
   if (!mon) return mon
-  const target = Math.max(mon.level ?? 1, Math.min(MAX_LEVEL, Number(targetLevel) || 1))
+  const target = Math.max(mon.level ?? 1, Math.min(maxLevelForPokemon(mon), Number(targetLevel) || 1))
   let next = mon
   while ((next.level ?? 1) < target) next = levelUpMon(next, movesDb)
   return next

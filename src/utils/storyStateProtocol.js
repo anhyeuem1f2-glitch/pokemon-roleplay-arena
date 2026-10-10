@@ -1,5 +1,6 @@
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
 import { normalizePokemonGender } from '../data/pokemonGender.js'
+import { getBossTier } from '../data/bossTiers.js'
 
 // ============ GIAO THỨC TRẠNG THÁI TRONG CHÍNH VĂN (đợt 24) ============
 // Cùng triết lý với [[BATTLE]] và [[DMG]]: AI kể chuyện bằng lời, còn các
@@ -182,7 +183,7 @@ export function parseStoryStateTags(text) {
   for (const m of text.matchAll(POKEMON_RE)) {
     const pokemon = {
       species: m[1].trim(),
-      level: Math.max(1, Math.min(100, parseInt(m[2], 10))),
+      level: Math.max(1, Math.min(getBossTier(m[1].trim())?.maxLevel ?? 100, parseInt(m[2], 10))),
     }
     const gender = normalizePokemonGender(m[3])
     if (gender) pokemon.gender = gender
@@ -200,7 +201,7 @@ export function parseStoryStateTags(text) {
       levels.push({
         target: m[1].trim(),
         mode: /^[+-]/.test(raw) ? 'delta' : 'absolute',
-        value: /^[+-]/.test(raw) ? value : Math.max(1, Math.min(100, value)),
+        value: /^[+-]/.test(raw) ? value : Math.max(1, Math.min(getBossTier(m[1].trim())?.maxLevel ?? 100, value)),
       })
     }
   }

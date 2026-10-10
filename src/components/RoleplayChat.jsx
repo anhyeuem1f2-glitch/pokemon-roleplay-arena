@@ -8,6 +8,7 @@ import { importCharacterCard } from '../utils/characterCardImport.js'
 import { BATTLE_MARKER } from '../utils/promptBuilder.js'
 import { battleBelongsToPlayer } from '../utils/battleOwnership.js'
 import { directWildEncounterBoundary } from '../utils/wildBattleGate.js'
+import { gateSemanticOwnership } from '../utils/semanticOwnershipGate.js'
 import { buildScanText } from '../utils/lorebook.js'
 import { buildMainApiMessages } from '../utils/buildMainMessages.js'
 import { resolveStoryLanguage } from '../i18n/storyLanguage.js'
@@ -80,57 +81,6 @@ const MEMORY_RECENT_WINDOW = 24
 // mở battle) không được phép chỉ dựa vào một semantic guess/marker lạc. State
 // vẫn đọc ngữ nghĩa tự nhiên, nhưng ownership/interaction phải có căn cứ canon
 // độc lập để reroll không tự sinh thêm Pokémon hay nút tương tác ngẫu nhiên.
-function rerollContextMentionsTarget(priorText, target) {
-  const targetKey = normalizeMonTarget(target)
-  const priorKey = normalizeMonTarget(priorText)
-  return Boolean(targetKey && priorKey && priorKey.includes(targetKey))
-}
-
-function gateSemanticOwnership(parsed, storyText, { reroll = false, priorText = '' } = {}) {
-  if (!parsed) return parsed
-  const kept = []
-  const rejected = []
-  const seenSemanticSpecies = new Set()
-  for (const pk of parsed.pokemons ?? []) {
-    const species = pk.species ?? pk.name
-    const semantic = Boolean(pk?.semantic || pk?.canon)
-    // Đợt 121: chính văn tiếng Trung có thể gọi loài bằng tên bản địa trong
-    // khi Semantic Engine chuẩn hoá target về tên database tiếng Anh. Model
-    // được yêu cầu giữ exact mention trong details.storyName để ownership gate
-    // vẫn kiểm được canon mà không phải bỏ firewall chống Pokémon hallucinated.
-    const storyName = pk?.details?.storyName ?? pk?.storyName ?? species
-    const hasCanonAcquisition = proseSupportsPokemonAcquisition(storyText, species)
-      || (storyName !== species && proseSupportsPokemonAcquisition(storyText, storyName))
-      || proseSupportsSemanticPokemonAcquisition(storyText, pk)
-    // Reroll chỉ được tái hiện Pokémon có liên hệ trực tiếp với nhánh trước đó.
-    // Nếu model tự bịa một loài hoàn toàn mới trong biến thể reroll, dù chính
-    // câu nó vừa viết có nói "nhận được", app vẫn không cho side-effect đó
-    // trở thành state. Điều này chặn reroll tự sinh thêm Pokémon ngoài ý người chơi.
-    const rerollHasPriorAnchor = !reroll || rerollContextMentionsTarget(priorText, species)
-    if (semantic && (!hasCanonAcquisition || !rerollHasPriorAnchor)) {
-      rejected.push({ ...pk, _reason: !hasCanonAcquisition ? 'no-canon-acquisition' : 'reroll-no-prior-anchor' })
-      continue
-    }
-    const speciesKey = normalizeMonTarget(species)
-    // Nhiều pass Semantic đôi khi mô tả cùng một acquisition hai lần với
-    // level/nickname hơi khác. Trong một response chỉ giữ một acquisition cho
-    // cùng loài; việc thật sự bắt thêm cá thể cùng loài ở lượt khác vẫn hợp lệ.
-    if (semantic && speciesKey && seenSemanticSpecies.has(speciesKey)) {
-      rejected.push({ ...pk, _reason: 'same-pass-duplicate' })
-      continue
-    }
-    if (semantic && speciesKey) seenSemanticSpecies.add(speciesKey)
-    kept.push(pk)
-  }
-  return {
-    ...parsed,
-    pokemons: kept,
-    _rejectedPokemonAcquisitions: [
-      ...(parsed._rejectedPokemonAcquisitions ?? []),
-      ...rejected,
-    ],
-  }
-}
 
 
 function semanticResultCoversStoryCues(result, storyText, appliedState = null) {
@@ -1807,7 +1757,7 @@ export default function RoleplayChat() {
         })
         if (prevo) {
           const beforeLevel = prevo.level ?? 1
-          const requestedLevel = Math.max(beforeLevel, Math.min(100, Number(pk.level) || beforeLevel))
+          const requestedLevel = Math.max(beforeLevel, Math.min(getBossTier(entry?.name)?.maxLevel ?? 100, Number(pk.level) || beforeLevel))
           let current = prevo
           if (requestedLevel > beforeLevel) {
             if (realisticMode && !isCanonDirective(pk)) {
@@ -1849,7 +1799,7 @@ export default function RoleplayChat() {
         // level người chơi/AI đã tuyên bố và không biến Pokémon sở hữu thành boss.
         const saneLv = realisticMode && !isCanonDirective(pk)
           ? receivedMonLevel({ entry, requestedLevel: pk.level, location: playerLocation })
-          : Math.max(1, Math.min(100, Math.floor(Number(pk.level) || 1)))
+          : Math.max(1, Math.min(getBossTier(entry?.name)?.maxLevel ?? 100, Math.floor(Number(pk.level) || 1)))
         const builtMon = realisticMode && !isCanonDirective(pk)
           ? buildMonSmart(entry, saneLv, movesDb)
           : buildWildMon(entry, saneLv, movesDb)
@@ -2992,8 +2942,8 @@ export default function RoleplayChat() {
           for (const failure of primaryRun.failures) semanticFailedApiKeys.add(failure.key)
           semanticPrimarySucceeded = true
           let semanticParsed = filterUiPreAppliedState(semantic.parsed, preAppliedState)
-          semanticParsed = gateSemanticOwnership(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-          semanticParsed = gatePokecenterInteraction(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+          semanticParsed = gateSemanticOwnership(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
+          semanticParsed = gatePokecenterInteraction(semanticParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
           // Semantic engine là nguồn chính; deterministic money/UI transaction
           // chỉ được ưu tiên để tránh trừ/cộng đôi. KHÔNG dùng input gate hay
           // validator legacy để phủ quyết event đã được đọc từ canon.
@@ -3025,8 +2975,8 @@ export default function RoleplayChat() {
               for (const failure of auditorRun.failures) semanticFailedApiKeys.add(failure.key)
               const auditor = auditorRun.value
               let auditorParsed = filterUiPreAppliedState(auditor.parsed, preAppliedState)
-              auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-              auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+              auditorParsed = gateSemanticOwnership(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
+              auditorParsed = gatePokecenterInteraction(auditorParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
               auditorParsed = filterSupplementalDuplicates(auditorParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
               stateParsed = mergeStateManifests(stateParsed, auditorParsed)
               immediateAuditorAudit = {
@@ -3088,8 +3038,8 @@ export default function RoleplayChat() {
                 continue
               }
               let focusParsed = filterUiPreAppliedState(row.result.parsed, preAppliedState)
-              focusParsed = gateSemanticOwnership(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-              focusParsed = gatePokecenterInteraction(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+              focusParsed = gateSemanticOwnership(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
+              focusParsed = gatePokecenterInteraction(focusParsed, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
               focusParsed = filterSupplementalDuplicates(focusParsed, stateParsed, { consumeExactMoney: true, moneyText: displayText })
               const accepted = countParsedStateOperations(focusParsed)
               stateParsed = mergeStateManifests(stateParsed, focusParsed)
@@ -3352,8 +3302,8 @@ export default function RoleplayChat() {
                 for (const failure of scanRun.failures) semanticFailedApiKeys.add(failure.key)
                 scanResult = scanRun.value
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
-                parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
-                parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext })
+                parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
+                parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
                 parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true, moneyText: displayText })
                 passAuditBase = {
                   pass: scanIndex + 1,
@@ -3584,7 +3534,7 @@ export default function RoleplayChat() {
           scanFailoverAttempts = scanRun.failures.length
           scanResult = scanRun.value
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
-          parsed = gateSemanticOwnership(parsed, storyText)
+          parsed = gateSemanticOwnership(parsed, storyText, { playerName: playerName || playerProfile?.name || '' })
           parsed = gatePokecenterInteraction(parsed, storyText)
           parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true, moneyText: storyText })
         } catch (scanError) {

@@ -1,3 +1,9 @@
+## Dot148 — Corrections before deployment (2026-10-10)
+
+Building on Dot147 (including Dot146 multi-Worldbook and wide-screen), Dot148 unifies story ownership checks between opening/regular turns, verifies the actual Pokémon species and recipient from prose, handles natural Chinese handover sentences and independently proven double captures, fixes wild encounters with mixed habitat prose, rejects Chinese spectator-only battles and makes legendary level growth obey tier caps. Regression: new 15/15, overall 47/51 (four older known-failing test scripts); JS/JSX parse PASS. No browser build due unavailable offline dependencies. See `BAN_GIAO_DU_AN.md` for paths, tests, and caveats.
+
+---
+
 ## Đợt 147 — Chặn CoT trần của preset + cắt prose đúng điểm gặp Pokémon hoang dã (28/09/2026)
 
 ### Preset làm lộ thinking khi provider làm rơi wrapper

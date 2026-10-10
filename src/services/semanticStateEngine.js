@@ -9,6 +9,7 @@ import { normalizePokemonGender } from '../data/pokemonGender.js'
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
 import { inferPokemonAcquisitionStoryName, proseSupportsPokemonAcquisition, proseSupportsSemanticPokemonAcquisition } from '../utils/stateEvidence.js'
 import { craftedPokemonAccessoryName, resolveItemByName } from '../data/shopItems.js'
+import { getBossTier } from '../data/bossTiers.js'
 
 const KIND_ALIASES = {
   money: 'money_change', money_change: 'money_change', payment: 'money_change', income: 'money_change', expense: 'money_change',
@@ -347,7 +348,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
         const inferredStoryName = explicitStoryName || inferPokemonAcquisitionStoryName('', event.evidence ?? '')
         const mon = {
           species,
-          level: clamp(event.level ?? details.level ?? 1, 1, 100),
+          level: clamp(event.level ?? details.level ?? 1, 1, getBossTier(species)?.maxLevel ?? 100),
           semantic: true,
           canon: true,
           semanticEventId: event.id,

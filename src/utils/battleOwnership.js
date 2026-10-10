@@ -40,6 +40,9 @@ export function battleBelongsToPlayer({ storyText = '', userText = '', ownNames 
   const combined = `${String(userText ?? '')}\n${String(storyText ?? '')}`
   const ownActive = ownMonIsActive(combined, ownNames)
   if (ownActive) return true
+  // Watching a friend battle is not the player's battle, including 中文
+  // without an explicit opponent's name or a Gym keyword.
+  if (/(?:你|玩家|主角).{0,18}(?:站在一旁|站在旁边|站在一边|旁观|观战|看着|围观).{0,38}(?:朋友|同伴|别人的|朋友进行|别人进行).{0,24}(?:对战|战斗|打架|交战)/u.test(combined)) return false
   // Câu kiểu “tôi tới Gym xem bạn thách đấu” không được để regex thấy chữ
   // “tôi ... thách đấu” ở cùng câu rồi gán nhầm trận cho người chơi.
   if (PLAYER_SPECTATES_THIRD_PARTY_RE.test(combined)) return false

@@ -35,8 +35,13 @@ export function directWildEncounterBoundary(text, opponent, detectOptions = {}) 
     const paragraph = match[0]
     const lower = paragraph.toLowerCase()
     if (!aliases.some((alias) => lower.includes(alias.toLowerCase()))) continue
-    if (WILD_LORE_ONLY_RE.test(paragraph)) continue
-    if (DIRECT_WILD_ENCOUNTER_RE.test(paragraph)) return match.index + paragraph.length
+    const isDirect = DIRECT_WILD_ENCOUNTER_RE.test(paragraph)
+    const isLoreOnly = WILD_LORE_ONLY_RE.test(paragraph)
+    // A habitat sentence can follow an actual appearance in the very same
+    // paragraph; it must not cancel a real encounter. But an encyclopedia
+    // sentence containing only 'wild species are found here' is not a fight.
+    const concreteArrival = /(?:lộ\s*diện|xuất\s*hiện|hiện\s*nguyên\s*hình|lao\s+(?:ra|tới|vào)|appears?|emerges?|leaps?\s+out|出现|现身|冲出|扑出|窜出|挡在|扑向)/iu.test(paragraph)
+    if (isDirect && (concreteArrival || !isLoreOnly)) return match.index + paragraph.length
   }
   return -1
 }

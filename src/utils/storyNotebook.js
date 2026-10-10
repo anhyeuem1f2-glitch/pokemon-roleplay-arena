@@ -9,6 +9,7 @@
 // hứa, mốc thời gian... đều có "giấy trắng mực đen".
 
 import { deterministicNpcId } from '../data/persistentIdentity.js'
+import { getBossTier } from '../data/bossTiers.js'
 
 const STORAGE_KEY = 'trainer-arena:story-notebook-v1'
 const MAX_NPCS = 80
@@ -135,7 +136,7 @@ export function recordNpcBattle(npcId, team = null) {
     ? team.map((mon, index) => ({
       slot: index,
       species: String(mon?.baseSpeciesName ?? mon?.name ?? mon?.species ?? '').replace(/-(?:Mega(?:-[XY])?|Gmax)$/i, '') || 'Pokémon',
-      level: Math.max(1, Math.min(100, Number(mon?.level) || 1)),
+      level: Math.max(1, Math.min(getBossTier(mon?.baseSpeciesName ?? mon?.name ?? mon?.species)?.maxLevel ?? 100, Number(mon?.level) || 1)),
     })).slice(0, 6)
     : npc.team
   const fields = { ...(npc.fields ?? {}) }

@@ -40,6 +40,9 @@ import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
+import StateCorrectionModal from './StateCorrectionModal.jsx'
+import { parseCorrectionJson, validateCorrectionProposal, patchPokemonAcrossRoster, undoPokemonCorrection, correctionHistoryKey } from '../utils/stateCorrection.js'
+import { getBuiltInZhPokemonSpeciesNames, normalizeLocalizedPokemonName } from '../utils/pokemonNameTranslations.js'
 import ActionChoices from './ActionChoices.jsx'
 import { renderInlineFormatting, stripInlineTags } from '../utils/inlineFormat.jsx'
 import SafariModal from './SafariModal.jsx'
@@ -653,6 +656,20 @@ function countParsedStateOperations(parsed) {
   return count
 }
 
+// Dot149: each state API attempt has a deadline so the send lock cannot
+// hang indefinitely on a non-responsive proxy. An AbortSignal aborts the
+// actual HTTP request (instead of merely racing an orphaned promise).
+async function boundedSemanticExtraction(config, options) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 90000)
+  try {
+    return await extractSemanticStateEvents(config, { ...options, signal: controller.signal })
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('Semantic State API timed out after 90 seconds')
+    throw error
+  } finally { clearTimeout(timer) }
+}
+
 function scheduleIdleStateTask(task) {
   if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
     return window.requestIdleCallback(() => task(), { timeout: 2500 })
@@ -820,6 +837,35 @@ export default function RoleplayChat() {
   const [input, setInput] = useState('')
   const inputRef = useRef(null)
   const [loading, setLoading] = useState(false)
+  // Dot149: Main call may finish before the Semantic Audit. Keep the input
+  // draft editable but do not permit new turns until the state ledger is done.
+  const [correctionOpen, setCorrectionOpen] = useState(false)
+  const [correctionBusy, setCorrectionBusy] = useState(false)
+  const correctionBusyRef = useRef(false)
+  const [correctionHistory, setCorrectionHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(correctionHistoryKey(trainerId)) || '[]') }
+    catch { return [] }
+  })
+  const syncMarkerKey = `trainer-arena:pending-state-sync:${trainerId}`
+  const [syncFailure, setSyncFailure] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem(`trainer-arena:pending-state-sync:${trainerId}`) || 'null') }
+    catch { return null }
+  })
+  const [stateSyncing, setStateSyncing] = useState(false)
+  const stateSyncingRef = useRef(false)
+  useEffect(() => {
+    if (!stateSyncing) return undefined
+    const warn = (event) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [stateSyncing])
+
+  const turnBusy = loading || stateSyncing || correctionBusy || correctionOpen || Boolean(syncFailure)
+  useEffect(() => {
+    try { setCorrectionHistory(JSON.parse(localStorage.getItem(correctionHistoryKey(trainerId)) || '[]')) }
+    catch { setCorrectionHistory([]) }
+  }, [trainerId])
+
   const [error, setError] = useState(null)
   const [cardOpen, setCardOpen] = useState(false)
   const [importError, setImportError] = useState(null)
@@ -1276,7 +1322,7 @@ export default function RoleplayChat() {
 
   async function handleDeleteMessage(i) {
     const target = messages[i]
-    if (!target || loading) return
+    if (!target || loading || stateSyncingRef.current || correctionOpen) return
     const triggerIndex = findTurnTriggerIndex(i)
     if (triggerIndex < 0) return
     const trigger = messages[triggerIndex]
@@ -1818,8 +1864,21 @@ export default function RoleplayChat() {
           } : {}),
         })
         acquiredSnapshot = recomputeMonStats(acquiredSnapshot)
+        // Dot149: do not reroll a gender already canonized in preceding
+        // assistant prose, before the Pokémon was formally received.
+        const precedingCanon = (latestMessagesRef.current ?? [])
+          .filter((msg) => msg?.role === 'assistant' && !msg.hidden)
+          .slice(-12)
+          .map((msg) => msg.meta?.evidenceText || msg.content || '')
+          .join('\n')
+        const zhCatalog = getBuiltInZhPokemonSpeciesNames()
+        const localizedName = zhCatalog.byCanonical[normalizeLocalizedPokemonName(entry.name)]
+        const withGenderEvidence = applyNarrativeGenderEvidence(
+          acquiredSnapshot, `${precedingCanon}\n${storyText}`, entry,
+          [pk.species, pk.nickname, localizedName].filter(Boolean), sourceMessageId,
+        )
         const newMon = ensurePokemonIdentity({
-          ...applyPerksToMon(acquiredSnapshot, playerTraits),
+          ...applyPerksToMon(withGenderEvidence, playerTraits),
           ...(acquisitionSourceId ? { acquisitionSourceId } : {}),
         }, trainerId)
         if (previewParty.length < 6) {
@@ -2051,6 +2110,9 @@ export default function RoleplayChat() {
       // cùng uid mang ba giới tính khác nhau.
       const applyStoryGender = (mon) => {
         if (!mon) return mon
+        // A confirmed user correction may not be undone by an unrelated
+        // semantic pass that repeats earlier text.
+        if (mon.genderSource === 'manual-correction') return mon
         const entry = findSpeciesEntry(mon.species ?? mon.name)
         return applyNarrativeGenderEvidence(
           mon,
@@ -2922,7 +2984,7 @@ export default function RoleplayChat() {
       if (semanticPrimaryPool.length) {
         try {
           const expectedStateLoad = estimateStateChangeLoad(displayText)
-          const primaryRun = await runWithApiFailover(semanticPrimaryPool, (cfg) => extractSemanticStateEvents(cfg, {
+          const primaryRun = await runWithApiFailover(semanticPrimaryPool, (cfg) => boundedSemanticExtraction(cfg, {
             storyText: displayText,
             userText: stateUserText,
             stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
@@ -2964,7 +3026,7 @@ export default function RoleplayChat() {
                 resolvedSemanticCfg,
                 apiConfig,
               ])
-              const auditorRun = await runWithApiFailover(auditorPool, (cfg) => extractSemanticStateEvents(cfg, {
+              const auditorRun = await runWithApiFailover(auditorPool, (cfg) => boundedSemanticExtraction(cfg, {
                 storyText: displayText,
                 userText: stateUserText,
                 stateSnapshot: buildStateScanSnapshot(null, Number(playerProfile?.money) || 0),
@@ -3017,7 +3079,7 @@ export default function RoleplayChat() {
               const at = index % pool.length
               const rotated = [...pool.slice(at), ...pool.slice(0, at)]
               try {
-                const focusRun = await runWithApiFailover(rotated, (cfg) => extractSemanticStateEvents(cfg, {
+                const focusRun = await runWithApiFailover(rotated, (cfg) => boundedSemanticExtraction(cfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   stateSnapshot: buildStateScanSnapshot(spec.focus, Number(playerProfile?.money) || 0),
@@ -3266,8 +3328,16 @@ export default function RoleplayChat() {
           broadPasses: stateCfgs.length > 1 ? 2 : 1,
         })
         stateScanLocksRef.current.add(turnMessageId)
-        scheduleIdleStateTask(async () => {
+        stateSyncingRef.current = true
+        setStateSyncing(true)
+        setSyncFailure(null)
+        try { sessionStorage.setItem(syncMarkerKey, JSON.stringify({ messageId: turnMessageId, interrupted: true })) } catch { /* ignore */ }
+        // Unlike Dot148's fire-and-forget idle task, completion is a turn
+        // barrier: callAI cannot release loading until every shard finishes.
+        await new Promise((resolveStateSync) => {
+          scheduleIdleStateTask(async () => {
           let scanLedger = turnAppliedManifest
+          const failedPasses = []
           try {
             for (let scanIndex = 0; scanIndex < scanPlan.length; scanIndex += 1) {
               const passSpec = scanPlan[scanIndex]
@@ -3280,7 +3350,7 @@ export default function RoleplayChat() {
               let parsedExtra = null
               let passAuditBase = null
               try {
-                const scanRun = await runWithApiFailover(rotatedPool, (cfg) => extractSemanticStateEvents(cfg, {
+                const scanRun = await runWithApiFailover(rotatedPool, (cfg) => boundedSemanticExtraction(cfg, {
                   storyText: displayText,
                   userText: stateUserText,
                   appliedState: scanLedger,
@@ -3337,6 +3407,7 @@ export default function RoleplayChat() {
                 }
               } catch (scanError) {
                 console.warn(`[semantic-state-${scanIndex + 1}] bỏ qua:`, scanError.message)
+                failedPasses.push(`Pass ${scanIndex + 1}: ${scanError.message}`)
                 setMessages((msgs) => msgs.map((message) => message.id === turnMessageId ? {
                   ...message,
                   meta: {
@@ -3406,9 +3477,28 @@ export default function RoleplayChat() {
                 })
               }
             }
+            if (failedPasses.length) {
+              const pending = { messageId: turnMessageId, message: failedPasses.join('; ') }
+              setSyncFailure(pending)
+              try { sessionStorage.setItem(syncMarkerKey, JSON.stringify(pending)) } catch { /* ignore */ }
+            } else {
+              try { sessionStorage.removeItem(syncMarkerKey) } catch { /* ignore */ }
+            }
+          } catch (unexpectedScanError) {
+            console.warn('[semantic-state] unexpected audit error:', unexpectedScanError)
+            const pending = { messageId: turnMessageId, message: String(unexpectedScanError?.message || unexpectedScanError) }
+            setSyncFailure(pending)
+            try { sessionStorage.setItem(syncMarkerKey, JSON.stringify(pending)) } catch { /* ignore */ }
           } finally {
             stateScanLocksRef.current.delete(turnMessageId)
+            // React must have a chance to commit context functional setters
+            // (which persist via localStorage) before the next turn can read.
+            await new Promise((flush) => setTimeout(flush, 0))
+            stateSyncingRef.current = false
+            setStateSyncing(false)
+            resolveStateSync()
           }
+        })
         })
       }
       // Tóm tắt cốt truyện (đợt 30): tự cập nhật nền khi đủ tin mới.
@@ -3438,6 +3528,7 @@ export default function RoleplayChat() {
   // Quét lại BIẾN THẬT từ chính văn đã lưu. Đây là luồng có validator và
   // ledger chống áp trùng; khác hoàn toàn bảng biến preset chỉ để trình bày.
   async function rerollStateForMessage(messageIndex, options = {}) {
+    if (correctionOpen || correctionBusyRef.current) throw new Error('Close state correction before scanning the transcript.')
     const source = latestMessagesRef.current[messageIndex]
     if (!source || source.role !== 'assistant') throw new Error('Không tìm thấy lượt AI cần quét.')
     const sourceKey = source.id || `legacy-message-${messageIndex}`
@@ -3465,6 +3556,14 @@ export default function RoleplayChat() {
     }
 
     const cfgs = semanticStateApiPool()
+    // A failed/interrupted synchronization cannot be declared repaired when
+    // the player has since removed every state API configuration.
+    if (!cfgs.length && syncFailure) throw new Error('No State API is configured for the unfinished synchronization.')
+    const ownsSyncBarrier = !stateSyncingRef.current
+    if (ownsSyncBarrier) {
+      stateSyncingRef.current = true
+      setStateSyncing(true)
+    }
     stateScanLocksRef.current.add(sourceKey)
     try {
       const lines = []
@@ -3516,7 +3615,7 @@ export default function RoleplayChat() {
         let parsed = null
         let scanFailoverAttempts = 0
         try {
-          const scanRun = await runWithApiFailover(passPool, (cfg) => extractSemanticStateEvents(cfg, {
+          const scanRun = await runWithApiFailover(passPool, (cfg) => boundedSemanticExtraction(cfg, {
             storyText,
             userText,
             appliedState: applied,
@@ -3626,8 +3725,12 @@ export default function RoleplayChat() {
           },
         },
       } : message))
+      if (!rerollAuditPasses.some((pass) => pass.error)) {
+        setSyncFailure(null)
+        try { sessionStorage.removeItem(syncMarkerKey) } catch { /* ignore */ }
+      }
       return {
-        ok: true,
+        ok: !rerollAuditPasses.some((pass) => pass.error),
         repairedRoster,
         message: lines.length
           ? `Đã quét và xử lý ${lines.length} thay đổi. Xem danh sách bên dưới.`
@@ -3635,6 +3738,11 @@ export default function RoleplayChat() {
       }
     } finally {
       stateScanLocksRef.current.delete(sourceKey)
+      if (ownsSyncBarrier) {
+        await new Promise((flush) => setTimeout(flush, 0))
+        stateSyncingRef.current = false
+        setStateSyncing(false)
+      }
     }
   }
 
@@ -3701,8 +3809,77 @@ export default function RoleplayChat() {
     return -1
   })()
 
+  // Dot149 correction review uses its own API request and never calls
+  // callAI, advances time, adds chat messages, or applies Semantic directives.
+  const correctionRoster = (() => {
+    const list = [], seen = new Set()
+    for (const mon of [playerMon, ...(party ?? []), ...(pcBox ?? [])]) {
+      if (!mon?.uid || seen.has(mon.uid)) continue
+      seen.add(mon.uid); list.push(mon)
+    }
+    return list
+  })()
+  async function reviewStateCorrection(mon, request) {
+    if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('State is busy; wait until sync finishes.')
+    correctionBusyRef.current = true
+    setCorrectionBusy(true)
+    try {
+      const canon = (latestMessagesRef.current ?? []).filter((msg) => msg?.role === 'assistant' && !msg.hidden)
+      const transcript = canon.slice(-90).map((msg) => String(msg.meta?.evidenceText || msg.content || '')).join('\n\n')
+      if (!transcript.trim()) return { ok: false, error: 'Không tìm thấy chính văn để đối chiếu.' }
+      const cfg = apiConfig
+      if (!cfg?.baseUrl || !cfg?.model) return { ok: false, error: 'Chưa cấu hình Main API.' }
+      const raw = await withApiLease(cfg, () => chatCompletion(cfg, [
+        { role:'system', content:'You are a conservative evidence auditor, NOT a storyteller. No narrative continuation and NO state changes. Compare user complaint to exact assistant prose. Only propose one correction for the specified Pokémon UID and one of: gender, nickname, shiny. If there is no direct reliable quotation from the assistant prose naming the Pokémon and establishing the proposed value, output {"noChange":true}. Else output ONLY JSON {"targetUid":"...","field":"gender|nickname|shiny","value":"male|female|unknown OR nickname OR boolean","evidenceQuote":"an EXACT contiguous quote copied from the assistant prose"}. Never trust the user complaint alone as evidence. Never grant items, money, new Pokémon, EXP or levels. A species-ambiguous/NPC quote is insufficient.' },
+        { role:'user', content: JSON.stringify({ target:{uid:mon.uid,name:mon.name,species:mon.species,nickname:mon.nickname,gender:mon.gender,shiny:mon.shiny}, complaint:request, canonTranscript:transcript.slice(-36000) }) },
+      ], { temperature: 0, maxTokens: 350, debugLabel:'State correction (no narrative)' }))
+      const proposal = parseCorrectionJson(raw)
+      if (proposal?.noChange || !proposal) return { ok:false, error:'Không tìm thấy bằng chứng chính văn rõ để hiệu chỉnh.' }
+      const speciesEntry = resolveSpeciesEntryFlexible(pokedexSpecies, mon.species ?? mon.name)
+      const zhAliases = (await loadZhPokemonSpeciesNames()).byCanonical
+      return validateCorrectionProposal(proposal, {
+        mon, speciesEntry, canonMessages:canon,
+        aliases: [zhAliases[normalizeLocalizedPokemonName(mon.name)], zhAliases[normalizeLocalizedPokemonName(mon.species)]].filter(Boolean),
+      })
+    } finally { correctionBusyRef.current = false; setCorrectionBusy(false) }
+  }
+  function persistCorrectionHistory(next) {
+    setCorrectionHistory(next)
+    try { localStorage.setItem(correctionHistoryKey(trainerId), JSON.stringify(next)) }
+    catch (e) { console.warn('[state-correction] history persist failed:', e.message) }
+    return next
+  }
+  function applyStateCorrection(patch) {
+    if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('Please wait for state sync.')
+    const current = [latestPlayerMonRef.current, ...latestPartyRef.current, ...latestPcBoxRef.current].find((m) => m?.uid === patch.targetUid)
+    if (!current || current[patch.field] !== patch.before) throw new Error('Pokémon changed since review; inspect again.')
+    const change = (mon) => patchPokemonAcrossRoster(mon, patch)
+    latestPlayerMonRef.current = change(latestPlayerMonRef.current)
+    latestPartyRef.current = latestPartyRef.current.map(change)
+    latestPcBoxRef.current = latestPcBoxRef.current.map(change)
+    setPlayerMon((cur) => change(cur))
+    setParty((cur) => (cur ?? []).map(change))
+    setPcBox((cur) => (cur ?? []).map(change))
+    return persistCorrectionHistory([...correctionHistory, { ...patch, date:new Date().toISOString() }].slice(-20))
+  }
+  function undoLastStateCorrection() {
+    if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('Please wait for state sync.')
+    const last = correctionHistory[correctionHistory.length - 1]
+    if (!last) return correctionHistory
+    const current = [latestPlayerMonRef.current, ...latestPartyRef.current, ...latestPcBoxRef.current].find((m) => m?.uid === last.targetUid)
+    if (!current || current[last.field] !== last.value) throw new Error('State changed after correction; cannot safely undo.')
+    const undo = (mon) => undoPokemonCorrection(mon, last)
+    latestPlayerMonRef.current = undo(latestPlayerMonRef.current)
+    latestPartyRef.current = latestPartyRef.current.map(undo)
+    latestPcBoxRef.current = latestPcBoxRef.current.map(undo)
+    setPlayerMon((cur) => undo(cur))
+    setParty((cur) => (cur ?? []).map(undo))
+    setPcBox((cur) => (cur ?? []).map(undo))
+    return persistCorrectionHistory(correctionHistory.slice(0,-1))
+  }
+
   async function handleSend() {
-    if (!input.trim() || loading) return
+    if (!input.trim() || loading || stateSyncingRef.current || correctionOpen || correctionBusyRef.current || syncFailure) return
     const userMsg = { id: makeMessageId('user'), role: 'user', content: input.trim() }
     try {
       await saveTurnCheckpoint(trainerId, messages, userMsg.content, userMsg.id)
@@ -3722,7 +3899,7 @@ export default function RoleplayChat() {
   // REROLL (đợt 39): bỏ tin AI cuối cùng, gọi lại từ đúng ngữ cảnh trước đó.
   // Dùng khi lượt vừa rồi bị cắt/lỗi/không ưng.
   async function handleRegenerate() {
-    if (loading) return
+    if (loading || stateSyncingRef.current) return
     // Tìm tin assistant cuối cùng (không tính hidden).
     let lastAiIdx = -1
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -3759,7 +3936,7 @@ export default function RoleplayChat() {
   // reroll chỉ nằm trên tin AI). Cắt mọi tin phía sau tin người chơi này
   // (thường là 1 tin AI trả lời) rồi gọi AI viết lại từ đúng chỗ đó.
   async function handleResendFromUser(idx) {
-    if (loading) return
+    if (loading || stateSyncingRef.current) return
     const m = messages[idx]
     if (!m || m.role !== 'user') return
     let restored = await restoreTurnCheckpoint(trainerId, m.content ?? '', idx)
@@ -3827,7 +4004,7 @@ export default function RoleplayChat() {
   async function handleRefreshActionChoices(messageId) {
     const at = messages.findIndex((message) => message.id === messageId)
     const target = at >= 0 ? messages[at] : null
-    if (!target || target.role !== 'assistant' || loading) return
+    if (!target || target.role !== 'assistant' || loading || stateSyncingRef.current) return
     const storyText = target.content || ''
     setMessages((current) => current.map((message) => message.id === messageId
       ? { ...message, actionChoicesPending: true }
@@ -3897,7 +4074,7 @@ export default function RoleplayChat() {
     // Đợt 64: chặn khi lượt truyện đang chạy — trước đây kết thúc mua sắm
     // giữa lúc AI đang viết sẽ chạy 2 callAI song song, tranh nhau ghi
     // messages (lượt sau đè lượt trước).
-    if (loading) return
+    if (loading || stateSyncingRef.current || syncFailure) return
     const idx = shopMsgIndex
     setShopMsgIndex(null)
     if (idx === null) return
@@ -3967,6 +4144,7 @@ export default function RoleplayChat() {
 
   // Rời Trung tâm Pokémon (đợt 71) — gửi note ẩn để AI kể tiếp cảnh rời đi.
   async function handlePokecenterFinish(what) {
+    if (loading || stateSyncingRef.current || syncFailure) return
     const idx = pokecenterMsg?.index ?? null
     setPokecenterMsg(null)
     const note = {
@@ -3993,6 +4171,10 @@ export default function RoleplayChat() {
   }
 
   async function handleBattleEnd(outcome, details = null) {
+    if (loading || stateSyncingRef.current || syncFailure) {
+      setError('Vẫn đang đồng bộ state; hãy đợi trước khi kết thúc battle.')
+      return
+    }
     setBattleOpen(false)
     expNoteRef.current = null
     const doubleMode = details?.mode === 'double'
@@ -4212,6 +4394,10 @@ export default function RoleplayChat() {
                 content={m.content}
                 used={Boolean(m.battleUsed)}
                 onOpenBattle={async () => {
+                  if (turnBusy || stateSyncingRef.current) {
+                    setError('Đang đồng bộ state hoặc đang hiệu chỉnh; hãy hoàn tất trước khi vào trận.')
+                    return
+                  }
                   if (!playerMon) {
                     window.alert('Bạn chưa có Pokémon nào — hãy để câu chuyện dẫn tới việc nhận Pokémon đầu tiên đã.')
                     return
@@ -4417,7 +4603,7 @@ ${m.content}`
                 <ActionChoices
                   choices={m.actionChoices ?? []}
                   pending={Boolean(m.actionChoicesPending)}
-                  disabled={loading}
+                  disabled={turnBusy}
                   onChoose={handleChooseAction}
                   onRefresh={() => handleRefreshActionChoices(m.id)}
                 />
@@ -4430,7 +4616,7 @@ ${m.content}`
                 <div>
                   <button
                     onClick={() => setShopMsgIndex(i)}
-                    disabled={Boolean(m.shopUsed)}
+                    disabled={Boolean(m.shopUsed) || turnBusy}
                     title={m.shopUsed ? 'Đã mua sắm xong tại đây' : 'Bấm để vào cửa hàng'}
                     style={{
                       display: 'inline-flex',
@@ -4443,7 +4629,7 @@ ${m.content}`
                       borderRadius: 999,
                       padding: '6px 16px',
                       margin: '6px 0',
-                      cursor: m.shopUsed ? 'default' : 'pointer',
+                      cursor: m.shopUsed || turnBusy ? 'default' : 'pointer',
                       fontSize: 13,
                     }}
                   >
@@ -4492,7 +4678,29 @@ ${m.content}`
               </React.Fragment>
             )
           })}
-          {loading && <p style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>Đang viết tiếp câu chuyện...</p>}
+          {loading && !stateSyncing && <p style={{ color: 'var(--text-dim)', fontSize: 12.5 }}>Đang viết tiếp câu chuyện...</p>}
+          {stateSyncing && <p role="status" style={{ color: 'var(--amber)', fontSize: 12.5 }}>
+            {uiLanguage === 'zh' ? '正在同步世界状态…请等待完成后再发送。' : uiLanguage === 'en' ? 'Synchronizing world state… please wait before sending.' : 'Đang đồng bộ thế giới… hãy đợi hoàn tất trước khi gửi lượt tiếp.'}
+          </p>}
+          {syncFailure && !stateSyncing && <div role="alert" style={{ border:'1px solid var(--amber)', borderRadius:8, marginTop:8, padding:10, fontSize:12 }}>
+            <p>{uiLanguage === 'zh' ? '上次状态同步未完成。请重试，再继续剧情。' : uiLanguage === 'en' ? 'The last state sync did not complete. Retry before continuing.' : 'Đồng bộ biến lượt trước chưa hoàn tất. Hãy quét lại trước khi chơi tiếp.'}</p>
+            <p style={{overflowWrap:'anywhere', opacity:.8}}>{syncFailure.message}</p>
+            <button className="btn" disabled={loading || correctionBusy} onClick={async () => {
+              const index = latestMessagesRef.current.findIndex((m) => m.id === syncFailure.messageId)
+              if (index < 0) { setError('Không tìm thấy lượt cần sửa; hãy khôi phục save trước khi tiếp tục.'); return }
+              setStateSyncing(true); stateSyncingRef.current = true
+              try {
+                const result = await rerollStateForMessage(index)
+                if (!result?.ok) setError(result?.message || 'State repair chưa hoàn tất.')
+              } catch(err) { setError(err.message) }
+              finally { await new Promise((flush) => setTimeout(flush, 0)); setStateSyncing(false); stateSyncingRef.current = false }
+            }}>{uiLanguage === 'zh' ? '重新扫描状态' : uiLanguage === 'en' ? 'Retry state sync' : 'Thử quét lại biến'}</button>
+            <button className="btn" style={{marginLeft:8}} onClick={() => {
+              if (!window.confirm(uiLanguage === 'zh' ? '状态可能不完整。仍要继续？' : uiLanguage === 'en' ? 'State may be incomplete. Continue anyway?' : 'Biến có thể chưa đầy đủ. Vẫn tiếp tục?')) return
+              setSyncFailure(null)
+              try { sessionStorage.removeItem(syncMarkerKey) } catch { /* ignore */ }
+            }}>{uiLanguage === 'zh' ? '忽略警告' : uiLanguage === 'en' ? 'Continue with warning' : 'Bỏ qua có cảnh báo'}</button>
+          </div>}
         </div>
         {showJumpToBottom && (
           <div style={{ position: 'absolute', left: 0, right: 6, bottom: 8, display: 'flex', justifyContent: 'center', pointerEvents: 'none', zIndex: 12 }}>
@@ -4540,11 +4748,11 @@ ${m.content}`
               >
                 {item('✎ Sửa tin nhắn', () => { setEditingIndex(ctxMenu.index); setEditDraft(m.content) })}
                 {!isAi && item('↻ Gửi lại (viết lại lượt trả lời)', () => handleResendFromUser(ctxMenu.index), {
-                  disabled: loading || ctxMenu.index !== lastUserIndex,
+                  disabled: turnBusy || ctxMenu.index !== lastUserIndex,
                   titleTip: ctxMenu.index !== lastUserIndex ? 'Chỉ gửi lại được tin người chơi MỚI NHẤT' : 'Xoá lượt AI trả lời và viết lại',
                 })}
                 {isAi && item('↻ Gửi lại (reroll)', handleRegenerate, {
-                  disabled: loading || ctxMenu.index !== lastAiIndex,
+                  disabled: turnBusy || ctxMenu.index !== lastAiIndex,
                   titleTip: ctxMenu.index !== lastAiIndex ? 'Chỉ reroll được tin AI mới nhất' : 'Viết lại lượt này',
                 })}
                 {item('⧉ Sao chép tin nhắn', () => {
@@ -4582,7 +4790,7 @@ ${m.content}`
                 },
                 {
                   label: '↩ Xoá lượt trả lời gần nhất',
-                  disabled: loading || lastAiIndex < 0,
+                  disabled: turnBusy || lastAiIndex < 0,
                   onClick: () => {
                     const ai = lastAiIndex
                     if (ai < 0) return
@@ -4595,7 +4803,7 @@ ${m.content}`
                 {
                   label: '🗑 Xoá toàn bộ lịch sử truyện',
                   danger: true,
-                  disabled: loading || messages.length === 0,
+                  disabled: turnBusy || messages.length === 0,
                   onClick: () => {
                     if (window.confirm('Xoá TOÀN BỘ lịch sử truyện và HOÀN TÁC state phát sinh từ nhánh này? Pokémon/tiền/vật phẩm/biến truyện do các lượt đã xoá cũng sẽ được trả về mốc trước truyện.')) {
                       void wipeAllMemory()
@@ -4632,7 +4840,7 @@ ${m.content}`
             {lastUserIndex >= 0 && lastUserIndex === messages.length - 1 && (
               <button
                 className="btn"
-                disabled={loading}
+                disabled={turnBusy}
                 onClick={() => {
                   setError(null)
                   callAI(messages, messages[lastUserIndex]?.content ?? '')
@@ -4705,6 +4913,11 @@ ${m.content}`
           </div>
         )}
 
+        <div style={{ display:'flex', justifyContent:'flex-end', marginTop:12 }}>
+          <button className="btn" disabled={loading || stateSyncing || correctionBusy} onClick={() => setCorrectionOpen(true)}>
+            {uiLanguage === 'zh' ? '🛠 状态纠错' : uiLanguage === 'en' ? '🛠 State correction' : '🛠 Hiệu chỉnh biến'}
+          </button>
+        </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
           <textarea
             ref={inputRef}
@@ -4738,11 +4951,18 @@ ${m.content}`
               fontSize: 13.5,
             }}
           />
-          <button className="btn btn--primary" onClick={handleSend} disabled={loading}>
-            Gửi
+          <button className="btn btn--primary" onClick={handleSend} disabled={turnBusy}>
+            {uiLanguage === 'zh' ? '发送' : uiLanguage === 'en' ? 'Send' : 'Gửi'}
           </button>
         </div>
       </div>
+
+      {correctionOpen && <StateCorrectionModal
+        language={uiLanguage} roster={correctionRoster} busy={loading || stateSyncing}
+        initialHistory={correctionHistory} onReview={reviewStateCorrection}
+        onApply={applyStateCorrection} onUndo={undoLastStateCorrection}
+        onClose={() => { if (!correctionBusy) setCorrectionOpen(false) }}
+      />}
 
       {shopMsgIndex !== null && messages[shopMsgIndex] && (
         <ShopModal

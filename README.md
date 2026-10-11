@@ -1,3 +1,9 @@
+## Dot149 — State-sync turn barrier & evidence-backed correction (2026-10-11)
+
+Based on full Dot148. Fix: narration completion no longer unlocks next user turn until all Semantic State Audit passes finish/commit. The input remains editable while Send, reroll, shop/PC follow-up and battle-start are guarded. Interrupted/failed state scans show a retry warning; network calls to state APIs have a 90-second abort timeout per attempt. Added an independent VI/EN/ZH "State correction" panel: inspect assistant canon via AI, show an exact-source quotation and a one-field proposal for a selected Pokémon UID, then user confirms the change or undoes it. Only `gender`, `nickname`, `shiny` supported; no free money, Pokémon, IV/EV or item patching. Historic gender from the last 12 assistant turns is used when receiving a Pokémon, and explicit manual correction survives later story scans. `BAN_GIAO_DU_AN.md` has detailed caveats, test results, and file changes. Dot149 test 12/12; 48/52 packaged suites PASS (4 pre-existing stale); 88 JS syntax and 56 JSX parse PASS; Vite build/browser E2E not run due unavailable npm dependencies in this environment.
+
+---
+
 ## Dot148 — Corrections before deployment (2026-10-10)
 
 Building on Dot147 (including Dot146 multi-Worldbook and wide-screen), Dot148 unifies story ownership checks between opening/regular turns, verifies the actual Pokémon species and recipient from prose, handles natural Chinese handover sentences and independently proven double captures, fixes wild encounters with mixed habitat prose, rejects Chinese spectator-only battles and makes legendary level growth obey tier caps. Regression: new 15/15, overall 47/51 (four older known-failing test scripts); JS/JSX parse PASS. No browser build due unavailable offline dependencies. See `BAN_GIAO_DU_AN.md` for paths, tests, and caveats.

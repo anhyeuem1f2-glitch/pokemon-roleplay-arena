@@ -3,6 +3,17 @@
 // already excludes those surfaces and only rewrites interface chrome.
 
 export const ZH_UI_EXTRAS = Object.freeze({
+  'Thử quét lại biến': '重新扫描状态',
+  'Biến có thể chưa đầy đủ. Vẫn tiếp tục?': '状态可能尚未完整同步，仍要继续吗？',
+  'Bỏ qua có cảnh báo': '忽略警告并继续',
+  '🛠 Hiệu chỉnh biến': '🛠 状态纠错',
+
+  'Đang đồng bộ state hoặc đang hiệu chỉnh; hãy hoàn tất trước khi vào trận.': '正在同步状态或修正数据，请完成后再进入战斗。',
+  'Đang đồng bộ thế giới… hãy đợi hoàn tất trước khi gửi lượt tiếp.': '正在同步世界状态……请等待完成后再发送下一回合。',
+  'Đồng bộ biến lượt trước chưa hoàn tất. Hãy quét lại trước khi chơi tiếp.': '上一回合的状态同步尚未完成，请重新扫描后再继续。',
+  'Không tìm thấy lượt cần sửa; hãy khôi phục save trước khi tiếp tục.': '找不到需要修复的回合，请先恢复存档。',
+  'State repair chưa hoàn tất.': '状态修复尚未完成。',
+
   'Preset này được nhập bằng engine cũ. Hãy nhập lại file JSON một lần để áp đúng Prompt Manager / prompt_order của SillyTavern.': '此预设是由旧版导入引擎载入的。请重新导入一次 JSON，以正确应用 SillyTavern 的 Prompt Manager / prompt_order。',
   'Tên chiêu Pokémon': '宝可梦招式名称',
   'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': '仅改变显示名称。战斗与存档中的招式数据始终保留标准英文名称，避免影响机制与兼容性。',
@@ -363,6 +374,17 @@ export const ZH_UI_EXTRAS = Object.freeze({
 })
 
 export const EN_UI_EXTRAS = Object.freeze({
+  'Thử quét lại biến': 'Retry state scan',
+  'Biến có thể chưa đầy đủ. Vẫn tiếp tục?': 'State may be incomplete. Continue anyway?',
+  'Bỏ qua có cảnh báo': 'Continue with warning',
+  '🛠 Hiệu chỉnh biến': '🛠 State correction',
+
+  'Đang đồng bộ state hoặc đang hiệu chỉnh; hãy hoàn tất trước khi vào trận.': 'State sync or correction is still in progress; finish it before entering battle.',
+  'Đang đồng bộ thế giới… hãy đợi hoàn tất trước khi gửi lượt tiếp.': 'Synchronizing world state… please wait before sending the next turn.',
+  'Đồng bộ biến lượt trước chưa hoàn tất. Hãy quét lại trước khi chơi tiếp.': 'The previous turn state sync is incomplete. Retry scanning before continuing.',
+  'Không tìm thấy lượt cần sửa; hãy khôi phục save trước khi tiếp tục.': 'Cannot find the turn requiring repair; restore your save before continuing.',
+  'State repair chưa hoàn tất.': 'State repair is incomplete.',
+
   'Preset này được nhập bằng engine cũ. Hãy nhập lại file JSON một lần để áp đúng Prompt Manager / prompt_order của SillyTavern.': 'This preset was imported by the old engine. Re-import the JSON once so SillyTavern Prompt Manager / prompt_order is applied correctly.',
   'Tên chiêu Pokémon': 'Pokémon move names',
   'Chỉ đổi phần hiển thị. Dữ liệu battle/save luôn giữ tên chiêu tiếng Anh canonical để không làm hỏng cơ chế.': 'Display only. Battle/save data always keeps canonical English move names so mechanics remain stable.',

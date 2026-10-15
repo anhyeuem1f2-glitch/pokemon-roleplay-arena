@@ -6,6 +6,7 @@
 
 import { chatCompletion } from './aiClient.js'
 import { normalizePokemonGender } from '../data/pokemonGender.js'
+import { isPokemonSpeciesAsLocation, canonicalStateFactKey } from '../utils/stateConsistency.js'
 import { parseBadgeDirective, parseQuestDirective } from '../data/worldProgress.js'
 import { inferPokemonAcquisitionStoryName, proseSupportsPokemonAcquisition, proseSupportsSemanticPokemonAcquisition } from '../utils/stateEvidence.js'
 import { craftedPokemonAccessoryName, resolveItemByName } from '../data/shopItems.js'
@@ -61,7 +62,7 @@ NGUYÊN TẮC CỐT LÕI:
 6. Nếu một Pokémon đã có trong PARTY/PC, các thay đổi của nó phải nhắm vào đúng cá thể hiện có (ưu tiên uid nếu snapshot có), không tạo bản sao.
 7. Event nào đã xảy ra thì status=completed. Việc đang cân nhắc/dự định/giá niêm yết/khả năng tương lai thì bỏ.
 8. Không giới hạn số event. Mỗi event độc lập; một event mơ hồ không được làm mất các event rõ khác.
-9. Vật phẩm: trả NET CHANGE của từng tên vật phẩm trong lượt. Nhận 3 rồi dùng 1 => quantity=2. Mất/dùng/trả => quantity âm. Vật phẩm lạ vẫn giữ nguyên tên.
+9. Vật phẩm: xuất từng thay đổi ĐỘC LẬP khi nhận và dùng trong cùng một lượt, KHÔNG gộp thành số NET khiến mất bằng chứng tiêu hao. Ví dụ nhận 3 rồi dùng 1 => xuất một event +3 và một event -1 với chứng cứ riêng. Vật phẩm lạ vẫn giữ nguyên tên.
 9.1. KHÔNG ĐƯỢC LÀM RƠI VẬT PHẨM CHỈ VÌ MƠ HỒ. Với 中文 cũng như Việt/Anh:
 - Tên rõ + số lượng rõ: target=tên thật, quantity=số thật.
 - Tên rõ + số lượng không rõ (一些树果 / vài quả berry / some berries): vẫn xuất item_change; nếu không suy ra được con số an toàn thì quantity=1 theo nghĩa MỘT LÔ/BUNDLE và details.quantityUncertain=true, details.quantityText=<cụm định lượng gốc>. KHÔNG bịa số.
@@ -97,7 +98,9 @@ Field tùy kind: id, target, uid, owner, source, amount, quantity, level, mode(d
 - item_change.details: category, holdable, wearable, pokemonAccessory, accessorySlot, sourceMaterial, infinite, keyItem, effect/effects, charges, durability, rarity, usage, customAttributes, quantityUncertain, quantityText, identityUncertain, rawLabel/rawDescription và mọi thuộc tính fan-made đã được canon xác lập. description KHÔNG bắt buộc; nếu chính văn không nói rõ thì bỏ trống. Mô tả item động sẽ do Item Description Protocol riêng tạo từ canon, không tự mượn mô tả vật phẩm khác.
 - item_patch: dùng khi VẬT PHẨM ĐÃ CÓ trong túi được chính văn bổ sung/thay đổi thuộc tính mà số lượng KHÔNG đổi (công dụng mới, trạng thái, số lần dùng, độ bền, quyền truy cập, ngoại hình, liên kết chủ sở hữu, hiệu ứng fan-made...). target là đúng tên/id vật phẩm; details/fields chứa các thuộc tính mới. KHÔNG dùng item_change quantity=0 cho việc này.
 - quest_update.details: id,status,title,giver,objective,reward,region.
-- custom_state dùng cho mọi state mới không khớp loại chuẩn: target là khóa; namespace; operation=set|merge|delta|append|remove; value/details là dữ liệu.
+- custom_state dùng cho mọi state mới không khớp loại chuẩn: target là khóa; namespace; operation=set|merge|delta|append|remove; value/details là dữ liệu. Luôn dùng CÙNG một khóa ổn định cho cùng thực thể và cùng thuộc tính; không ghép namespace lặp thành story:story:..., không tạo key mới mỗi lần trạng thái của một thực thể thay đổi.
+- Nếu một lượt VỪA NHẬN VỪA TIÊU THỤ cùng một vật phẩm, tạo HAI item_change riêng (+số lượng nhận và -số lượng dùng), mỗi event có evidence độc lập, kể cả số lượng cuối cùng bằng 0. Không diễn giải một món vừa dùng là vẫn còn trong túi.
+- move/place: chỉ trả địa điểm thực tế nhân vật đã tới. Pokémon xuất hiện, được nhận hoặc đang chiến đấu KHÔNG phải một địa điểm; tuyệt đối không gửi place: Pikachu, 皮卡丘 hoặc tên loài đơn lẻ.
 - Unknown kind cũng được app giữ như dynamic state, nhưng hãy ưu tiên kind chuẩn khi có thể.
 Nếu thật sự không có thay đổi state nào, trả <STATE_EVENTS>{"events":[]}</STATE_EVENTS>.
 Không markdown, không giải thích ngoài khối STATE_EVENTS.`
@@ -278,7 +281,7 @@ export function parseSemanticStateResponse(raw) {
 }
 
 function customFact(event) {
-  const key = String(event.target ?? event.key ?? event.kind ?? 'Sự kiện').trim() || 'Sự kiện'
+  const key = canonicalStateFactKey(event.target ?? event.key ?? event.kind ?? 'Sự kiện') || 'Sự kiện'
   const details = event.details && Object.keys(event.details).length ? ` ${JSON.stringify(event.details)}` : ''
   const value = event.value != null ? ` ${String(event.value)}` : ''
   const text = String(event.note ?? event.evidence ?? '').trim() || `${key}${value}${details}`.trim()
@@ -425,7 +428,7 @@ export function semanticEventsToParsed(events, { minConfidence = 0.30 } = {}) {
       }
       case 'move': {
         const place = String(event.place ?? target).trim()
-        if (place) {
+        if (place && !isPokemonSpeciesAsLocation(place)) {
           const d = { place, x: Number.isFinite(Number(event.x)) ? clamp(event.x, 0, 100) : null, y: Number.isFinite(Number(event.y)) ? clamp(event.y, 0, 100) : null, semantic: true, canon: true, semanticEventId: event.id, evidence: event.evidence }
           parsed.moveDirectives.push(d)
           parsed.moves.push(place)

@@ -4183,3 +4183,7 @@ Người chơi chọn **English** hoặc **简体中文** trước đây mới c
 
 ### Regression
 Thêm `test-dot133.mjs` kiểm tra UI tiếng Trung → chính văn tiếng Trung, preset được quyền override, action choices đa ngôn ngữ và không còn các prompt phụ ép tiếng Việt.
+
+
+## Dot150 · State consistency
+Semantic state guards for same-turn item usage, invalid Pokémon locations, and repeated state prefixes. See BAN_GIAO_DU_AN.md.

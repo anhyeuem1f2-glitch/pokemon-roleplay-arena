@@ -4,6 +4,8 @@
 // hứa, quyền truy cập, tài sản hư cấu... Core state (money/inventory/Pokémon)
 // vẫn có handler riêng; kho này là phần mở rộng chứ không thay thế chúng.
 
+import { canonicalStateIdentity } from '../utils/stateConsistency.js'
+
 const VERSION = 1
 
 function slug(value) {
@@ -19,13 +21,22 @@ export function normalizeDynamicState(raw) {
   const values = source.values && typeof source.values === 'object' && !Array.isArray(source.values)
     ? source.values
     : {}
-  return { version: VERSION, values: { ...values } }
+  const canonical = {}
+  for (const [rawKey, entry] of Object.entries(values)) {
+    const parts = String(rawKey).split(':')
+    const namespace = parts.shift() || 'world'
+    const identity = canonicalStateIdentity(namespace, parts.join(':'))
+    const key = identity.key || rawKey
+    const previous = canonical[key]
+    if (!previous || Number(entry?.updatedAtTurn ?? -1) >= Number(previous?.updatedAtTurn ?? -1)) {
+      canonical[key] = { ...entry, key: identity.target || entry?.key || key, namespace: identity.namespace }
+    }
+  }
+  return { version: VERSION, values: canonical }
 }
 
 export function dynamicStateKey(update = {}) {
-  const namespace = slug(update.namespace ?? update.scope ?? 'world') || 'world'
-  const target = slug(update.target ?? update.key ?? update.name)
-  return target ? `${namespace}:${target}` : ''
+  return canonicalStateIdentity(update.namespace ?? update.scope ?? 'world', update.target ?? update.key ?? update.name).key
 }
 
 function numeric(value) {
@@ -85,7 +96,7 @@ export function applyDynamicStateUpdates(current, updates, { turn = null, source
       nextValue = before + (operation === 'decrement' ? -Math.abs(delta) : delta)
     } else if (operation === 'append') {
       const before = Array.isArray(previousValue) ? previousValue : (previousValue == null ? [] : [previousValue])
-      nextValue = [...before, update.value]
+      nextValue = before.some((entry) => JSON.stringify(entry) === JSON.stringify(update.value)) ? before : [...before, update.value]
     } else if (operation === 'merge') {
       const before = previousValue && typeof previousValue === 'object' && !Array.isArray(previousValue) ? previousValue : {}
       const incoming = update.value && typeof update.value === 'object' && !Array.isArray(update.value)

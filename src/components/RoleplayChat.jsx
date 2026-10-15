@@ -51,7 +51,7 @@ import { musicManager } from '../utils/musicManager.js'
 import { VICTORY_TRACK_KEYS, DEFEAT_TRACK_KEYS } from '../data/musicTracks.js'
 import { rememberExchange, recallRelevant, buildMemoryNote, forgetMemoriesInTurnRange, clearMemory } from '../utils/storyMemory.js'
 import { archiveExchange, recallArchive, recallFromTranscript, mergeMemoryResults, forgetArchiveRange, clearArchive, backfillArchiveFromMessages } from '../utils/storyArchive.js'
-import { upsertNpc, addFact, findRelevantNotes, buildNotebookNote, findNpcProfileInText, recordNpcBattle } from '../utils/storyNotebook.js'
+import { upsertNpc, addFact, upsertSemanticFact, findRelevantNotes, buildNotebookNote, findNpcProfileInText, recordNpcBattle } from '../utils/storyNotebook.js'
 import { maybeUpdateSummary, buildSummaryNote, trimSummaryCoverage, clearSummary } from '../utils/storySummary.js'
 import { maybeMakeNudge, getIdentity } from '../data/storyDirector.js'
 import { getRegion, getArea } from '../data/regions.js'
@@ -472,6 +472,12 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     appliedItemPatchFields.set(key, fields)
   }
   const appliedSemanticItemTargets = new Set((applied?.items ?? []).filter((entry) => entry?.semantic || entry?.canon).map((entry) => itemKey(entry.name)))
+  const appliedItemSigns = new Map()
+  for (const entry of applied?.items ?? []) {
+    const key = itemKey(entry.name)
+    if (!appliedItemSigns.has(key)) appliedItemSigns.set(key, new Set())
+    appliedItemSigns.get(key).add(Math.sign(Number(entry.qty) || 0))
+  }
   const appliedFriends = new Set((applied?.friendships ?? []).map((entry) => `${monKey(entry.target)}|${Number(entry.delta)}|${monKey(entry.note)}`))
   const appliedEquipment = new Set((applied?.equipment ?? []).map((entry) => `${monKey(entry.target)}|${itemKey(entry.item ?? 'none')}|${entry.mode}`))
   // Qua nhiều semantic pass, cùng một Pokémon có thể bị model chấm lệch
@@ -531,7 +537,21 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     money: filteredMoneyEntries.reduce((sum, value) => sum + value, 0),
     levels: (extra?.levels ?? []).filter((entry) => !appliedLevelTargets.has(monKey(entry.target)) && !appliedLevels.has(`${monKey(entry.target)}|${entry.mode}|${entry.value}`)),
     evolutions: (extra?.evolutions ?? []).filter((entry) => !appliedEvolutions.has(`${monKey(entry.from)}|${monKey(entry.to)}`)),
-    items: (extra?.items ?? []).filter((entry) => !appliedItems.has(`${itemKey(entry.name)}|${Number(entry.qty)}`) && !((entry?.semantic || entry?.canon) && appliedSemanticItemTargets.has(itemKey(entry.name)))),
+    items: (extra?.items ?? []).filter((entry) => {
+      const key = itemKey(entry.name)
+      const qty = Number(entry.qty) || 0
+      if (!qty || appliedItems.has(`${key}|${qty}`)) return false
+      if (!(entry?.semantic || entry?.canon) || !appliedSemanticItemTargets.has(key)) return true
+      // A received item can be consumed later in THIS SAME story turn.
+      // Keep opposite-sign events only when their independent evidence contains
+      // a concrete consumption/action and the story includes that item.
+      const signs = appliedItemSigns.get(key) ?? new Set()
+      const opposite = signs.has(-Math.sign(qty))
+      const evidence = String(entry.evidence ?? entry.rawEvidence ?? '')
+      const story = String(moneyText ?? '')
+      const consumption = /(?:用掉|使用|消耗|投掷|扔出|捕捉|扔掉|đã dùng|tiêu hao|sử dụng|ném|bắt được|threw|thrown|used|consum|catch|caught)/iu
+      return opposite && qty < 0 && consumption.test(evidence) && consumption.test(story)
+    }),
     itemPatches: (extra?.itemPatches ?? []).map((entry) => {
       const used = appliedItemPatchFields.get(itemKey(entry.target)) ?? new Set()
       const fields = Object.fromEntries(Object.entries(entry.fields ?? {}).filter(([field]) => !used.has(field)))
@@ -2164,11 +2184,17 @@ export default function RoleplayChat() {
         ...(parsed.items ?? []),
         ...(automaticMysteryDebits > 0 ? [{ name: 'Poké Ball chưa xác định', qty: -automaticMysteryDebits, automaticMysteryReveal: true }] : []),
       ]
-      const itemChanges = rawItemChanges.map((raw) => {
+      // Resolve received-in-this-turn items before debits. Without this, a
+      // brand-new Poké Ball received and immediately used leaves a ghost ball.
+      const sameTurnCredits = rawItemChanges.filter((raw) => Number(raw.qty) > 0).map((raw) =>
+        resolveInventoryItemByName(raw.name, latestInventoryRef.current) ?? createCustomItemDescriptor(raw.name, raw)
+      ).filter(Boolean)
+      const itemChanges = [...rawItemChanges].sort((a, b) => Number(b.qty > 0) - Number(a.qty > 0)).map((raw) => {
         // Inventory roleplay là open-world: item không có trong database vẫn
         // được tạo và persist nếu canon nói người chơi đã nhận nó. Khi mất
         // item tự tạo, resolve trực tiếp từ inventory hiện tại theo tên/id.
         const knownOrOwned = resolveInventoryItemByName(raw.name, latestInventoryRef.current)
+          ?? resolveInventoryItemByName(raw.name, sameTurnCredits)
         const entry = knownOrOwned ?? (Number(raw.qty) > 0
           ? createCustomItemDescriptor(raw.name, raw)
           : null)
@@ -2552,7 +2578,7 @@ export default function RoleplayChat() {
 
     try {
       for (const n of parsed.npcs ?? []) upsertNpc(n.name, n.fields, turnNow)
-      for (const f of parsed.facts ?? []) addFact(f.key, f.text, turnNow)
+      for (const f of parsed.facts ?? []) upsertSemanticFact(f.key, f.text, turnNow)
     } catch (e2) { console.warn('[state] NPC/FACT lỗi:', e2.message) }
 
     try {

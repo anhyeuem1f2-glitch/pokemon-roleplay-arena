@@ -179,6 +179,25 @@ export function removeFact(fact) {
   notify()
 }
 
+/** Dot150: update the latest semantic state for the same canonical key.
+ * Legacy free-form addFact remains append-only for intentionally multi-valued lore. */
+export function upsertSemanticFact(key, text, turn) {
+  const s = load()
+  const normalize = (raw) => String(raw ?? '').normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ')
+  const canonical = (raw) => {
+    const words = normalize(raw).split(':').filter(Boolean)
+    while (words.length > 2 && words[0] === words[1]) words.shift()
+    return words.join(':')
+  }
+  const id = canonical(key)
+  if (!id) return
+  const before = s.facts.filter((fact) => canonical(fact.key) !== id)
+  const next = { key: id, text: String(text ?? ''), turn }
+  s.facts = [...before, next].slice(-MAX_FACTS)
+  persist()
+  notify()
+}
+
 /** Format 1 NPC thành 1 dòng gọn cho prompt. */
 export function formatNpcLine(npc) {
   const stable = normalizeNpc(npc)

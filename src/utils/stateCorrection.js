@@ -5,8 +5,8 @@ import { genderRatioForSpecies, normalizePokemonGender } from '../data/pokemonGe
 
 const SUPPORTED_FIELDS = new Set(['gender', 'nickname', 'shiny'])
 const GENDER_WORDS = {
-  male: /(?:\bmale\b|♂|\bduc\b|\bđực\b|雄性|公的|公宝可梦|雄|公)/iu,
-  female: /(?:\bfemale\b|♀|\bcai\b|\bcái\b|雌性|母的|母宝可梦|雌|母)/iu,
+  male: /(?:\bmale\b|♂|\bduc\b|\bđực\b|雄性|公的|公宝可梦|雄宝可梦)/iu,
+  female: /(?:\bfemale\b|♀|\bcai\b|\bcái\b|雌性|母的|母宝可梦|雌宝可梦)/iu,
   unknown: /(?:genderless|无性别|無性別|vô giới tính)/iu,
 }
 
@@ -53,9 +53,12 @@ export function validateCorrectionProposal(proposal, { mon, speciesEntry, canonM
       return { ok: false, error: 'Gender contradicts the species canon.' }
     }
   } else if (proposal.field === 'shiny') {
-    if (typeof value !== 'boolean' || !/(shiny|闪光|異色|异色|màu sắc khác thường|ánh kim)/iu.test(quote)) return { ok: false, error: 'No explicit Shiny evidence.' }
+    const positive = /(?:shiny|闪光|異色|异色|màu sắc khác thường|ánh kim)/iu.test(quote)
+    const negative = /(?:not\s+shiny|non[- ]shiny|không\s+(?:phải\s+)?shiny|không\s+(?:phải\s+)?dị\s+sắc|并非闪光|不是闪光|非闪光|不是异色|並非異色)/iu.test(quote)
+    if (typeof value !== 'boolean' || (value ? !positive || negative : !negative)) return { ok: false, error: 'No unambiguous Shiny/non-Shiny evidence.' }
   } else if (proposal.field === 'nickname') {
-    if (typeof value !== 'string' || !value.trim() || value.length > 60 || !quote.includes(value)) {
+    if (typeof value !== 'string' || !value.trim() || value.length > 60 || !quote.includes(value)
+      || !/(biệt\s*danh|đặt\s*tên|gọi\s+(?:nó\s+)?là|nickname|named|called|绰号|昵称|取名|命名|叫做|称为)/iu.test(quote)) {
       return { ok: false, error: 'Nickname not explicitly stated in quoted canon.' }
     }
     value = value.trim()

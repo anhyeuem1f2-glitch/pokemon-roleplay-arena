@@ -5,6 +5,10 @@
 // do model sinh vẫn giữ nguyên ngôn ngữ gốc.
 
 export const ZH_STATIC_CATALOG = Object.freeze({
+  '· đã kiểm tra, không có sự kiện mới': '· 已检查，无新事件',
+  'đã kiểm tra, không có sự kiện mới': '已检查，无新事件',
+  '· hợp lệ: không có thay đổi': '· 有效：无需更新',
+  'hợp lệ: không có thay đổi': '有效：无需更新',
   // ---- Màn hình chính / điều hướng ----
   'Thế giới nhập vai của huấn luyện viên Pokémon': '宝可梦训练家角色扮演世界',
   'Sẵn sàng bắt đầu hành trình.': '准备开始旅程。',

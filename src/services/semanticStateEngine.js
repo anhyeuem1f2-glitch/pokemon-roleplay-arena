@@ -277,7 +277,7 @@ export function parseSemanticStateResponse(raw) {
       details: event.details && typeof event.details === 'object' ? event.details : {},
     }))
     .filter((event) => event.kind && !['planned', 'intent', 'pending', 'future', 'failed', 'cancelled', 'canceled'].includes(event.status))
-  return { events: normalized, malformed, salvaged }
+  return { events: normalized, malformed, salvaged, explicitNoChange: !malformed && normalized.length === 0 }
 }
 
 function customFact(event) {

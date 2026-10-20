@@ -201,6 +201,7 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                         Semantic primary: đề xuất <b>{stateAudit.semantic.proposed ?? 0}</b> · nhận <b style={{ color: 'var(--mint)' }}>{stateAudit.semantic.accepted ?? 0}</b>
                         {(stateAudit.semantic.rejected ?? 0) > 0 ? <> · bỏ <b style={{ color: '#e9a06b' }}>{stateAudit.semantic.rejected}</b></> : ''}
                         {stateAudit.semantic.repaired ? <span style={{ color: '#e9c46a' }}> · đã tự sửa format</span> : null}
+                        {stateAudit.semantic.explicitNoChange ? <span style={{ color: 'var(--mint)' }}> · đã kiểm tra, không có sự kiện mới</span> : null}
                         {stateAudit.semantic.error ? <span style={{ color: '#e9a06b' }}> · lỗi: {stateAudit.semantic.error}</span> : null}
                         {stateAudit.semantic.auditor ? (
                           <div style={{ marginTop: 5, color: 'var(--text-dim)' }}>
@@ -249,6 +250,7 @@ export default function TurnInfoModal({ message, onClose, onRerollState, onSaveP
                             <span style={{ color: 'var(--text-dim)' }}> · {pass.engine === 'semantic-events' ? 'semantic event' : pass.evidenceAnchored ? 'evidence nguyên văn' : 'legacy'}</span>
                             {pass.salvaged ? <span style={{ color: '#e9c46a' }}> · đã cứu JSON lỗi</span> : null}
                             {pass.repaired ? <span style={{ color: '#e9c46a' }}> · đã tự sửa format</span> : null}
+                            {pass.explicitNoChange && !pass.error ? <span style={{ color: 'var(--mint)' }}> · hợp lệ: không có thay đổi</span> : null}
                             {pass.error ? (
                               <span style={{ color: '#e9a06b' }}> · lỗi: {pass.error}</span>
                             ) : (

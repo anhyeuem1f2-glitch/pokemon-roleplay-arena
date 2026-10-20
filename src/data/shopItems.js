@@ -150,12 +150,12 @@ export function displayInventoryCategory(item) {
 // phân biệt hoa thường; kèm bảng tên gọi khác vì model dùng lẫn lộn Anh-Việt.
 const ITEM_ALIASES = {
   rarecandy: ['rare candy', 'keo hiem', 'keo qui', 'keo hiem co', 'candy hiem'],
-  pokeball: ['poke ball', 'bong poke', 'bong pokemon'],
-  greatball: ['great ball', 'bong lon'],
-  ultraball: ['ultra ball', 'sieu bong'],
-  masterball: ['master ball', 'bong bac thay'],
+  pokeball: ['poke ball', 'bong poke', 'bong pokemon', '精灵球', '精靈球', '宝可梦球', '寶可夢球'],
+  greatball: ['great ball', 'bong lon', '超级球', '超級球'],
+  ultraball: ['ultra ball', 'sieu bong', '高级球', '高級球'],
+  masterball: ['master ball', 'bong bac thay', '大师球', '大師球'],
   'unknown-pokemon-ball': ['poke ball chua xac dinh', 'pokeball chua xac dinh', 'qua bong chua xac dinh', 'poke ball niem phong'],
-  potion: ['thuoc hoi mau', 'binh thuoc'],
+  potion: ['thuoc hoi mau', 'binh thuoc', '伤药', '傷藥'],
   revive: ['hoi sinh', 'thuoc hoi sinh'],
   fullrestore: ['full restore', 'hoi phuc toan phan'],
   fullheal: ['full heal', 'chua moi trang thai'],

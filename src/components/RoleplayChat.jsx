@@ -36,12 +36,14 @@ import PokecenterModal from './PokecenterModal.jsx'
 import { parseStoryStateTags, applyStoryState } from '../utils/storyStateProtocol.js'
 import { validateStateAgainstProse, proseSupportsMove, proseSupportsMysteryBallReveal, proseHasCompletedPokemonAcquisition, proseSupportsPokemonAcquisition, proseSupportsSemanticPokemonAcquisition, reconcileMoneyDirectives, filterMoneyEntriesAgainstCanon, reconcileAppliedMoneyLedger } from '../utils/stateEvidence.js'
 import { buildStateScanPlan, estimateStateChangeLoad } from '../utils/stateScanPlan.js'
+import { applyTrainingEvGain, reconcileTrainingManifest } from '../utils/trainingProgress.js'
 import { adjustFriendship } from '../data/pokemonFriendship.js'
 import BattleModal from './BattleModal.jsx'
 import DoubleBattleModal from './DoubleBattleModal.jsx'
 import TurnInfoModal from './TurnInfoModal.jsx'
 import StateCorrectionModal from './StateCorrectionModal.jsx'
 import { parseCorrectionJson, validateCorrectionProposal, patchPokemonAcrossRoster, undoPokemonCorrection, correctionHistoryKey } from '../utils/stateCorrection.js'
+import { validateManualStateRepair, repairEvidenceMessages } from '../utils/manualStateRepair.js'
 import { getBuiltInZhPokemonSpeciesNames, normalizeLocalizedPokemonName } from '../utils/pokemonNameTranslations.js'
 import ActionChoices from './ActionChoices.jsx'
 import { renderInlineFormatting, stripInlineTags } from '../utils/inlineFormat.jsx'
@@ -88,13 +90,19 @@ const MEMORY_RECENT_WINDOW = 24
 
 function semanticResultCoversStoryCues(result, storyText, appliedState = null) {
   const expectedLoad = estimateStateChangeLoad(storyText)
-  if (expectedLoad <= 0) return true
-  if (Number(result?.acceptedCount) <= 0) return false
-  // Event "nhận Pokémon" là side effect cốt lõi. Một endpoint trả ITEM/MOVE
-  // nhưng bỏ Pokémon không được phép chặn failover chỉ vì acceptedCount > 0.
+  if (!result || (result.malformed && !result.salvaged && !result.repaired)) return false
+  // High-impact ownership updates are checked independently of the fuzzy
+  // cue-load score: multilingual narrative may evade generic word counters.
   const needsPokemon = proseHasCompletedPokemonAcquisition(storyText)
     && !(appliedState?.pokemons?.length)
   if (needsPokemon && !(result?.parsed?.pokemons?.length)) return false
+  if (expectedLoad <= 0) return true
+  // A correctly parsed {"events":[]} means "no state change". Narrative
+  // mentions alone are NOT proof of a completed transaction. Subsequent
+  // focused auditor passes can still find missed operations; never raise a
+  // fake API failure on a valid no-change response.
+  const validNoChange = Boolean(result.explicitNoChange)
+  if (Number(result?.acceptedCount) <= 0 && !validNoChange) return false
   return true
 }
 
@@ -572,7 +580,8 @@ function filterSupplementalDuplicates(extra, applied, { consumeExactMoney = fals
     moves: (extra?.moveDirectives ?? []).filter((entry) => !appliedMoves.has(`${monKey(entry.place)}|${entry.x ?? ''}|${entry.y ?? ''}`)).map((entry) => entry.place),
     dateAdvance: applied?.dateAdvance ? 0 : (extra?.dateAdvance ?? 0),
     datePart: applied?.datePart === extra?.datePart ? null : (extra?.datePart ?? null),
-    training: Number(applied?.training) === Number(extra?.training) ? 0 : (extra?.training ?? 0),
+    training: Number(applied?.training) > 0 || (applied?.trainingEvents?.length ?? 0) > 0 ? 0 : (extra?.training ?? 0),
+    trainingEvents: (extra?.trainingEvents ?? []).filter((entry) => !(applied?.trainingEvents ?? []).some((prior) => monKey(prior.target) === monKey(entry.target))),
     npcs: (extra?.npcs ?? []).filter((entry) => !appliedNpc.has(`${monKey(entry.name)}|${JSON.stringify(entry.fields ?? {})}`)),
     facts: (extra?.facts ?? []).filter((entry) => !appliedFact.has(`${monKey(entry.key)}|${monKey(entry.text)}`)),
     badges: (extra?.badges ?? []).filter((entry) => !appliedBadges.has(JSON.stringify(entry))),
@@ -619,7 +628,7 @@ function filterUiPreAppliedState(extra, preApplied) {
 
 const STATE_ARRAY_FIELDS = [
   'rel', 'body', 'shops', 'loots', 'npcs', 'facts', 'pokemons', 'pokemonRemovals', 'levels', 'evolutions',
-  'friendships', 'pokemonPatches', 'equipment', 'hunger', 'moves', 'moveDirectives', 'items', 'itemPatches', 'badges',
+  'friendships', 'pokemonPatches', 'equipment', 'hunger', 'trainingEvents', 'moves', 'moveDirectives', 'items', 'itemPatches', 'badges',
   'quests', 'reputations', 'wanted', 'legendaryAccess', 'collectionAwards', 'customEvents', 'dynamicUpdates',
 ]
 
@@ -653,7 +662,7 @@ function mergeStateManifests(base, extra) {
 // không tồn tại, thiếu vật phẩm, cổng tiến hoá, v.v. Ledger chỉ được đánh dấu
 // cho operation đã áp hoặc đã ở trạng thái đích; nếu không Auditor sẽ tưởng
 // biến đã cập nhật và bỏ qua lỗi thật.
-const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'pokemonRemovals', 'items', 'itemPatches', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates']
+const APPLY_GATED_FIELDS = ['levels', 'evolutions', 'friendships', 'pokemonPatches', 'pokemons', 'pokemonRemovals', 'items', 'itemPatches', 'loots', 'equipment', 'collectionAwards', 'dynamicUpdates', 'trainingEvents']
 function ledgerManifestFromApplyReport(parsed, report) {
   const manifest = compactStateManifest(parsed)
   for (const field of APPLY_GATED_FIELDS) {
@@ -778,6 +787,7 @@ function describeParsedChanges(parsed, movedTo, suffix = '', applicationReport =
   if (parsed.pokecenter) out.push(`✚ Trung tâm Pokémon: ${parsed.pokecenter.name}${tag}`)
   if (parsed.dateAdvance) out.push(`📅 Thời gian +${parsed.dateAdvance} ngày${tag}`)
   if (parsed.training) out.push(`🏋 Luyện tập cường độ ${parsed.training} — cả đội nhận EXP${tag}`)
+  for (const event of parsed.trainingEvents ?? []) out.push(`🏋 Tập luyện: ${event.target} · ${event.stat ?? 'chỉ số chủ đạo'} · EXP + EV${tag}`)
   if (parsed.datePart) out.push(`🕐 Chuyển buổi: ${parsed.datePart}${tag}`)
   if (movedTo) out.push(`🗺 Di chuyển tới: ${movedTo.areaKey} (${movedTo.regionKey})${Number.isFinite(movedTo.x) && Number.isFinite(movedTo.y) ? ` · X${movedTo.x} Y${movedTo.y}` : ''}${tag}`)
   return out
@@ -2014,6 +2024,17 @@ export default function RoleplayChat() {
           continue
         }
         const fields = { ...(patch.fields ?? {}) }
+        // Dot151: IV is genetic and EV is earned from verified battle or
+        // completed training. Do not let a semantic-model guess such as
+        // "Pikachu seems stronger" overwrite all six IV/EV stats in normal
+        // gameplay. Sandbox/admin may explicitly customize these values.
+        if (!adminMode && normalizeGameMode(storyTone) !== 'sandbox') {
+          if (fields.ivs !== undefined || fields.evs !== undefined) {
+            report.lines.push(`ℹ ${targetMon.name}: chặn IV/EV do AI tự gán; tiến triển trận/luyện tập được tính riêng`)
+          }
+          delete fields.ivs
+          delete fields.evs
+        }
         const abilityChangeRequested = Boolean(fields.ability)
         const abilityChangeAllowed = canRewritePokemonAbility(playerTraits)
         if (abilityChangeRequested && !abilityChangeAllowed) {
@@ -2087,7 +2108,12 @@ export default function RoleplayChat() {
             return out
           }
           if (fields.ivs) next.ivs = patchStats(fields.ivs, 31, next.ivs)
-          if (fields.evs) next.evs = patchStats(fields.evs, 252, next.evs)
+          if (fields.evs) {
+            const candidate = patchStats(fields.evs, 252, next.evs)
+            const total = Object.values(candidate).reduce((sum, val) => sum + Math.max(0, Number(val) || 0), 0)
+            if (total <= 510) next.evs = candidate
+            else report.lines.push(`⚠ Bỏ bảng EV của ${targetMon.name}: vượt tổng 510`)
+          }
           if (fields.status !== undefined) next.status = fields.status ? String(fields.status) : null
           if (fields.customAttributes && typeof fields.customAttributes === 'object' && !Array.isArray(fields.customAttributes)) {
             next.customAttributes = { ...(next.customAttributes ?? {}), ...fields.customAttributes }
@@ -2534,21 +2560,27 @@ export default function RoleplayChat() {
       }
 
       const trainLv = parsed.training ?? 0
+      const trainingEvents = parsed.trainingEvents ?? []
       const daysPassed = parsed.dateAdvance ?? 0
-      if (trainLv > 0 || daysPassed > 0) {
-        // Từ đợt 74 hệ số >1 chỉ đến từ năng lực TỰ MÔ TẢ.
+      if (trainLv > 0 || trainingEvents.length || daysPassed > 0) {
         const expMul = trainingExpMultiplier(playerTraits)
+        const trainFor = (mon) => trainingEvents.find((event) =>
+          (mon.uid && String(mon.uid) === String(event.target)) ||
+          (!mon.uid && normalizeMonTarget(mon.name) === normalizeMonTarget(event.target)))
         const grow = (mon) => {
           if (!mon) return mon
+          const explicit = trainFor(mon)
+          const intensity = explicit?.intensity ?? trainLv
           const amount = Math.round(
-            ((trainLv > 0 ? expFromTraining(mon, trainLv) : 0)
+            ((intensity > 0 ? expFromTraining(mon, intensity) : 0)
               + (daysPassed > 0 ? expFromDays(mon, daysPassed) : 0)) * expMul,
           )
-          // Độ thân mật chỉ đổi khi chính văn có [[FRIEND]] đã qua đối
-          // chiếu. Không tự cộng chỉ vì thời gian trôi/luyện tập, vì đó là
-          // biến truyện chứ không phải phần thưởng máy móc ngầm.
-          return amount > 0 ? applyExpGain(mon, amount, movesDb).mon : mon
+          let next = amount > 0 ? applyExpGain(mon, amount, movesDb).mon : mon
+          if (explicit) next = applyTrainingEvGain(next, explicit).mon
+          return next
         }
+        // Use identical deterministic transform on all representations of
+        // one UID. The caller uses the same input snapshot for party/PC/active.
         setPlayerMon((cur) => (cur ? grow(cur) : cur))
         setParty((cur) => (cur ?? []).map((pm) => grow(pm)))
         setPcBox((cur) => (cur ?? []).map((pm) => grow(pm)))
@@ -2558,6 +2590,16 @@ export default function RoleplayChat() {
         latestPlayerMonRef.current = previewActive
         latestPartyRef.current = previewParty
         latestPcBoxRef.current = previewPc
+        for (const event of trainingEvents) {
+          const trained = resolveOwned(event.target)
+          if (!trained) {
+            report.lines.push(`⚠ Bỏ qua TRAIN ${event.target}: Pokémon không còn trong đội/PC`)
+            continue
+          }
+          const stat = event.stat ?? 'chỉ số chủ đạo'
+          report.lines.push(`✅ Luyện tập ${trained.name}: nhận EXP và EV (${stat}); giới hạn 252/chỉ số, 510 tổng`)
+          markLedger('trainingEvents', event)
+        }
       }
 
       if ((parsed.dateAdvance ?? 0) > 0 || parsed.datePart) {
@@ -3009,7 +3051,6 @@ export default function RoleplayChat() {
       let resolvedSemanticCfg = semanticPrimaryPool[0] ?? apiConfig
       if (semanticPrimaryPool.length) {
         try {
-          const expectedStateLoad = estimateStateChangeLoad(displayText)
           const primaryRun = await runWithApiFailover(semanticPrimaryPool, (cfg) => boundedSemanticExtraction(cfg, {
             storyText: displayText,
             userText: stateUserText,
@@ -3021,9 +3062,7 @@ export default function RoleplayChat() {
             // Dot136: HTTP 200 + events=[] không còn được coi là thành công nếu
             // chính văn có cue state rõ. Một model phụ "im lặng" phải nhường
             // cho endpoint kế tiếp/Main API thay vì làm cả lượt đứng biến.
-            acceptValue: expectedStateLoad > 0
-              ? (result) => semanticResultCoversStoryCues(result, displayText, preAppliedState)
-              : null,
+            acceptValue: (result) => semanticResultCoversStoryCues(result, displayText, preAppliedState),
           })
           const semantic = primaryRun.value
           resolvedSemanticCfg = primaryRun.config
@@ -3151,6 +3190,7 @@ export default function RoleplayChat() {
             malformed: semantic.malformed,
             salvaged: semantic.salvaged,
             repaired: Boolean(semantic.repaired),
+            explicitNoChange: Boolean(semantic.explicitNoChange),
             repairAttempted: Boolean(semantic.repairAttempted),
             failoverAttempts: primaryRun.failures.length,
             usedMainFallback: apiConfigKey(resolvedSemanticCfg) === apiConfigKey(apiConfig) && primaryRun.failures.length > 0,
@@ -3186,6 +3226,9 @@ export default function RoleplayChat() {
         if (inferredShop) validShops = [inferredShop]
       }
       stateParsed = { ...stateParsed, shops: validShops }
+      // Dot151: training is deterministic from completed CANON prose, not a
+      // speculative semantic guess or a free reward for the whole team.
+      stateParsed = reconcileTrainingManifest(stateParsed, displayText, [latestPlayerMonRef.current, ...(latestPartyRef.current ?? []), ...(latestPcBoxRef.current ?? [])])
       applyStoryState(stateParsed, {
         playerProfile, setPlayerProfile,
         relationships, setRelationships,
@@ -3391,16 +3434,14 @@ export default function RoleplayChat() {
                   skipKeys: semanticFailedApiKeys,
                   // Nếu canon vừa nhận Pokémon mà ledger pass hiện tại chưa có,
                   // HTTP 200 + event khác/empty vẫn phải nhường endpoint kế tiếp.
-                  acceptValue: estimateStateChangeLoad(displayText) > 0
-                    ? (result) => semanticResultCoversStoryCues(result, displayText, scanLedger)
-                    : null,
+                  acceptValue: (result) => semanticResultCoversStoryCues(result, displayText, scanLedger),
                 })
                 for (const failure of scanRun.failures) semanticFailedApiKeys.add(failure.key)
                 scanResult = scanRun.value
                 parsedExtra = filterUiPreAppliedState(scanResult.parsed, preAppliedState)
                 parsedExtra = gateSemanticOwnership(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
                 parsedExtra = gatePokecenterInteraction(parsedExtra, displayText, { reroll: Boolean(runOptions?.reroll), priorText: rerollPriorContext, playerName: playerName || playerProfile?.name || '' })
-                parsedExtra = filterSupplementalDuplicates(parsedExtra, scanLedger, { consumeExactMoney: true, moneyText: displayText })
+                parsedExtra = filterSupplementalDuplicates({ ...parsedExtra, training: 0, trainingEvents: [] }, scanLedger, { consumeExactMoney: true, moneyText: displayText })
                 passAuditBase = {
                   pass: scanIndex + 1,
                   role: passSpec.role,
@@ -3409,6 +3450,7 @@ export default function RoleplayChat() {
                   malformed: Boolean(scanResult?.malformed),
                   salvaged: Boolean(scanResult?.salvaged),
                   repaired: Boolean(scanResult?.repaired),
+                  explicitNoChange: Boolean(scanResult?.explicitNoChange),
                   repairAttempted: Boolean(scanResult?.repairAttempted),
                   proposed: scanResult?.proposedCount ?? 0,
                   semanticRejected: scanResult?.rejectedCount ?? 0,
@@ -3652,15 +3694,19 @@ export default function RoleplayChat() {
           }), {
             acceptValue: needsPokemonRepair
               ? (result) => (result?.parsed?.pokemons?.length ?? 0) > 0
-              : estimateStateChangeLoad(storyText) > 0
-                ? (result) => semanticResultCoversStoryCues(result, storyText, applied)
-                : null,
+              : (result) => semanticResultCoversStoryCues(result, storyText, applied),
           })
           scanFailoverAttempts = scanRun.failures.length
           scanResult = scanRun.value
           parsed = filterUiPreAppliedState(scanResult.parsed, source.meta?.preAppliedState)
           parsed = gateSemanticOwnership(parsed, storyText, { playerName: playerName || playerProfile?.name || '' })
           parsed = gatePokecenterInteraction(parsed, storyText)
+          // Dot151: rescan must not award training for a second time. For an
+          // older save without a training ledger, reconstruct the same
+          // deterministic progress once from the original canon text.
+          parsed = (applied?.trainingEvents?.length || applied?.training)
+            ? { ...parsed, training: 0, trainingEvents: [] }
+            : reconcileTrainingManifest(parsed, storyText, [latestPlayerMonRef.current, ...(latestPartyRef.current ?? []), ...(latestPcBoxRef.current ?? [])])
           parsed = filterSupplementalDuplicates(parsed, applied, { consumeExactMoney: true, moneyText: storyText })
         } catch (scanError) {
           lines.push(`⚠ Semantic scan ${scanIndex + 1}${passSpec.focus ? ` (${passSpec.focus.label})` : ''} lỗi: ${scanError.message}`)
@@ -3685,6 +3731,7 @@ export default function RoleplayChat() {
           malformed: Boolean(scanResult?.malformed),
           salvaged: Boolean(scanResult?.salvaged),
           repaired: Boolean(scanResult?.repaired),
+          explicitNoChange: Boolean(scanResult?.explicitNoChange),
           repairAttempted: Boolean(scanResult?.repairAttempted),
           proposed: scanResult?.proposedCount ?? 0,
           semanticRejected: scanResult?.rejectedCount ?? 0,
@@ -3869,6 +3916,55 @@ export default function RoleplayChat() {
       })
     } finally { correctionBusyRef.current = false; setCorrectionBusy(false) }
   }
+  // Dot152: Manual repair is never a privileged free-form state editor. The
+  // source quote must be inside an existing assistant turn, the claimed value
+  // must match the quote, and species/form/UID changes are never allowed.
+  function reviewManualCorrection(request) {
+    if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('State is busy; wait until sync finishes.')
+    const roster = [latestPlayerMonRef.current, ...(latestPartyRef.current ?? []), ...(latestPcBoxRef.current ?? [])]
+      .filter((mon, i, all) => mon?.uid && all.findIndex((other) => other?.uid === mon.uid) === i)
+    const mon = roster.find((entry) => entry.uid === request.targetUid)
+    const aliasMap = getBuiltInZhPokemonSpeciesNames().byCanonical
+    const entry = mon && resolveSpeciesEntryFlexible(pokedexSpecies, mon.species ?? mon.name)
+    const repairedRequest = request.kind === 'canon_fact'
+      ? { ...request, previous: latestDynamicStateRef.current?.values?.[dynamicStateKey({namespace:'story',target:request.factKey})]?.value }
+      : request
+    return validateManualStateRepair(repairedRequest, {
+      canonMessages: latestMessagesRef.current ?? [], roster, inventory: latestInventoryRef.current ?? [],
+      money: Number(playerProfile?.money) || 0, history: correctionHistory, playerName,
+      speciesEntry: entry, aliases: mon ? [aliasMap[normalizeLocalizedPokemonName(mon.name)], aliasMap[normalizeLocalizedPokemonName(mon.species)]].filter(Boolean) : [],
+    })
+  }
+  function commitManualRepairLedger(patch, reverse = false) {
+    const beforeMessages = latestMessagesRef.current ?? []
+    const sourceIndex = beforeMessages.findIndex((msg) => msg.id === patch.sourceMessageId && msg.role === 'assistant')
+    if (sourceIndex < 0) throw new Error('Source story turn no longer exists.')
+    const source = beforeMessages[sourceIndex]
+    const oldManifest = source.meta?.appliedState ?? {}
+    const existingRepairs = source.meta?.manualStateRepairs ?? []
+    const repairId = `${patch.kind}:${patch.sourceMessageId}:${patch.evidenceQuote}`
+    if (!reverse && existingRepairs.some((item) => item.repairId === repairId)) throw new Error('Correction was already added to this turn.')
+    if (reverse && !existingRepairs.some((item) => item.repairId === repairId)) throw new Error('Cannot undo: source ledger has changed.')
+    const signed = reverse ? -1 : 1
+    const nextManifest = { ...oldManifest }
+    if (patch.kind === 'item_delta') {
+      if (reverse) {
+        nextManifest.items = (oldManifest.items ?? []).filter((item) => item.manualRepairId !== repairId)
+      } else {
+        nextManifest.items = [...(oldManifest.items ?? []), { name:patch.itemName, qty:patch.delta, manualRepairId:repairId }]
+      }
+    } else if (patch.kind === 'money_balance') {
+      nextManifest.money = (Number(oldManifest.money) || 0) + signed * (patch.value - patch.before)
+    }
+    const manualStateRepairs = reverse
+      ? existingRepairs.filter((item) => item.repairId !== repairId)
+      : [...existingRepairs, { ...patch, repairId }]
+    const nextMessages = beforeMessages.slice()
+    nextMessages[sourceIndex] = { ...source, meta: { ...(source.meta ?? {}), appliedState:nextManifest, manualStateRepairs } }
+    latestMessagesRef.current = nextMessages
+    setMessages(nextMessages)
+  }
+
   function persistCorrectionHistory(next) {
     setCorrectionHistory(next)
     try { localStorage.setItem(correctionHistoryKey(trainerId), JSON.stringify(next)) }
@@ -3877,6 +3973,38 @@ export default function RoleplayChat() {
   }
   function applyStateCorrection(patch) {
     if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('Please wait for state sync.')
+    if (patch.kind === 'item_delta' || patch.kind === 'money_balance' || patch.kind === 'canon_fact') {
+      // A second guard is mandatory: a player can leave the modal open while
+      // a save changes in another UI. Never apply a stale preview.
+      const fresh = reviewManualCorrection({
+        kind: patch.kind, sourceMessageId: patch.sourceMessageId, evidenceQuote: patch.evidenceQuote,
+        itemName: patch.itemName, delta: patch.delta, value: patch.value, factKey: patch.factKey, factValue:patch.value,
+      })
+      if (!fresh.ok || JSON.stringify(fresh.patch) !== JSON.stringify(patch)) throw new Error(fresh.error || 'State changed since preview; review again.')
+      if (patch.kind === 'canon_fact') {
+        const next = applyDynamicStateUpdates(latestDynamicStateRef.current, [{ namespace:'story', target:patch.factKey, operation:'set', value:patch.value, evidence:patch.evidenceQuote }], { sourceMessageId:patch.sourceMessageId }).state
+        latestDynamicStateRef.current = next
+        setDynamicState(next)
+      } else if (patch.kind === 'money_balance') {
+        if ((Number(playerProfile?.money) || 0) !== patch.before) throw new Error('Money changed since preview; review again.')
+        setPlayerProfile((cur) => ({ ...cur, money: patch.value }))
+      } else {
+        const existing = resolveInventoryItemByName(patch.itemName, latestInventoryRef.current) ?? resolveItemByName(patch.itemName)
+        const descriptor = existing ?? createCustomItemDescriptor(patch.itemName)
+        if (!descriptor || descriptor.infinite) throw new Error('Invalid or infinite item.')
+        const next = [...(latestInventoryRef.current ?? [])]
+        const at = next.findIndex((item) => item.id === descriptor.id)
+        const have = at < 0 ? 0 : Math.max(0, Number(next[at].qty) || 0)
+        if (have !== patch.before || have + patch.delta < 0) throw new Error('Inventory changed since preview; review again.')
+        if (have + patch.delta === 0) { if (at >= 0) next.splice(at, 1) }
+        else if (at >= 0) next[at] = { ...next[at], qty: have + patch.delta }
+        else next.push({ ...descriptor, qty: patch.delta, manualCanonSourceId: patch.sourceMessageId })
+        latestInventoryRef.current = next
+        setInventory(next)
+      }
+      commitManualRepairLedger(patch)
+      return persistCorrectionHistory([...correctionHistory, { ...patch, date:new Date().toISOString() }].slice(-1000))
+    }
     const current = [latestPlayerMonRef.current, ...latestPartyRef.current, ...latestPcBoxRef.current].find((m) => m?.uid === patch.targetUid)
     if (!current || current[patch.field] !== patch.before) throw new Error('Pokémon changed since review; inspect again.')
     const change = (mon) => patchPokemonAcrossRoster(mon, patch)
@@ -3886,12 +4014,41 @@ export default function RoleplayChat() {
     setPlayerMon((cur) => change(cur))
     setParty((cur) => (cur ?? []).map(change))
     setPcBox((cur) => (cur ?? []).map(change))
-    return persistCorrectionHistory([...correctionHistory, { ...patch, date:new Date().toISOString() }].slice(-20))
+    return persistCorrectionHistory([...correctionHistory, { ...patch, date:new Date().toISOString() }].slice(-1000))
   }
   function undoLastStateCorrection() {
     if (loading || stateSyncingRef.current || correctionBusyRef.current) throw new Error('Please wait for state sync.')
     const last = correctionHistory[correctionHistory.length - 1]
     if (!last) return correctionHistory
+    if (last.kind === 'canon_fact') {
+      const key = dynamicStateKey({ namespace:'story', target:last.factKey })
+      const current = latestDynamicStateRef.current?.values?.[key]?.value
+      if (current !== last.value) throw new Error('Fact changed since correction; cannot undo safely.')
+      commitManualRepairLedger(last, true)
+      const next = applyDynamicStateUpdates(latestDynamicStateRef.current, [{ namespace:'story', target:last.factKey, operation:last.before == null ? 'remove' : 'set', value:last.before }], { sourceMessageId:last.sourceMessageId }).state
+      latestDynamicStateRef.current = next
+      setDynamicState(next)
+      return persistCorrectionHistory(correctionHistory.slice(0, -1))
+    }
+    if (last.kind === 'money_balance') {
+      if ((Number(playerProfile?.money) || 0) !== last.value) throw new Error('Money changed since correction; undo not safe.')
+      commitManualRepairLedger(last, true)
+      setPlayerProfile((cur) => ({ ...cur, money: last.before }))
+      return persistCorrectionHistory(correctionHistory.slice(0, -1))
+    }
+    if (last.kind === 'item_delta') {
+      const existing = resolveInventoryItemByName(last.itemName, latestInventoryRef.current) ?? resolveItemByName(last.itemName)
+      const next = [...(latestInventoryRef.current ?? [])]
+      const at = next.findIndex((item) => item.id === existing?.id)
+      const have = at < 0 ? 0 : Math.max(0, Number(next[at]?.qty) || 0)
+      if (have !== last.value || !existing) throw new Error('Item changed since correction; undo not safe.')
+      if (last.before === 0) { if (at >= 0) next.splice(at, 1) }
+      else next[at] = { ...next[at], qty: last.before }
+      commitManualRepairLedger(last, true)
+      latestInventoryRef.current = next
+      setInventory(next)
+      return persistCorrectionHistory(correctionHistory.slice(0, -1))
+    }
     const current = [latestPlayerMonRef.current, ...latestPartyRef.current, ...latestPcBoxRef.current].find((m) => m?.uid === last.targetUid)
     if (!current || current[last.field] !== last.value) throw new Error('State changed after correction; cannot safely undo.')
     const undo = (mon) => undoPokemonCorrection(mon, last)
@@ -4986,6 +5143,9 @@ ${m.content}`
       {correctionOpen && <StateCorrectionModal
         language={uiLanguage} roster={correctionRoster} busy={loading || stateSyncing}
         initialHistory={correctionHistory} onReview={reviewStateCorrection}
+        onReviewManual={reviewManualCorrection}
+        evidenceMessages={repairEvidenceMessages(latestMessagesRef.current ?? [])}
+        money={Number(playerProfile?.money) || 0} inventory={inventory ?? []} facts={dynamicState?.values ?? {}}
         onApply={applyStateCorrection} onUndo={undoLastStateCorrection}
         onClose={() => { if (!correctionBusy) setCorrectionOpen(false) }}
       />}

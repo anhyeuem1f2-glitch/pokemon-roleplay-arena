@@ -1,3 +1,32 @@
+# Dot152 — Hiệu chỉnh biến thủ công dựa trên chính văn (20/10/2026)
+
+**Nền**: full Dot151 (gồm Dot146–150). Không reset save, không ghi đè tài nguyên.
+
+- Trong nút `🛠 Hiệu chỉnh biến`, thêm tab **Tự sửa theo chính văn** (VI/EN/简体中文), giữ tab **AI kiểm tra Pokémon** từ Dot149.
+- Người chơi chọn một lượt **assistant đã lưu**, chép một đoạn dẫn chứng **nguyên văn**, chọn loại biến và đề xuất. Validator deterministic kiểm tra nguồn, đúng giá trị/số lượng, hành động đã hoàn tất và quyền sở hữu; KHÔNG dùng yêu cầu do người chơi tự viết làm bằng chứng.
+- Hỗ trợ: (1) thuộc tính `gender/nickname/shiny` của **UID Pokémon đang sở hữu**; (2) item `+/- số lượng` có tên và số lượng nêu rõ trong chính văn; (3) đặt **số dư ví** khi chính văn trực tiếp công bố số dư; (4) `canon_fact` phi chiến đấu với **key và value cùng có mặt nguyên văn**. Các biến mở được lưu qua `dynamicState` và sẽ được gửi cho AI các lượt sau.
+- **Không mở cửa đổi Pokémon sang loài khác**, UID, level, IV/EV, form, quyền truy cập, không có trường tự cộng tiền tùy ý. Không có nút tự sinh Pokémon: test baseline cho thấy ownership gate vẫn có false positive với câu NPC bắt Pokémon; tạo mới bắt buộc qua pipeline sở hữu chính thức và cần hardening riêng.
+- Giao diện luôn có preview trước → sau + đoạn bằng chứng, chỉ áp sau xác nhận. `sourceMessageId`, lịch sử 1000 lần, thêm `manualStateRepairs` và `appliedState` trên message làm ledger để chống double-apply ở state scan. **Undo** chỉ khi snapshot chưa thay đổi.
+- `src/utils/manualStateRepair.js` mới là lớp kiểm định thuần, test `test-dot152.mjs`; thêm alias tên Poké Ball/Potion theo 简体中文 ở `shopItems.js` để không tạo vật phẩm custom trùng danh mục.
+- Hardening thêm `stateCorrection.js`: ràng buộc nickname phải có câu đặt tên, `shiny:false` chỉ khi chính văn nêu rõ không Shiny, không suy ra từ một chữ Shiny bất kỳ.
+
+**Kiểm thử offline:** `node test-dot152.mjs` **30/30 PASS**; toàn bộ `test-dot*.mjs` **51/55 file PASS**, 4 fail lịch sử Dot70, 122, 123, 127; kiểm tra JSX/JS syntax PASS.
+
+**Giới hạn / cần QA browser:** Không build Vite hoặc E2E được xác minh trong môi trường offline (thiếu dependency). Các câu văn quá mơ hồ hoặc nguồn quá 80 lượt gần nhất sẽ bị từ chối thay vì đoán. Cần sao lưu save và thử trên máy thật: item received/used, fact, wallet, same source retry, undo, refresh, rollback, CJK, và tiếp tục lượt AI sau khi sửa. Không xem "sửa manual" là quyền tạo state mới không có trong chính văn.
+
+**Runtime files cập nhật:**
+```
+src/components/RoleplayChat.jsx
+src/components/StateCorrectionModal.jsx
+src/utils/manualStateRepair.js  (new)
+src/utils/stateCorrection.js
+src/data/shopItems.js
+README.md
+```
+`BAN_GIAO_DU_AN.md`, `test-dot152.mjs` chỉ trong full ZIP, **không push**.
+
+---
+
 ## Dot149 — State-sync turn barrier & evidence-backed correction (2026-10-11)
 
 Based on full Dot148. Fix: narration completion no longer unlocks next user turn until all Semantic State Audit passes finish/commit. The input remains editable while Send, reroll, shop/PC follow-up and battle-start are guarded. Interrupted/failed state scans show a retry warning; network calls to state APIs have a 90-second abort timeout per attempt. Added an independent VI/EN/ZH "State correction" panel: inspect assistant canon via AI, show an exact-source quotation and a one-field proposal for a selected Pokémon UID, then user confirms the change or undoes it. Only `gender`, `nickname`, `shiny` supported; no free money, Pokémon, IV/EV or item patching. Historic gender from the last 12 assistant turns is used when receiving a Pokémon, and explicit manual correction survives later story scans. `BAN_GIAO_DU_AN.md` has detailed caveats, test results, and file changes. Dot149 test 12/12; 48/52 packaged suites PASS (4 pre-existing stale); 88 JS syntax and 56 JSX parse PASS; Vite build/browser E2E not run due unavailable npm dependencies in this environment.
@@ -4187,3 +4216,11 @@ Thêm `test-dot133.mjs` kiểm tra UI tiếng Trung → chính văn tiếng Trun
 
 ## Dot150 · State consistency
 Semantic state guards for same-turn item usage, invalid Pokémon locations, and repeated state prefixes. See BAN_GIAO_DU_AN.md.
+
+## Dot151 · Semantic no-change & training EV (2026-10-17)
+
+- A valid `<STATE_EVENTS>{"events":[]}</STATE_EVENTS>` is a successful scan with no new state events; malformed or blank provider replies are not silently accepted.
+- Completed, explicitly attributable training in VI/EN/简体中文 now grants verified Pokémon EXP and modest EV (+1 to +3 per session, max 252/stat and 510 total); uncompleted plans, NPC-only training, or spectators do not grant progression.
+- The EV stat comes from the described exercise (Speed, Attack, Defense, etc.), or from the Pokémon's leading non-HP base stat when narrative merely says "stronger after training" without specifying a stat.
+- Training events carry specific Pokémon identities and are deduplicated across audit passes and reroll/rescan. Normal-mode semantic patches can no longer arbitrarily overwrite IVs or EVs.
+- State Audit marks valid no-change explicitly. Full integration testing after deployment is still required.
